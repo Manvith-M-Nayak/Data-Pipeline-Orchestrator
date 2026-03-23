@@ -20,9 +20,8 @@ def get_access_token() -> str:
     r = requests.post(url, data=payload)
     data = r.json()
     if "access_token" not in data:
-        print(f"❌ Azure auth failed: {data}")
         raise Exception(f"Failed to get access token: {data}")
-    print("✅ Azure access token obtained")
+    print("Azure access token obtained")
     return data["access_token"]
 
 
@@ -39,9 +38,9 @@ def adf_put(token: str, resource_type: str, name: str, body: dict) -> requests.R
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     r = requests.put(url, headers=headers, json=body)
     if r.status_code in [200, 201]:
-        print(f"   ✅ {resource_type}/{name}")
+        print(f"   Created {resource_type}/{name}")
     else:
-        print(f"   ❌ {resource_type}/{name} → {r.status_code}: {r.text}")
+        print(f"   Failed {resource_type}/{name} -> {r.status_code}: {r.text}")
     return r
 
 
@@ -57,12 +56,8 @@ def delete_adf_resource(token: str, resource_type: str, name: str):
     )
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     r = requests.delete(url, headers=headers)
-    if r.status_code in [200, 204]:
-        print(f"   🗑️  Deleted {resource_type}/{name}")
-    elif r.status_code == 404:
-        print(f"   ℹ️  {resource_type}/{name} not found, skipping")
-    else:
-        print(f"   ⚠️  Could not delete {resource_type}/{name} → {r.status_code}: {r.text[:200]}")
+    if r.status_code not in [200, 204, 404]:
+        print(f"   Could not delete {resource_type}/{name} -> {r.status_code}: {r.text[:200]}")
 
 
 # ============================================================
@@ -74,17 +69,17 @@ def delete_adf_resource(token: str, resource_type: str, name: str):
 # no separate draft/publish step and the /publishAll endpoint
 # does not exist (returns 404).
 #
-# With Git integration the flow is: REST → draft → publishAll → live.
-# Without Git integration the flow is: REST → live (immediate).
+# With Git integration the flow is: REST -> draft -> publishAll -> live.
+# Without Git integration the flow is: REST -> live (immediate).
 #
 # We simply wait a few seconds to let ADF finish internal
 # propagation before triggering runs.
 # ============================================================
 def publish_factory(token: str):
-    print("   ℹ️  No Git integration detected — resources are live immediately via REST API")
-    print("   ⏳ Waiting 15s for ADF to finish internal resource propagation...")
+    print("   No Git integration — resources are live immediately via REST API")
+    print("   Waiting 15s for ADF internal resource propagation...")
     time.sleep(15)
-    print("   ✅ Ready to trigger pipelines")
+    print("   Ready to trigger pipelines")
 
 
 # ============================================================
@@ -112,11 +107,11 @@ def create_blob_container(container_name: str):
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     r = requests.put(url, headers=headers, json={"properties": {"publicAccess": "None"}})
     if r.status_code in [200, 201]:
-        print(f"   ✅ Container '{container_name}' created")
+        print(f"   Container '{container_name}' created")
     elif r.status_code == 409:
-        print(f"   ℹ️  Container '{container_name}' already exists")
+        print(f"   Container '{container_name}' already exists")
     else:
-        print(f"   ❌ Container '{container_name}' → {r.status_code}: {r.text}")
+        print(f"   Container '{container_name}' failed -> {r.status_code}: {r.text}")
 
 
 # ============================================================
@@ -135,16 +130,15 @@ def purge_container(container_name: str):
         container = client.get_container_client(container_name)
         blobs = list(container.list_blobs())
         if not blobs:
-            print(f"   ℹ️  '{container_name}' is already empty")
+            print(f"   '{container_name}' is already empty")
             return
-        print(f"   🧹 Purging {len(blobs)} blob(s) from '{container_name}'...")
+        print(f"   Purging {len(blobs)} blob(s) from '{container_name}'...")
         for blob in blobs:
             container.delete_blob(blob.name)
-            print(f"      🗑️  Deleted '{blob.name}'")
     except ImportError:
-        print("   ⚠️  azure-storage-blob not installed — skipping purge")
+        print("   azure-storage-blob not installed — skipping purge")
     except Exception as e:
-        print(f"   ⚠️  Purge failed for '{container_name}': {e}")
+        print(f"   Purge failed for '{container_name}': {e}")
 
 
 # ============================================================
@@ -152,21 +146,20 @@ def purge_container(container_name: str):
 #       the current file.
 #
 # Every run wipes ALL existing blobs from the container before
-# uploading the new CSV.  This guarantees the copy pipeline
-# never merges stale files from previous runs into merged.csv.
+# uploading the new CSV. This guarantees the copy pipeline
+# never merges stale files from previous runs into staged.csv.
 # ============================================================
 def upload_csv(filepath: str, container_name: str) -> str:
     import os
     try:
         from azure.storage.blob import BlobServiceClient
     except ImportError:
-        print("   ⚠️  azure-storage-blob not installed → pip install azure-storage-blob")
-        print(f"   ⚠️  Manually upload '{filepath}' to container '{container_name}'")
+        print("   azure-storage-blob not installed -> pip install azure-storage-blob")
+        print(f"   Manually upload '{filepath}' to container '{container_name}'")
         return os.path.basename(filepath)
 
     filename = os.path.basename(filepath)
 
-    # Hard guard: never allow a wildcard or non-csv blob name
     if not filename or filename.startswith("*") or not filename.lower().endswith(".csv"):
         raise ValueError(
             f"Invalid blob filename '{filename}'. "
@@ -182,21 +175,15 @@ def upload_csv(filepath: str, container_name: str) -> str:
     client    = BlobServiceClient.from_connection_string(conn_str)
     container = client.get_container_client(container_name)
 
-    # Delete every existing blob in the container so the copy
-    # pipeline only ever sees one file — the current run's CSV.
     existing = list(container.list_blobs())
     if existing:
-        print(f"   🧹 Purging {len(existing)} existing blob(s) from '{container_name}'...")
+        print(f"   Purging {len(existing)} existing blob(s) from '{container_name}'...")
         for blob in existing:
             container.delete_blob(blob.name)
-            print(f"      🗑️  Deleted '{blob.name}'")
-    else:
-        print(f"   ℹ️  Container '{container_name}' is already empty")
 
-    # Upload the current CSV
     with open(filepath, "rb") as f:
         container.upload_blob(name=filename, data=f, overwrite=True)
-    print(f"   ✅ '{filename}' → container '{container_name}' (only file present)")
+    print(f"   '{filename}' uploaded to container '{container_name}'")
     return filename
 
 
@@ -217,29 +204,29 @@ def check_blob_has_rows(container_name: str) -> bool:
         blobs     = list(container.list_blobs())
 
         if not blobs:
-            print(f"   ❌ Container '{container_name}' is EMPTY — no files found")
+            print(f"   Container '{container_name}' is empty — no files found")
             return False
 
         valid_blobs = 0
         for blob in blobs:
             if blob.name == "*.csv":
-                print(f"   ⚠️  Stale blob named '*.csv' found — will be ignored by dataflow (wildcard reads skip it)")
+                print(f"   Stale wildcard blob '*.csv' found in '{container_name}' — will be ignored")
             elif blob.size == 0:
-                print(f"   ⚠️  '{blob.name}' is 0 bytes — skipping")
+                print(f"   '{blob.name}' is 0 bytes — skipping")
             else:
-                print(f"   ✅ '{blob.name}' — {blob.size:,} bytes")
+                print(f"   '{blob.name}' — {blob.size:,} bytes")
                 valid_blobs += 1
 
         if valid_blobs == 0:
-            print(f"   ❌ No valid (non-empty, non-wildcard) blobs in '{container_name}'")
+            print(f"   No valid blobs in '{container_name}'")
             return False
         return True
 
     except ImportError:
-        print("   ⚠️  azure-storage-blob not installed — skipping blob check")
+        print("   azure-storage-blob not installed — skipping blob check")
         return True
     except Exception as e:
-        print(f"   ⚠️  Blob check error: {e} — continuing anyway")
+        print(f"   Blob check error: {e} — continuing anyway")
         return True
 
 
@@ -266,10 +253,12 @@ def create_linked_service(token: str) -> requests.Response:
 # ============================================================
 # DATASET: Dynamically created from Groq's dataset config
 #
-# FIX: Source datasets use "*.csv" (wildcard read — correct).
-#      Sink datasets must never use a wildcard — ADF will write
-#      a literal file called "*.csv" which breaks subsequent reads.
-#      We enforce "output.csv" for any sink with a wildcard name.
+# Source datasets use "*.csv" (wildcard read).
+# Sink datasets must never use a wildcard — ADF will write
+# a literal file called "*.csv" which breaks subsequent reads.
+# Sink filename is enforced as "output.csv".
+# Intermediate datasets are written by the copy pipeline as
+# "staged.csv" and read by the dataflow source from the same name.
 # ============================================================
 def create_dataset(token: str, ds_config: dict) -> requests.Response:
     role     = ds_config.get("role", "source")
@@ -277,15 +266,11 @@ def create_dataset(token: str, ds_config: dict) -> requests.Response:
 
     if role == "sink" and (not filename or filename.startswith("*")):
         filename = "output.csv"
-        print(f"   ℹ️  Sink dataset '{ds_config['name']}': filename corrected to 'output.csv'")
+        print(f"   Sink dataset '{ds_config['name']}': filename set to 'output.csv'")
 
-    # Intermediate datasets are written to by the copy pipeline as
-    # "merged.csv". The dataflow source reads from this same dataset,
-    # so it must point to "merged.csv" — not the wildcard "*.csv"
-    # which resolves to no files after the bronze purge.
     if role == "intermediate" and (not filename or filename.startswith("*")):
-        filename = "merged.csv"
-        print(f"   ℹ️  Intermediate dataset '{ds_config['name']}': filename corrected to 'merged.csv'")
+        filename = "staged.csv"
+        print(f"   Intermediate dataset '{ds_config['name']}': filename set to 'staged.csv'")
 
     body = {
         "properties": {
@@ -311,18 +296,15 @@ def create_dataset(token: str, ds_config: dict) -> requests.Response:
 
 
 # ============================================================
-# PIPELINE: Copy Activity (raw -> bronze)
+# PIPELINE: Copy Activity (raw -> stage1)
 #
-# FIX: The sink dataset (DS_Bronze) has fileName="*.csv" because
-# it is an intermediate dataset used for both reading and writing.
-# When ADF executes a copy sink with fileName="*.csv", it creates
-# a literal blob named "*.csv" in the container — which then
-# blocks the dataflow from reading real data.
-#
-# Solution: override the fileName at the pipeline level using
-# storeSettings.fileName = "merged.csv". This takes precedence
-# over the dataset-level fileName without changing the dataset
-# definition (which still needs "*.csv" for the dataflow source read).
+# The sink dataset may carry fileName="*.csv" because it is also
+# used as a dataflow source (wildcard read). When ADF executes
+# a copy sink with fileName="*.csv" it creates a literal blob
+# named "*.csv". To prevent this, we override the fileName at
+# the pipeline level via storeSettings.fileName = "staged.csv".
+# This takes precedence over the dataset-level fileName without
+# changing the dataset definition.
 # ============================================================
 def create_copy_pipeline(token: str, pipeline_config: dict) -> requests.Response:
     body = {
@@ -347,7 +329,7 @@ def create_copy_pipeline(token: str, pipeline_config: dict) -> requests.Response
                             "type": "DelimitedTextSink",
                             "storeSettings": {
                                 "type":     "AzureBlobStorageWriteSettings",
-                                "fileName": "merged.csv"
+                                "fileName": "staged.csv"
                             },
                             "formatSettings": {
                                 "type":          "DelimitedTextWriteSettings",
@@ -464,12 +446,11 @@ def build_dataflow_script(
     """
     Returns (script_string, use_filter_bool).
 
-    KEY FIX: declare every column with its type inside output() so
-    ADF knows the schema at design/compile time.  Without this the
-    Source node shows "Columns: 0 total" and every column reference
-    in filter() or derive() resolves to nothing -> DF-EXPR-010.
+    Declares every column with its type inside output() so ADF knows
+    the schema at design/compile time. Without this the Source node
+    shows "Columns: 0 total" and column references in filter() or
+    derive() resolve to nothing (DF-EXPR-010).
     """
-    # Build schema declaration: "col1 as string, col2 as integer, ..."
     schema_parts = []
     for col in columns:
         adf_t = _adf_type(inferred_types.get(col, "string"))
@@ -512,15 +493,11 @@ def build_dataflow_script(
     return "\n".join([source_block, middle, sink_block]), use_filter
 
 
-
 # ============================================================
-# PIPELINE: Data Flow Activity (bronze -> silver)
+# PIPELINE: Data Flow Activity (stage1 -> stage2)
 # ============================================================
 def create_dataflow_pipeline(token: str, pipeline_config: dict, columns: list) -> requests.Response:
     columns_lower = {c.lower() for c in columns}
-
-    print(f"   📋 Schema columns: {columns}")
-    print(f"   🔧 Raw transformations from Groq: {pipeline_config.get('transformations', [])}")
 
     derived_columns  = []
     filter_condition = None
@@ -532,20 +509,6 @@ def create_dataflow_pipeline(token: str, pipeline_config: dict, columns: list) -
         col, expr = t.split("=", 1)
         col  = col.strip()
         expr = expr.strip()
-
-        # ── DETECT GROQ'S FILTER-AS-DERIVED-COLUMN PATTERN ──────────────
-        # Groq frequently encodes a filter intent as a derived column:
-        #   backbone_filter = iif(backbone == 1, true, false)
-        #   eggs_flag       = iif(eggs != 0, true, false)
-        # These are NOT valid derived columns (ADF rejects "==" operator
-        # and returns "Type mismatch"). We detect this pattern and
-        # promote it to a proper filter instead of a derived column.
-        #
-        # Detection rules (ANY of these → treat as filter intent):
-        #   1. LHS is literally "filter"
-        #   2. Expression matches iif(col == N, true, false)
-        #   3. Expression matches iif(col != N, true, false)
-        #   4. Expression is bare "col == N" or "col != N"
 
         _iif_pattern = re.compile(
             r"^iif\(\s*(\w+)\s*(==|!=)\s*(\d+)\s*,\s*true\s*,\s*false\s*\)$",
@@ -561,10 +524,8 @@ def create_dataflow_pipeline(token: str, pipeline_config: dict, columns: list) -
 
         if is_filter_intent:
             if filter_condition is not None:
-                print(f"   ℹ️  Extra filter ignored: {t}")
                 continue
 
-            # Normalise → rewrite → validate
             candidate = _normalize_filter_expr(expr.strip(), columns_lower)
             candidate = rewrite_column_refs(candidate, columns_lower)
 
@@ -574,21 +535,20 @@ def create_dataflow_pipeline(token: str, pipeline_config: dict, columns: list) -
                 if tk.lower() not in columns_lower and tk not in ADF_FUNCTIONS
             ]
             if invalid:
-                print(f"   ⚠️  Filter refs unknown columns {invalid} — dropping filter")
+                print(f"   Filter references unknown columns {invalid} — dropping filter")
                 continue
 
             filter_condition = candidate
-            print(f"   ✅ Filter promoted from derived col '{col}': {filter_condition}")
+            print(f"   Filter promoted from derived column '{col}': {filter_condition}")
 
         else:
-            # Validate every identifier against real columns + ADF allowlist.
             tokens  = re.findall(r'\b([a-zA-Z_][a-zA-Z0-9_]*)\b', expr)
             invalid = [
                 tk for tk in tokens
                 if tk.lower() not in columns_lower and tk not in ADF_FUNCTIONS
             ]
             if invalid:
-                print(f"   ⚠️  Skipping derived col '{col}': unknown refs {invalid}")
+                print(f"   Skipping derived column '{col}': unknown references {invalid}")
                 continue
 
             derived_columns.append({
@@ -596,22 +556,17 @@ def create_dataflow_pipeline(token: str, pipeline_config: dict, columns: list) -
                 "expression": rewrite_column_refs(expr, columns_lower),
             })
 
-    # Always guarantee processed_time exists
     if not any(d["name"] == "processed_time" for d in derived_columns):
         derived_columns.append({
             "name":       "processed_time",
             "expression": "currentTimestamp()",
         })
 
-    print(f"   🔍 filter_condition = {filter_condition!r}")
-    print(f"   🔍 derived_columns  = {derived_columns}")
-
     pipeline_name   = pipeline_config["name"]
     source_dataset  = pipeline_config["source_dataset"]
     sink_dataset    = pipeline_config["sink_dataset"]
     partition_count = pipeline_config.get("partition_count", 4)
 
-    # Timestamp the dataflow name — new resource every run, zero cache risk
     _ts     = datetime.datetime.utcnow().strftime("%Y%m%d%H%M%S")
     df_name = f"DF_{pipeline_name}_{_ts}"
 
@@ -622,21 +577,15 @@ def create_dataflow_pipeline(token: str, pipeline_config: dict, columns: list) -
         inferred_types   = pipeline_config.get("inferred_types", {}),
         filter_condition = filter_condition,
     )
-    print(f"   📜 DataFlow script:\n{script}\n")
 
     # Delete the pipeline before the dataflow — ADF returns 400 if
     # you try to delete a dataflow that a pipeline still references.
     delete_adf_resource(token, "pipelines", pipeline_name)
     time.sleep(5)
-    # Also delete the legacy non-timestamped dataflow name that older
-    # runs created (e.g. DF_Pipeline_Bronze_to_Silver with no suffix).
-    # This had an empty FilterRows node and was still being shown in
-    # ADF Studio, causing confusion about which dataflow was active.
     legacy_df_name = f"DF_{pipeline_name}"
     delete_adf_resource(token, "dataflows", legacy_df_name)
     time.sleep(3)
 
-    # structured transformations list must exactly mirror the script
     structured_transforms = []
     if use_filter:
         structured_transforms.append({"name": "FilterRows"})
@@ -672,7 +621,7 @@ def create_dataflow_pipeline(token: str, pipeline_config: dict, columns: list) -
 
     r_df = adf_put(token, "dataflows", df_name, df_body)
     if r_df.status_code not in [200, 201]:
-        print("   ❌ Dataflow creation failed")
+        print("   Dataflow creation failed")
         return r_df
 
     time.sleep(5)
@@ -735,7 +684,7 @@ def cleanup_old_dataflows(token: str, pipeline_name: str, current_df_name: str):
             if name.startswith(prefix) and name != current_df_name:
                 delete_adf_resource(token, "dataflows", name)
     except Exception as e:
-        print(f"   ⚠️  Cleanup skipped: {e}")
+        print(f"   Cleanup skipped: {e}")
 
 
 # ============================================================
@@ -752,10 +701,10 @@ def trigger_pipeline(token: str, pipeline_name: str):
     r = requests.post(url, headers=headers, json={})
     if r.status_code == 200:
         run_id = r.json().get("runId", "unknown")
-        print(f"   ✅ '{pipeline_name}' triggered | Run ID: {run_id}")
+        print(f"   '{pipeline_name}' triggered | Run ID: {run_id}")
         return run_id
     else:
-        print(f"   ❌ '{pipeline_name}' trigger failed → {r.status_code}: {r.text}")
+        print(f"   '{pipeline_name}' trigger failed -> {r.status_code}: {r.text}")
     return None
 
 
@@ -771,8 +720,8 @@ def _get_with_retry(url: str, headers: dict, max_retries: int = 5) -> requests.R
                 requests.exceptions.Timeout) as e:
             if attempt == max_retries:
                 raise
-            print(f"   ⚠️  Network error (attempt {attempt}/{max_retries}): {e}")
-            print(f"   ⏳ Retrying in {delay}s...")
+            print(f"   Network error (attempt {attempt}/{max_retries}): {e}")
+            print(f"   Retrying in {delay}s...")
             time.sleep(delay)
             delay = min(delay * 2, 60)
 
@@ -795,7 +744,7 @@ def check_pipeline_status(token: str, pipeline_name: str, run_id: str, max_wait:
             r = _get_with_retry(url, headers)
         except (requests.exceptions.ConnectionError,
                 requests.exceptions.Timeout) as e:
-            print(f"   ⚠️  Persistent network error: {e} — waiting 30s...")
+            print(f"   Persistent network error: {e} — waiting 30s...")
             time.sleep(30)
             elapsed += 30
             continue
@@ -805,11 +754,11 @@ def check_pipeline_status(token: str, pipeline_name: str, run_id: str, max_wait:
             status = data.get("status", "Unknown")
 
             if status == "Succeeded":
-                print(f"   ✅ Pipeline '{pipeline_name}' succeeded")
+                print(f"   Pipeline '{pipeline_name}' succeeded")
                 return {"status": "Succeeded", "details": data}
 
             elif status == "Failed":
-                print(f"   ❌ Pipeline '{pipeline_name}' FAILED")
+                print(f"   Pipeline '{pipeline_name}' FAILED")
                 act_url = (
                     f"https://management.azure.com/subscriptions/{AZURE_SUBSCRIPTION_ID}"
                     f"/resourceGroups/{AZURE_RESOURCE_GROUP}"
@@ -822,29 +771,29 @@ def check_pipeline_status(token: str, pipeline_name: str, run_id: str, max_wait:
                         for activity in act_r.json().get("value", []):
                             if activity.get("status") == "Failed":
                                 error = activity.get("error", {})
-                                print(f"      Activity error: {error.get('message', 'Unknown')}")
+                                print(f"   Activity error: {error.get('message', 'Unknown')}")
                 except Exception:
                     pass
                 return {"status": "Failed", "details": data}
 
             else:
-                print(f"   ⏳ Pipeline '{pipeline_name}' → {status} ({elapsed}s elapsed)")
+                print(f"   Pipeline '{pipeline_name}' -> {status} ({elapsed}s elapsed)")
                 time.sleep(10)
                 elapsed += 10
 
         elif r.status_code == 401:
-            print("   🔑 Access token expired mid-poll — refreshing...")
+            print("   Access token expired — refreshing...")
             try:
                 token   = get_access_token()
                 headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
             except Exception as e:
-                print(f"   ❌ Token refresh failed: {e}")
+                print(f"   Token refresh failed: {e}")
                 return {"status": "Failed", "details": {"error": str(e)}}
 
         else:
-            print(f"   ⚠️  Status check HTTP {r.status_code}: {r.text[:200]}")
+            print(f"   Status check HTTP {r.status_code}: {r.text[:200]}")
             time.sleep(10)
             elapsed += 10
 
-    print(f"   ⏱️  Timeout waiting for pipeline '{pipeline_name}'")
+    print(f"   Timeout waiting for pipeline '{pipeline_name}'")
     return {"status": "Timeout", "run_id": run_id}
