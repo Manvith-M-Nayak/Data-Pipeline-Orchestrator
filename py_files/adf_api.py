@@ -204,13 +204,13 @@ def check_blob_has_rows(container_name: str) -> bool:
         blobs     = list(container.list_blobs())
 
         if not blobs:
-            print(f"   Container '{container_name}' is empty — no files found")
+            print(f"   Container '{container_name}' is empty")
             return False
 
         valid_blobs = 0
         for blob in blobs:
             if blob.name == "*.csv":
-                print(f"   Stale wildcard blob '*.csv' found in '{container_name}' — will be ignored")
+                print(f"   Stale wildcard blob '*.csv' found in '{container_name}'")
             elif blob.size == 0:
                 print(f"   '{blob.name}' is 0 bytes — skipping")
             else:
