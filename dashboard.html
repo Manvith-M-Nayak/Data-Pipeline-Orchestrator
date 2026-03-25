@@ -1,0 +1,810 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ADF Monitor</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
+
+  :root {
+    --bg:        #0b0e14;
+    --surface:   #111620;
+    --surface2:  #181f2e;
+    --border:    #1e2a3a;
+    --border2:   #2a3a50;
+    --text:      #cdd8e8;
+    --muted:     #5a7080;
+    --accent:    #00d4ff;
+    --accent2:   #0099cc;
+    --green:     #00e5a0;
+    --red:       #ff4d6a;
+    --amber:     #ffb830;
+    --purple:    #b06dff;
+    --mono:      'IBM Plex Mono', monospace;
+    --sans:      'IBM Plex Sans', sans-serif;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: var(--sans);
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── Grid scanline overlay ── */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background:
+      repeating-linear-gradient(0deg, transparent, transparent 39px, #ffffff04 39px, #ffffff04 40px),
+      repeating-linear-gradient(90deg, transparent, transparent 39px, #ffffff03 39px, #ffffff03 40px);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .app { position: relative; z-index: 1; }
+
+  /* ── Header ── */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 36px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, #0e1520 0%, transparent 100%);
+    position: sticky; top: 0;
+    backdrop-filter: blur(10px);
+    z-index: 100;
+  }
+
+  .logo {
+    display: flex; align-items: center; gap: 12px;
+  }
+  .logo-icon {
+    width: 34px; height: 34px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px;
+  }
+  .logo-text {
+    font-family: var(--mono);
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    color: var(--accent);
+  }
+  .logo-sub {
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .header-right {
+    display: flex; align-items: center; gap: 16px;
+  }
+
+  #last-updated {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  .load-btn {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--surface2);
+    border: 1px solid var(--border2);
+    color: var(--text);
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-family: var(--mono);
+    font-size: 12px;
+    cursor: pointer;
+    transition: border-color .2s, background .2s;
+  }
+  .load-btn:hover { border-color: var(--accent); background: #1a2535; }
+
+  /* ── Main layout ── */
+  main { padding: 28px 36px; max-width: 1440px; }
+
+  /* ── Upload zone ── */
+  .upload-zone {
+    border: 2px dashed var(--border2);
+    border-radius: 12px;
+    padding: 56px 36px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color .25s, background .25s;
+    margin-bottom: 32px;
+  }
+  .upload-zone:hover, .upload-zone.drag-over {
+    border-color: var(--accent);
+    background: #0d1a28;
+  }
+  .upload-zone .icon { font-size: 40px; margin-bottom: 12px; }
+  .upload-zone h2 { font-size: 18px; font-weight: 500; margin-bottom: 6px; }
+  .upload-zone p  { font-size: 13px; color: var(--muted); }
+  .upload-zone input { display: none; }
+
+  /* ── Stat cards ── */
+  .stat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 16px;
+    margin-bottom: 28px;
+  }
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px 22px;
+    position: relative;
+    overflow: hidden;
+    animation: fadeUp .4s ease both;
+  }
+  .stat-card::before {
+    content: '';
+    position: absolute; top: 0; left: 0; right: 0; height: 2px;
+  }
+  .stat-card.healthy::before  { background: var(--green); }
+  .stat-card.failed::before   { background: var(--red); }
+  .stat-card.warning::before  { background: var(--amber); }
+  .stat-card.info::before     { background: var(--accent); }
+  .stat-card.purple::before   { background: var(--purple); }
+
+  .stat-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: .1em;
+    color: var(--muted);
+    margin-bottom: 8px;
+    font-family: var(--mono);
+  }
+  .stat-value {
+    font-family: var(--mono);
+    font-size: 32px;
+    font-weight: 600;
+    line-height: 1;
+  }
+  .stat-card.healthy  .stat-value { color: var(--green); }
+  .stat-card.failed   .stat-value { color: var(--red); }
+  .stat-card.warning  .stat-value { color: var(--amber); }
+  .stat-card.info     .stat-value { color: var(--accent); }
+  .stat-card.purple   .stat-value { color: var(--purple); }
+  .stat-sub {
+    font-size: 11px; color: var(--muted); margin-top: 6px;
+  }
+
+  /* ── Section ── */
+  .section { margin-bottom: 32px; }
+  .section-header {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 16px;
+  }
+  .section-title {
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .12em;
+    color: var(--muted);
+  }
+  .section-line {
+    flex: 1; height: 1px; background: var(--border);
+  }
+
+  /* ── Pipeline cards ── */
+  .pipeline-list { display: flex; flex-direction: column; gap: 14px; }
+
+  .pipeline-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    animation: fadeUp .4s ease both;
+  }
+  .pipeline-card.has-issues { border-color: #3a1a20; }
+  .pipeline-card.healthy    { border-color: #0d2a1e; }
+
+  .pipeline-header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 16px 20px;
+    cursor: pointer;
+    transition: background .2s;
+  }
+  .pipeline-header:hover { background: #151e2e; }
+
+  .status-dot {
+    width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0;
+  }
+  .dot-green  { background: var(--green);  box-shadow: 0 0 6px var(--green); }
+  .dot-red    { background: var(--red);    box-shadow: 0 0 6px var(--red); }
+  .dot-amber  { background: var(--amber);  box-shadow: 0 0 6px var(--amber); }
+  .dot-blue   { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+  .dot-purple { background: var(--purple); box-shadow: 0 0 6px var(--purple); }
+
+  .pipeline-name {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 500;
+    flex: 1;
+  }
+
+  .pipeline-meta {
+    display: flex; align-items: center; gap: 20px;
+    font-size: 11px; color: var(--muted);
+  }
+  .pipeline-meta span { font-family: var(--mono); }
+
+  .badge {
+    padding: 2px 8px; border-radius: 4px;
+    font-size: 10px; font-family: var(--mono);
+    font-weight: 600; text-transform: uppercase; letter-spacing: .05em;
+  }
+  .badge-green  { background: #0d2a1e; color: var(--green); }
+  .badge-red    { background: #2a0d14; color: var(--red); }
+  .badge-amber  { background: #2a1d00; color: var(--amber); }
+  .badge-blue   { background: #002a36; color: var(--accent); }
+  .badge-purple { background: #1a0d2a; color: var(--purple); }
+
+  .chevron {
+    width: 16px; height: 16px; color: var(--muted);
+    transition: transform .25s;
+    flex-shrink: 0;
+  }
+  .pipeline-card.open .chevron { transform: rotate(180deg); }
+
+  /* ── Run detail panel ── */
+  .pipeline-body {
+    display: none;
+    border-top: 1px solid var(--border);
+  }
+  .pipeline-card.open .pipeline-body { display: block; }
+
+  .runs-table-wrap { overflow-x: auto; }
+  table {
+    width: 100%; border-collapse: collapse;
+    font-size: 12px; font-family: var(--mono);
+  }
+  thead th {
+    text-align: left; padding: 10px 16px;
+    color: var(--muted); font-weight: 500;
+    font-size: 10px; text-transform: uppercase; letter-spacing: .08em;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface2);
+  }
+  tbody tr { transition: background .15s; }
+  tbody tr:hover { background: #151e2e; }
+  tbody td {
+    padding: 10px 16px;
+    border-bottom: 1px solid #141d2a;
+    vertical-align: top;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+
+  .flag-pill {
+    display: inline-block; padding: 1px 6px;
+    border-radius: 3px; font-size: 9px;
+    margin-right: 4px; margin-bottom: 2px;
+    text-transform: uppercase; letter-spacing: .05em;
+  }
+  .flag-failed    { background: #2a0d14; color: var(--red); }
+  .flag-long_run  { background: #2a1d00; color: var(--amber); }
+  .flag-anomaly   { background: #1a0d2a; color: var(--purple); }
+
+  /* ── Error drill-down ── */
+  .error-panel {
+    margin: 0; padding: 14px 20px;
+    background: #0d0e16;
+    border-top: 1px solid var(--border);
+  }
+  .error-panel-title {
+    font-family: var(--mono); font-size: 10px;
+    text-transform: uppercase; letter-spacing: .1em;
+    color: var(--red); margin-bottom: 10px;
+  }
+  .error-entry {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 6px 14px;
+    padding: 10px 14px;
+    background: #10121a;
+    border: 1px solid #2a1520;
+    border-radius: 6px;
+    margin-bottom: 8px;
+    font-size: 11px;
+  }
+  .error-entry:last-child { margin-bottom: 0; }
+  .err-key { color: var(--muted); white-space: nowrap; }
+  .err-val { color: var(--text); word-break: break-word; }
+  .err-val.code  { color: var(--red); }
+  .err-val.msg   { color: #f0c0c8; }
+  .err-val.act   { color: var(--amber); }
+
+  /* ── Anomaly panel ── */
+  .anomaly-panel {
+    margin: 0; padding: 14px 20px;
+    background: #0d0e16;
+    border-top: 1px solid var(--border);
+  }
+  .anomaly-panel-title {
+    font-family: var(--mono); font-size: 10px;
+    text-transform: uppercase; letter-spacing: .1em;
+    color: var(--purple); margin-bottom: 10px;
+  }
+  .anomaly-entry {
+    padding: 10px 14px;
+    background: #10121a;
+    border: 1px solid #22103a;
+    border-radius: 6px;
+    font-size: 11px;
+    margin-bottom: 8px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 6px 16px;
+  }
+  .anomaly-entry:last-child { margin-bottom: 0; }
+  .an-item .an-key { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+  .an-item .an-val { color: var(--purple); font-weight: 600; margin-top: 1px; }
+  .an-item .an-val.z  { color: var(--red); }
+
+  /* ── Stats bar ── */
+  .stats-bar {
+    padding: 14px 20px;
+    border-top: 1px solid var(--border);
+    display: flex; gap: 28px; flex-wrap: wrap;
+    background: var(--surface2);
+  }
+  .stat-item .s-key {
+    font-size: 9px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .08em;
+    font-family: var(--mono);
+  }
+  .stat-item .s-val {
+    font-family: var(--mono); font-size: 14px; font-weight: 600;
+    color: var(--accent); margin-top: 2px;
+  }
+
+  /* ── Issue list ── */
+  .issue-list { display: flex; flex-direction: column; gap: 8px; }
+  .issue-item {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 12px 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 12px;
+    font-family: var(--mono);
+    animation: fadeUp .3s ease both;
+  }
+  .issue-icon { flex-shrink: 0; font-size: 14px; margin-top: 1px; }
+
+  /* ── Timeline bar ── */
+  .timeline-bar {
+    height: 6px; border-radius: 3px;
+    background: var(--border);
+    margin: 4px 0;
+    overflow: hidden;
+  }
+  .timeline-fill {
+    height: 100%; border-radius: 3px;
+    transition: width .6s ease;
+  }
+  .fill-green  { background: var(--green); }
+  .fill-red    { background: var(--red); }
+  .fill-amber  { background: var(--amber); }
+  .fill-purple { background: var(--purple); }
+
+  /* ── Empty / loading states ── */
+  .empty-state {
+    text-align: center; padding: 60px 20px;
+    color: var(--muted); font-family: var(--mono); font-size: 13px;
+  }
+  .empty-state .icon { font-size: 36px; margin-bottom: 12px; }
+
+  /* ── Animations ── */
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: .4; }
+  }
+  .pulsing { animation: pulse 2s infinite; }
+
+  /* ── Scrollbar ── */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ── HEADER ── -->
+  <header>
+    <div class="logo">
+      <div class="logo-icon">🏭</div>
+      <div>
+        <div class="logo-text">ADF MONITOR</div>
+        <div class="logo-sub">Azure Data Factory · Pipeline Health</div>
+      </div>
+    </div>
+    <div class="header-right">
+      <span id="last-updated">No data loaded</span>
+      <label class="load-btn" for="file-input">
+        <span>📂</span> Load Report JSON
+        <input type="file" id="file-input" accept=".json" />
+      </label>
+    </div>
+  </header>
+
+  <!-- ── MAIN ── -->
+  <main id="main-content">
+
+    <!-- Upload zone (shown when no data) -->
+    <div class="upload-zone" id="upload-zone">
+      <div class="icon">🗂️</div>
+      <h2>Drop your monitoring report here</h2>
+      <p>Load <code>adf_monitoring_report.json</code> generated by the monitoring agent</p>
+    </div>
+
+    <!-- Dashboard (hidden until data loaded) -->
+    <div id="dashboard" style="display:none">
+
+      <!-- Stat cards -->
+      <div class="stat-grid" id="stat-grid"></div>
+
+      <!-- Success rate bar -->
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">Success Rate</span>
+          <div class="section-line"></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:14px;">
+          <div class="timeline-bar" style="flex:1;height:10px;">
+            <div class="timeline-fill fill-green" id="success-bar" style="width:0%"></div>
+          </div>
+          <span id="success-pct" style="font-family:var(--mono);font-size:18px;font-weight:600;color:var(--green);min-width:52px;text-align:right">–</span>
+        </div>
+      </div>
+
+      <!-- Issues -->
+      <div class="section" id="issues-section" style="display:none">
+        <div class="section-header">
+          <span class="section-title">Issues Detected</span>
+          <div class="section-line"></div>
+        </div>
+        <div class="issue-list" id="issue-list"></div>
+      </div>
+
+      <!-- Pipelines -->
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">Pipelines</span>
+          <div class="section-line"></div>
+        </div>
+        <div class="pipeline-list" id="pipeline-list"></div>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<script>
+// ─────────────────────────────────────────────
+//  Helpers
+// ─────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+const fmt = s => s ?? '—';
+
+function statusColor(status) {
+  if (!status) return 'blue';
+  const s = status.toLowerCase();
+  if (s === 'succeeded') return 'green';
+  if (s === 'failed' || s === 'cancelled') return 'red';
+  if (s === 'inprogress' || s === 'queued') return 'amber';
+  return 'blue';
+}
+
+function badgeClass(color) {
+  return `badge badge-${color}`;
+}
+
+function dotClass(color) {
+  return `status-dot dot-${color}`;
+}
+
+function issueIcon(msg) {
+  const m = msg.toLowerCase();
+  if (m.includes('anomal'))  return '📊';
+  if (m.includes('long'))    return '⏱';
+  if (m.includes('fail') || m.includes('cancel')) return '❌';
+  return '⚠️';
+}
+
+function formatTs(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleString('en-GB', {
+    day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit'
+  });
+}
+
+// ─────────────────────────────────────────────
+//  Render
+// ─────────────────────────────────────────────
+function render(data) {
+  const s = data.summary || {};
+  $('dashboard').style.display = 'block';
+  $('upload-zone').style.display = 'none';
+
+  // Updated timestamp
+  const ts = data.generated_at ? new Date(data.generated_at) : null;
+  $('last-updated').textContent = ts
+    ? `Updated ${ts.toLocaleTimeString('en-GB')} · ${ts.toLocaleDateString('en-GB')}`
+    : 'Report loaded';
+
+  // ── Stat cards ──
+  const statCards = [
+    { label: 'Total Runs',    value: s.total_runs  ?? '—', cls: 'info',    sub: `Last ${data.lookback_hours}h` },
+    { label: 'Succeeded',     value: s.succeeded   ?? '—', cls: 'healthy', sub: 'Completed OK' },
+    { label: 'Failed',        value: s.failed      ?? '—', cls: 'failed',  sub: 'Needs attention' },
+    { label: 'In Progress',   value: s.in_progress ?? '—', cls: 'warning', sub: 'Still running' },
+    { label: 'Issues',        value: s.issue_count ?? '—', cls: s.issue_count > 0 ? 'failed' : 'healthy', sub: 'Detected' },
+    { label: 'Pipelines',     value: Object.keys(data.pipelines || {}).length, cls: 'purple', sub: 'Monitored' },
+  ];
+
+  $('stat-grid').innerHTML = statCards.map((c, i) => `
+    <div class="stat-card ${c.cls}" style="animation-delay:${i * 50}ms">
+      <div class="stat-label">${c.label}</div>
+      <div class="stat-value">${c.value}</div>
+      <div class="stat-sub">${c.sub}</div>
+    </div>
+  `).join('');
+
+  // ── Success bar ──
+  const pct = s.success_rate ?? 0;
+  $('success-bar').style.width = pct + '%';
+  $('success-pct').textContent = pct + '%';
+  if (pct < 50) { $('success-bar').className = 'timeline-fill fill-red'; $('success-pct').style.color = 'var(--red)'; }
+  else if (pct < 80) { $('success-bar').className = 'timeline-fill fill-amber'; $('success-pct').style.color = 'var(--amber)'; }
+
+  // ── Issues ──
+  const issues = data.issues || [];
+  if (issues.length) {
+    $('issues-section').style.display = 'block';
+    $('issue-list').innerHTML = issues.map((msg, i) => `
+      <div class="issue-item" style="animation-delay:${i * 40}ms">
+        <span class="issue-icon">${issueIcon(msg)}</span>
+        <span>${msg}</span>
+      </div>
+    `).join('');
+  }
+
+  // ── Pipelines ──
+  const pipelines = data.pipelines || {};
+  const plEl = $('pipeline-list');
+  plEl.innerHTML = '';
+
+  if (!Object.keys(pipelines).length) {
+    plEl.innerHTML = '<div class="empty-state"><div class="icon">🔍</div>No pipeline data found.</div>';
+    return;
+  }
+
+  Object.entries(pipelines).forEach(([name, pl], pi) => {
+    const runs      = pl.runs || [];
+    const anomalies = pl.anomalies || [];
+    const stats     = pl.stats || null;
+    const hasErrors = runs.some(r => r.errors && r.errors.length > 0);
+    const hasAnomaly = anomalies.length > 0;
+
+    // Overall status: worst of all runs
+    let worstStatus = 'Succeeded';
+    runs.forEach(r => {
+      if (r.status === 'Failed' || r.status === 'Cancelled') worstStatus = r.status;
+      else if (r.status !== 'Succeeded' && worstStatus === 'Succeeded') worstStatus = r.status;
+    });
+
+    const color     = statusColor(worstStatus);
+    const cardClass = (color === 'green' && !hasAnomaly) ? 'healthy' : 'has-issues';
+
+    const card = document.createElement('div');
+    card.className = `pipeline-card ${cardClass}`;
+    card.style.animationDelay = `${pi * 60}ms`;
+
+    // ── Header ──
+    card.innerHTML = `
+      <div class="pipeline-header" onclick="toggleCard(this)">
+        <div class="${dotClass(color)}"></div>
+        <span class="pipeline-name">${name}</span>
+        <div class="pipeline-meta">
+          <span>${runs.length} run${runs.length !== 1 ? 's' : ''}</span>
+          ${hasAnomaly ? `<span class="${badgeClass('purple')}">⚡ Anomaly</span>` : ''}
+          <span class="${badgeClass(color)}">${worstStatus}</span>
+        </div>
+        <svg class="chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="4,6 8,10 12,6"/>
+        </svg>
+      </div>
+
+      <div class="pipeline-body">
+
+        ${stats ? `
+        <div class="stats-bar">
+          <div class="stat-item"><div class="s-key">Mean</div><div class="s-val">${fmtSec(stats.mean_s)}</div></div>
+          <div class="stat-item"><div class="s-key">Median</div><div class="s-val">${fmtSec(stats.median_s)}</div></div>
+          <div class="stat-item"><div class="s-key">Std Dev</div><div class="s-val">${fmtSec(stats.stdev_s)}</div></div>
+          <div class="stat-item"><div class="s-key">Min</div><div class="s-val">${fmtSec(stats.min_s)}</div></div>
+          <div class="stat-item"><div class="s-key">Max</div><div class="s-val">${fmtSec(stats.max_s)}</div></div>
+        </div>` : ''}
+
+        <div class="runs-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Run ID</th>
+                <th>Status</th>
+                <th>Started</th>
+                <th>Duration</th>
+                <th>Flags</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${runs.map(r => `
+                <tr>
+                  <td style="font-size:10px;color:var(--muted)">${r.run_id || '—'}</td>
+                  <td><span class="${badgeClass(statusColor(r.status))}">${r.status}</span></td>
+                  <td style="color:var(--muted)">${formatTs(r.started_at)}</td>
+                  <td>${r.duration_display || '—'}</td>
+                  <td>${(r.flags || []).map(f => `<span class="flag-pill flag-${f}">${f}</span>`).join('') || '—'}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+
+        ${hasErrors ? `
+        <div class="error-panel">
+          <div class="error-panel-title">🔴 Error Details</div>
+          ${runs.filter(r => r.errors && r.errors.length).flatMap(r => r.errors).map(e => `
+            <div class="error-entry">
+              <span class="err-key">Activity</span>  <span class="err-val act">${e.activity || '—'}</span>
+              <span class="err-key">Type</span>       <span class="err-val">${e.type || '—'}</span>
+              <span class="err-key">Error Code</span> <span class="err-val code">${e.error_code || '—'}</span>
+              <span class="err-key">Category</span>   <span class="err-val">${e.category || '—'}</span>
+              <span class="err-key">Message</span>    <span class="err-val msg">${e.message || '—'}</span>
+            </div>
+          `).join('')}
+        </div>` : ''}
+
+        ${hasAnomaly ? `
+        <div class="anomaly-panel">
+          <div class="anomaly-panel-title">📊 Anomalous Runs</div>
+          ${anomalies.map(a => `
+            <div class="anomaly-entry">
+              <div class="an-item"><div class="an-key">Run ID</div><div class="an-val" style="font-size:9px;color:var(--muted)">${a.run_id}</div></div>
+              <div class="an-item"><div class="an-key">Duration</div><div class="an-val">${fmtSec(a.duration_s)}</div></div>
+              <div class="an-item"><div class="an-key">Mean</div><div class="an-val">${fmtSec(a.mean_s)}</div></div>
+              <div class="an-item"><div class="an-key">Std Dev</div><div class="an-val">${fmtSec(a.stdev_s)}</div></div>
+              <div class="an-item"><div class="an-key">Z-Score</div><div class="an-val z">${a.z_score}σ</div></div>
+              <div class="an-item"><div class="an-key">Threshold</div><div class="an-val">${fmtSec(a.threshold_s)}</div></div>
+            </div>
+          `).join('')}
+        </div>` : ''}
+      </div>
+    `;
+
+    plEl.appendChild(card);
+  });
+}
+
+function fmtSec(s) {
+  if (s == null) return '—';
+  s = Math.round(s);
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  if (h) return `${h}h ${m}m ${sec}s`;
+  if (m) return `${m}m ${sec}s`;
+  return `${sec}s`;
+}
+
+function toggleCard(header) {
+  const card = header.closest('.pipeline-card');
+  card.classList.toggle('open');
+}
+
+// ─────────────────────────────────────────────
+//  File loading
+// ─────────────────────────────────────────────
+function loadFile(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const data = JSON.parse(e.target.result);
+      render(data);
+    } catch(err) {
+      alert('Invalid JSON file: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+}
+
+$('file-input').addEventListener('change', e => loadFile(e.target.files[0]));
+
+// Drag and drop on upload zone
+const zone = $('upload-zone');
+zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
+zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+zone.addEventListener('drop', e => {
+  e.preventDefault();
+  zone.classList.remove('drag-over');
+  loadFile(e.dataTransfer.files[0]);
+});
+zone.addEventListener('click', () => $('file-input').click());
+
+// ─────────────────────────────────────────────
+//  Demo data (shown on first load)
+// ─────────────────────────────────────────────
+const DEMO = {
+  "generated_at": new Date().toISOString(),
+  "factory": "adf-monitor-demo",
+  "resource_group": "adf-demo-rg",
+  "lookback_hours": 24,
+  "total_runs": 7,
+  "pipelines": {
+    "PL_Copy_Raw_to_Stage1": {
+      "name": "PL_Copy_Raw_to_Stage1",
+      "runs": [
+        { "run_id": "a1b2c3d4-0001", "status": "Succeeded", "started_at": new Date(Date.now()-3600000).toISOString(), "ended_at": new Date(Date.now()-3540000).toISOString(), "duration_s": 60, "duration_display": "1m 0s", "flags": [], "errors": [], "activities": [] },
+        { "run_id": "a1b2c3d4-0002", "status": "Succeeded", "started_at": new Date(Date.now()-7200000).toISOString(), "ended_at": new Date(Date.now()-7140000).toISOString(), "duration_s": 58, "duration_display": "58s", "flags": [], "errors": [], "activities": [] },
+        { "run_id": "a1b2c3d4-0003", "status": "Succeeded", "started_at": new Date(Date.now()-10800000).toISOString(), "ended_at": new Date(Date.now()-10682000).toISOString(), "duration_s": 118, "duration_display": "1m 58s", "flags": ["anomaly"], "errors": [], "activities": [] }
+      ],
+      "anomalies": [{ "run_id": "a1b2c3d4-0003", "duration_s": 118, "mean_s": 59, "stdev_s": 24, "z_score": 2.46, "threshold_s": 107 }],
+      "stats": { "mean_s": 78.7, "median_s": 60, "stdev_s": 32.8, "min_s": 58, "max_s": 118 }
+    },
+    "PL_DataFlow_Transform": {
+      "name": "PL_DataFlow_Transform",
+      "runs": [
+        { "run_id": "b2c3d4e5-0001", "status": "Failed", "started_at": new Date(Date.now()-1800000).toISOString(), "ended_at": new Date(Date.now()-1740000).toISOString(), "duration_s": 60, "duration_display": "1m 0s", "flags": ["failed"],
+          "errors": [{ "activity": "DataFlowActivity", "type": "ExecuteDataFlow", "error_code": "DF-Executor-InvalidData", "category": "UserError", "message": "Column 'transaction_date' contains null values that violate the non-null constraint in the sink dataset." }], "activities": [] },
+        { "run_id": "b2c3d4e5-0002", "status": "Succeeded", "started_at": new Date(Date.now()-5400000).toISOString(), "ended_at": new Date(Date.now()-5280000).toISOString(), "duration_s": 120, "duration_display": "2m 0s", "flags": [], "errors": [], "activities": [] }
+      ],
+      "anomalies": [],
+      "stats": { "mean_s": 90, "median_s": 90, "stdev_s": 42.4, "min_s": 60, "max_s": 120 }
+    },
+    "PL_Copy_Stage1_to_Stage2": {
+      "name": "PL_Copy_Stage1_to_Stage2",
+      "runs": [
+        { "run_id": "c3d4e5f6-0001", "status": "Succeeded", "started_at": new Date(Date.now()-900000).toISOString(), "ended_at": new Date(Date.now()-855000).toISOString(), "duration_s": 45, "duration_display": "45s", "flags": [], "errors": [], "activities": [] }
+      ],
+      "anomalies": [],
+      "stats": null
+    }
+  },
+  "issues": [
+    "[PL_DataFlow_Transform] run b2c3d4e5-0001 ended with status 'Failed'",
+    "[PL_DataFlow_Transform/DataFlowActivity] DF-Executor-InvalidData: Column 'transaction_date' contains null values that violate the non-null constraint in the sink dataset.",
+    "[PL_Copy_Raw_to_Stage1] run a1b2c3d4-0003 is anomalously slow (1m 58s vs mean 59s, stddev 24s, z=2.5)"
+  ],
+  "summary": {
+    "status": "issues_found",
+    "total_runs": 6,
+    "succeeded": 4,
+    "failed": 1,
+    "in_progress": 1,
+    "issue_count": 3,
+    "success_rate": 66.7
+  }
+};
+
+// Auto-load demo data
+render(DEMO);
+</script>
+</body>
+</html>
