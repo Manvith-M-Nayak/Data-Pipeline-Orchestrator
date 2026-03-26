@@ -16,7 +16,9 @@ from adf_api import (
     trigger_pipeline,
     check_pipeline_status,
 )
-from config import AZURE_STORAGE_ACCOUNT, AZURE_STORAGE_KEY
+from config import AZURE_STORAGE_ACCOUNT, AZURE_STORAGE_KEY, AZURE_SUBSCRIPTION_ID, AZURE_RESOURCE_GROUP, AZURE_DATA_FACTORY
+from azure.mgmt.datafactory import DataFactoryManagementClient
+from monitor_agent import MonitoringAgent
 
 
 # ============================================================
@@ -243,12 +245,37 @@ def main():
                     all_succeeded = False
                     break
 
-    config_output = csv_filepath.replace(".csv", "_pipeline_config.json")
-    with open(config_output, "w") as f:
-        json.dump(pipeline_config, f, indent=2)
-    print(f"\nPipeline config saved to: {config_output}")
-
     if all_succeeded:
+        print("\n--- Step 11: Monitoring Pipelines ---")
+
+        from azure.identity import ClientSecretCredential
+        from azure.mgmt.datafactory import DataFactoryManagementClient
+        from monitor_agent import MonitoringAgent
+
+        credential = ClientSecretCredential(
+            AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET
+        )
+
+        client = DataFactoryManagementClient(credential, AZURE_SUBSCRIPTION_ID)
+
+        monitor = MonitoringAgent(
+            client,
+            AZURE_RESOURCE_GROUP,
+            AZURE_DATA_FACTORY,
+            scan_past_pipelines=True,
+            silent=False
+        )
+
+        report = monitor.monitor()
+
+        summary = report.get("summary", {})
+
+        print("\nSUMMARY:")
+        print(f"Total Runs: {summary.get('total_runs')}")
+        print(f"Succeeded : {summary.get('succeeded')}")
+        print(f"Failed    : {summary.get('failed')}")
+        print(f"Running   : {summary.get('in_progress')}")
+
         print("\nAll done! Monitor your pipelines at:")
         print("   https://adf.azure.com/en/monitoring/pipelineruns\n")
     else:
