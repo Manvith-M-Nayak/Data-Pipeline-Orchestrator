@@ -16,7 +16,7 @@ from adf_api import (
     trigger_pipeline,
     check_pipeline_status,
 )
-from config import AZURE_STORAGE_ACCOUNT, AZURE_STORAGE_KEY, AZURE_SUBSCRIPTION_ID, AZURE_RESOURCE_GROUP, AZURE_DATA_FACTORY
+from config import AZURE_STORAGE_ACCOUNT, AZURE_STORAGE_KEY, AZURE_SUBSCRIPTION_ID, AZURE_RESOURCE_GROUP, AZURE_DATA_FACTORY, GROQ_API_KEY
 from azure.mgmt.datafactory import DataFactoryManagementClient
 from monitor_agent import MonitoringAgent
 
@@ -263,7 +263,8 @@ def main():
             AZURE_RESOURCE_GROUP,
             AZURE_DATA_FACTORY,
             scan_past_pipelines=True,
-            silent=False
+            silent=False,
+            groq_api_key=GROQ_API_KEY
         )
 
         report = monitor.monitor()
