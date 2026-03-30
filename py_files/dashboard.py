@@ -591,6 +591,8 @@ def run_pipeline_thread(csv_path: str, pipeline_config: dict,
             result_q.put(("log", "--- Step 1: Creating Blob Containers ---"))
             for cname in pipeline_config["containers"].values():
                 create_blob_container(cname)
+            raw_container = pipeline_config["containers"].get("stage0") or pipeline_config["containers"].get("raw") or list(pipeline_config["containers"].values())[0]
+            purge_container(raw_container)
             for key in ["stage1", "stage2"]:
                 cname = pipeline_config["containers"].get(key)
                 if cname:
@@ -598,7 +600,7 @@ def run_pipeline_thread(csv_path: str, pipeline_config: dict,
             result_q.put(("progress", 20))
 
             result_q.put(("log", "--- Step 2: Uploading CSV ---"))
-            raw_container = pipeline_config["containers"].get("raw", "incoming")
+            raw_container = pipeline_config["containers"].get("stage0") or pipeline_config["containers"].get("raw") or list(pipeline_config["containers"].values())[0]
             upload_csv(csv_path, raw_container)
             if not check_blob_has_rows(raw_container):
                 result_q.put(("error", "Upload verification failed — no rows in raw container."))
@@ -1191,6 +1193,19 @@ render_status_badge()
 
 if "history_limit" not in st.session_state:
     st.session_state["history_limit"] = 20
+
+# Global guard: If pipeline is running, redirect to running stage
+# This prevents showing config/deploy during execution
+pipeline_in_progress = (
+    st.session_state.stage in ["plan", "input"] and 
+    (st.session_state.get("pipeline_start_ts") is not None or 
+     st.session_state.get("progress", 0) > 0 or
+     "_q" in st.session_state)
+)
+if pipeline_in_progress and st.session_state.stage != "running":
+    st.session_state.stage = "running"
+    st.rerun()
+
 
 # ════════════════════════════════════════════════════════════════
 # STAGE: input

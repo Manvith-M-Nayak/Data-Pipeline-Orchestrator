@@ -105,7 +105,7 @@ def decide_pipeline_config(
         {
             "name": f"DS_{container_list[0].title()}",
             "container": container_list[0],
-            "filename": "*.csv",
+            "filename": "",
             "role": "source"
         }
     ] + [

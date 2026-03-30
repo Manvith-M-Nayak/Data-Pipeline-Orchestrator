@@ -320,6 +320,9 @@ def main():
     for container_name in pipeline_config["containers"].values():
         create_blob_container(container_name)
 
+    raw_container = pipeline_config["containers"].get("stage0") or pipeline_config["containers"].get("raw") or list(pipeline_config["containers"].values())[0]
+    purge_container(raw_container)
+
     print("\n--- Step 4b: Purging intermediate and output containers ---")
     for key in list(pipeline_config["containers"].keys())[1:]:
         cname = pipeline_config["containers"].get(key)

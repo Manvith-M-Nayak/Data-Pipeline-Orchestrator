@@ -1,18 +1,3186 @@
 {
-  "generated_at": "2026-03-30T10:42:42.596858+00:00",
+  "generated_at": "2026-03-30T21:12:09.005474+00:00",
   "factory": "BigdataDF1",
   "resource_group": "bigdatatest",
   "lookback_hours": 24,
   "long_run_threshold_minutes": 30,
   "anomaly_stddev_factor": 2.0,
   "scan_past_pipelines": true,
-  "total_runs": 6,
+  "total_runs": 25,
   "running_runs": 0,
-  "past_runs": 6,
+  "past_runs": 25,
   "pipelines": {
+    "Pipeline_Silver_to_Gold": {
+      "name": "Pipeline_Silver_to_Gold",
+      "runs": [
+        {
+          "run_id": "9998d388-46f0-4d3a-8490-d2296a24e957",
+          "status": "Succeeded",
+          "started_at": "2026-03-30T21:08:51.672533+00:00",
+          "ended_at": "2026-03-30T21:09:10.910235+00:00",
+          "duration_s": 19.2,
+          "duration_display": "19s",
+          "activities": [
+            {
+              "activity_name": "DataFlowActivity",
+              "activity_type": "ExecuteDataFlow",
+              "status": "Succeeded",
+              "started_at": "2026-03-30T21:08:59.759635+00:00",
+              "ended_at": "2026-03-30T21:09:10.102503+00:00",
+              "duration_s": 10.3,
+              "duration_display": "10s",
+              "input": {
+                "dataflow": {
+                  "referenceName": "DF_Pipeline_Silver_to_Gold_20260330210448",
+                  "type": "DataFlowReference"
+                },
+                "compute": {
+                  "coreCount": 4,
+                  "computeType": "General"
+                },
+                "staging": {
+                  "linkedService": {
+                    "referenceName": "LS_Blob_Storage",
+                    "type": "LinkedServiceReference"
+                  }
+                },
+                "dataFlowETag": "3400cf44-0000-2000-0000-69cae57b0000"
+              },
+              "output": {
+                "runStatus": {
+                  "idleTimeBeforeCurrentJob": 24532,
+                  "sparkVersion": "3.4",
+                  "computeAcquisitionDuration": 441,
+                  "version": "20260305.6",
+                  "profile": {
+                    "Source": {
+                      "computed": [],
+                      "lineage": {},
+                      "dropped": 0,
+                      "drifted": 1,
+                      "newer": 18,
+                      "total": 18,
+                      "updated": 0
+                    },
+                    "DerivedColumns": {
+                      "computed": [],
+                      "lineage": {},
+                      "dropped": 0,
+                      "drifted": 0,
+                      "newer": 0,
+                      "total": 18,
+                      "updated": 2
+                    },
+                    "Sink": {
+                      "computed": [],
+                      "lineage": {
+                        "aquatic": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "aquatic"
+                              ]
+                            }
+                          ]
+                        },
+                        "toothed": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "toothed"
+                              ]
+                            }
+                          ]
+                        },
+                        "domestic": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "domestic"
+                              ]
+                            }
+                          ]
+                        },
+                        "hair": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "hair"
+                              ]
+                            }
+                          ]
+                        },
+                        "processed_time": {
+                          "mapped": false,
+                          "from": [
+                            {
+                              "source": "DerivedColumns",
+                              "columns": [
+                                "processed_time"
+                              ]
+                            }
+                          ]
+                        },
+                        "eggs": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "eggs"
+                              ]
+                            }
+                          ]
+                        },
+                        "milk": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "milk"
+                              ]
+                            }
+                          ]
+                        },
+                        "airborne": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "airborne"
+                              ]
+                            }
+                          ]
+                        },
+                        "feathers": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "feathers"
+                              ]
+                            }
+                          ]
+                        },
+                        "tail": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "tail"
+                              ]
+                            }
+                          ]
+                        },
+                        "animal_name": {
+                          "mapped": false,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "animal_name"
+                              ]
+                            }
+                          ]
+                        },
+                        "backbone": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "backbone"
+                              ]
+                            }
+                          ]
+                        },
+                        "catsize": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "catsize"
+                              ]
+                            }
+                          ]
+                        },
+                        "breathes": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "breathes"
+                              ]
+                            }
+                          ]
+                        },
+                        "legs": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "legs"
+                              ]
+                            }
+                          ]
+                        },
+                        "predator": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "predator"
+                              ]
+                            }
+                          ]
+                        },
+                        "fins": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "fins"
+                              ]
+                            }
+                          ]
+                        },
+                        "venomous": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "venomous"
+                              ]
+                            }
+                          ]
+                        }
+                      },
+                      "dropped": 0,
+                      "drifted": 0,
+                      "newer": 0,
+                      "total": 18,
+                      "updated": 18
+                    }
+                  },
+                  "metrics": {
+                    "Sink": {
+                      "format": "delimited",
+                      "stages": [
+                        {
+                          "stage": 3,
+                          "partitionTimes": [
+                            831
+                          ],
+                          "recordsWritten": 59,
+                          "lastUpdateTime": "2026-03-30 21:09:08.049",
+                          "bytesWritten": 3611,
+                          "recordsRead": 59,
+                          "bytesRead": 3611,
+                          "partitionStatus": "Success",
+                          "streams": {
+                            "DerivedColumns": {
+                              "count": 59,
+                              "cached": false,
+                              "totalPartitions": 1,
+                              "partitionStatus": "Success",
+                              "partitionCounts": [
+                                59
+                              ],
+                              "type": "derive"
+                            },
+                            "Source": {
+                              "count": 59,
+                              "cached": false,
+                              "totalPartitions": 1,
+                              "partitionStatus": "Success",
+                              "partitionCounts": [
+                                59
+                              ],
+                              "type": "source"
+                            },
+                            "Sink": {
+                              "count": 59,
+                              "cached": false,
+                              "totalPartitions": 1,
+                              "partitionStatus": "Success",
+                              "partitionCounts": [
+                                59
+                              ],
+                              "type": "sink"
+                            }
+                          },
+                          "target": "Sink",
+                          "time": 949,
+                          "progressState": "Completed"
+                        }
+                      ],
+                      "sinkPostProcessingTime": 0,
+                      "store": "blob",
+                      "rowsWritten": 59,
+                      "details": {
+                        "preCommandsDuration": [
+                          0
+                        ],
+                        "mergeDuration": [
+                          153
+                        ],
+                        "postCommandsDuration": [
+                          0
+                        ]
+                      },
+                      "progressState": "Completed",
+                      "sources": {
+                        "Source": {
+                          "rowsRead": 59,
+                          "store": "blob",
+                          "details": {
+                            "pathResolutionDuration": [
+                              26
+                            ],
+                            "fileReadCount": [
+                              1
+                            ],
+                            "fileLoadDuration": [
+                              422
+                            ],
+                            "fileSystemInitDuration": [
+                              453
+                            ]
+                          },
+                          "format": "delimited"
+                        }
+                      },
+                      "sinkProcessingTime": 1741
+                    }
+                  },
+                  "clusterComputeId": "6e5b541c-042b-4b7b-a7b2-d397e4972892",
+                  "dsl": "\nsource() ~> Source\n\nSource derive() ~> DerivedColumns\n\nDerivedColumns sink() ~> Sink"
+                },
+                "effectiveIntegrationRuntime": "AutoResolveIntegrationRuntime (Central India)",
+                "billingReference": {
+                  "activityType": "executedataflow",
+                  "billableDuration": [
+                    {
+                      "meterType": "General",
+                      "duration": 0.036938041666666664,
+                      "unit": "coreHour",
+                      "sessionType": "JobCluster"
+                    }
+                  ]
+                },
+                "reportLineageToPurview": {
+                  "status": "NotReported"
+                }
+              },
+              "error": {
+                "errorCode": "",
+                "message": "",
+                "failureType": "",
+                "target": "DataFlowActivity",
+                "details": ""
+              }
+            }
+          ],
+          "errors": [],
+          "flags": [],
+          "resources": {
+            "data_moved_bytes": 0,
+            "data_moved_display": "0 B",
+            "compute_units": [],
+            "activity_types": [
+              "ExecuteDataFlow"
+            ],
+            "data_flows": []
+          }
+        },
+        {
+          "run_id": "83ed79cb-b738-4a69-9ce6-90a02ec55213",
+          "status": "Failed",
+          "started_at": "2026-03-30T20:22:46.214245+00:00",
+          "ended_at": "2026-03-30T20:23:08.602728+00:00",
+          "duration_s": 22.4,
+          "duration_display": "22s",
+          "activities": [
+            {
+              "activity_name": "DataFlowActivity",
+              "activity_type": "ExecuteDataFlow",
+              "status": "Failed",
+              "started_at": "2026-03-30T20:22:53.847084+00:00",
+              "ended_at": "2026-03-30T20:23:07.648183+00:00",
+              "duration_s": 13.8,
+              "duration_display": "13s",
+              "input": {
+                "dataflow": {
+                  "referenceName": "DF_Pipeline_Silver_to_Gold_20260330201841",
+                  "type": "DataFlowReference"
+                },
+                "compute": {
+                  "coreCount": 4,
+                  "computeType": "General"
+                },
+                "staging": {
+                  "linkedService": {
+                    "referenceName": "LS_Blob_Storage",
+                    "type": "LinkedServiceReference"
+                  }
+                },
+                "dataFlowETag": "34001018-0000-2000-0000-69cadaac0000"
+              },
+              "output": {
+                "runStatus": {
+                  "idleTimeBeforeCurrentJob": 24594,
+                  "sparkVersion": "3.4",
+                  "computeAcquisitionDuration": 4677,
+                  "version": "20260305.6",
+                  "profile": {},
+                  "metrics": {
+                    "Sink": {
+                      "format": "delimited",
+                      "stages": [
+                        {
+                          "recordsWritten": 0,
+                          "lastUpdateTime": "",
+                          "bytesWritten": 0,
+                          "recordsRead": 0,
+                          "bytesRead": 0,
+                          "streams": {
+                            "Sink": {
+                              "count": 0,
+                              "cached": false,
+                              "totalPartitions": 0,
+                              "partitionStatus": "Success",
+                              "partitionCounts": [],
+                              "type": "sink"
+                            },
+                            "DerivedColumns": {
+                              "count": 0,
+                              "cached": false,
+                              "totalPartitions": 0,
+                              "partitionStatus": "Success",
+                              "partitionCounts": [],
+                              "type": "derive"
+                            },
+                            "Source": {
+                              "count": 0,
+                              "cached": false,
+                              "totalPartitions": 0,
+                              "partitionStatus": "Success",
+                              "partitionCounts": [],
+                              "type": "source"
+                            }
+                          },
+                          "target": "Sink",
+                          "time": 0,
+                          "progressState": ""
+                        }
+                      ],
+                      "sinkPostProcessingTime": 0,
+                      "store": "blob",
+                      "rowsWritten": 0,
+                      "details": {},
+                      "progressState": {},
+                      "sources": {
+                        "Source": {
+                          "rowsRead": 0,
+                          "store": "blob",
+                          "details": {
+                            "pathResolutionDuration": [
+                              38
+                            ],
+                            "fileSystemInitDuration": [
+                              39
+                            ]
+                          },
+                          "format": "delimited"
+                        }
+                      },
+                      "sinkProcessingTime": 0
+                    }
+                  },
+                  "clusterComputeId": "04feac56-758f-4961-9a06-0f8c527e76c9",
+                  "dsl": "\nsource() ~> Source\n\nSource derive() ~> DerivedColumns\n\nDerivedColumns sink() ~> Sink"
+                },
+                "effectiveIntegrationRuntime": "AutoResolveIntegrationRuntime (Central India)",
+                "billingReference": {
+                  "activityType": "executedataflow",
+                  "billableDuration": [
+                    {
+                      "meterType": "General",
+                      "duration": 0.03942718533333334,
+                      "unit": "coreHour",
+                      "sessionType": "JobCluster"
+                    }
+                  ]
+                },
+                "reportLineageToPurview": {
+                  "status": "NotReported"
+                }
+              },
+              "error": {
+                "message": "{\"StatusCode\":\"DF-Executor-InvalidPath\",\"Message\":\"Job failed due to reason: at Source 'Source': Path /staged.csv does not resolve to any file(s). Please make sure the file/folder exists and is not hidden. At the same time, please ensure special character is not included in file/folder name, for example, name starting with _\",\"Details\":\"\"}",
+                "failureType": "UserError",
+                "target": "DataFlowActivity"
+              }
+            }
+          ],
+          "errors": [
+            {
+              "activity": "DataFlowActivity",
+              "type": "ExecuteDataFlow",
+              "error_code": "N/A",
+              "message": "{\"StatusCode\":\"DF-Executor-InvalidPath\",\"Message\":\"Job failed due to reason: at Source 'Source': Path /staged.csv does not resolve to any file(s). Please make sure the file/folder exists and is not hidden. At the same time, please ensure special character is not included in file/folder name, for example, name starting with _\",\"Details\":\"\"}",
+              "category": "UserError"
+            }
+          ],
+          "flags": [
+            "failed"
+          ],
+          "resources": {
+            "data_moved_bytes": 0,
+            "data_moved_display": "0 B",
+            "compute_units": [],
+            "activity_types": [
+              "ExecuteDataFlow"
+            ],
+            "data_flows": []
+          }
+        },
+        {
+          "run_id": "ac174ab8-80e0-4253-ac28-c0b78c15786d",
+          "status": "Failed",
+          "started_at": "2026-03-30T17:42:10.510132+00:00",
+          "ended_at": "2026-03-30T17:42:26.343335+00:00",
+          "duration_s": 15.8,
+          "duration_display": "15s",
+          "activities": [
+            {
+              "activity_name": "DataFlowActivity",
+              "activity_type": "ExecuteDataFlow",
+              "status": "Failed",
+              "started_at": "2026-03-30T17:42:18.199070+00:00",
+              "ended_at": "2026-03-30T17:42:25.386914+00:00",
+              "duration_s": 7.2,
+              "duration_display": "7s",
+              "input": {
+                "dataflow": {
+                  "referenceName": "DF_Pipeline_Silver_to_Gold_20260330173603",
+                  "type": "DataFlowReference"
+                },
+                "compute": {
+                  "coreCount": 4,
+                  "computeType": "General"
+                },
+                "staging": {
+                  "linkedService": {
+                    "referenceName": "LS_Blob_Storage",
+                    "type": "LinkedServiceReference"
+                  }
+                },
+                "dataFlowETag": "3300f326-0000-2000-0000-69cab48e0000"
+              },
+              "output": {
+                "runStatus": {
+                  "idleTimeBeforeCurrentJob": 19464,
+                  "sparkVersion": "3.4",
+                  "computeAcquisitionDuration": 847,
+                  "version": "20260305.6",
+                  "profile": {},
+                  "metrics": {
+                    "Sink": {
+                      "format": "delimited",
+                      "stages": [
+                        {
+                          "recordsWritten": 0,
+                          "lastUpdateTime": "",
+                          "bytesWritten": 0,
+                          "recordsRead": 0,
+                          "bytesRead": 0,
+                          "streams": {
+                            "Sink": {
+                              "count": 0,
+                              "cached": false,
+                              "totalPartitions": 0,
+                              "partitionStatus": "Success",
+                              "partitionCounts": [],
+                              "type": "sink"
+                            },
+                            "DerivedColumns": {
+                              "count": 0,
+                              "cached": false,
+                              "totalPartitions": 0,
+                              "partitionStatus": "Success",
+                              "partitionCounts": [],
+                              "type": "derive"
+                            },
+                            "Source": {
+                              "count": 0,
+                              "cached": false,
+                              "totalPartitions": 0,
+                              "partitionStatus": "Success",
+                              "partitionCounts": [],
+                              "type": "source"
+                            }
+                          },
+                          "target": "Sink",
+                          "time": 0,
+                          "progressState": ""
+                        }
+                      ],
+                      "sinkPostProcessingTime": 0,
+                      "store": "blob",
+                      "rowsWritten": 0,
+                      "details": {},
+                      "progressState": {},
+                      "sources": {
+                        "Source": {
+                          "rowsRead": 0,
+                          "store": "blob",
+                          "details": {
+                            "pathResolutionDuration": [
+                              34
+                            ],
+                            "fileSystemInitDuration": [
+                              35
+                            ]
+                          },
+                          "format": "delimited"
+                        }
+                      },
+                      "sinkProcessingTime": 0
+                    }
+                  },
+                  "clusterComputeId": "47376898-487d-4698-8e62-1d7a448f777b",
+                  "dsl": "\nsource() ~> Source\n\nSource derive() ~> DerivedColumns\n\nDerivedColumns sink() ~> Sink"
+                },
+                "effectiveIntegrationRuntime": "AutoResolveIntegrationRuntime (Central India)",
+                "billingReference": {
+                  "activityType": "executedataflow",
+                  "billableDuration": [
+                    {
+                      "meterType": "General",
+                      "duration": 0.02625080388888889,
+                      "unit": "coreHour",
+                      "sessionType": "JobCluster"
+                    }
+                  ]
+                },
+                "reportLineageToPurview": {
+                  "status": "NotReported"
+                }
+              },
+              "error": {
+                "message": "{\"StatusCode\":\"DF-Executor-InvalidPath\",\"Message\":\"Job failed due to reason: at Source 'Source': Path /staged.csv does not resolve to any file(s). Please make sure the file/folder exists and is not hidden. At the same time, please ensure special character is not included in file/folder name, for example, name starting with _\",\"Details\":\"\"}",
+                "failureType": "UserError",
+                "target": "DataFlowActivity"
+              }
+            }
+          ],
+          "errors": [
+            {
+              "activity": "DataFlowActivity",
+              "type": "ExecuteDataFlow",
+              "error_code": "N/A",
+              "message": "{\"StatusCode\":\"DF-Executor-InvalidPath\",\"Message\":\"Job failed due to reason: at Source 'Source': Path /staged.csv does not resolve to any file(s). Please make sure the file/folder exists and is not hidden. At the same time, please ensure special character is not included in file/folder name, for example, name starting with _\",\"Details\":\"\"}",
+              "category": "UserError"
+            }
+          ],
+          "flags": [
+            "failed"
+          ],
+          "resources": {
+            "data_moved_bytes": 0,
+            "data_moved_display": "0 B",
+            "compute_units": [],
+            "activity_types": [
+              "ExecuteDataFlow"
+            ],
+            "data_flows": []
+          }
+        },
+        {
+          "run_id": "0688924f-6e3e-4fcc-88fd-ec2a1d5116b5",
+          "status": "Failed",
+          "started_at": "2026-03-30T17:11:54.143490+00:00",
+          "ended_at": "2026-03-30T17:12:13.373643+00:00",
+          "duration_s": 19.2,
+          "duration_display": "19s",
+          "activities": [
+            {
+              "activity_name": "DataFlowActivity",
+              "activity_type": "ExecuteDataFlow",
+              "status": "Failed",
+              "started_at": "2026-03-30T17:12:02.043822+00:00",
+              "ended_at": "2026-03-30T17:12:12.487354+00:00",
+              "duration_s": 10.4,
+              "duration_display": "10s",
+              "input": {
+                "dataflow": {
+                  "referenceName": "DF_Pipeline_Silver_to_Gold_20260330170744",
+                  "type": "DataFlowReference"
+                },
+                "compute": {
+                  "coreCount": 4,
+                  "computeType": "General"
+                },
+                "staging": {
+                  "linkedService": {
+                    "referenceName": "LS_Blob_Storage",
+                    "type": "LinkedServiceReference"
+                  }
+                },
+                "dataFlowETag": "3200e3f9-0000-2000-0000-69caadeb0000"
+              },
+              "output": {
+                "runStatus": {
+                  "idleTimeBeforeCurrentJob": 20081,
+                  "sparkVersion": "3.4",
+                  "computeAcquisitionDuration": 3304,
+                  "version": "20260305.6",
+                  "profile": {},
+                  "metrics": {
+                    "Sink": {
+                      "format": "delimited",
+                      "stages": [
+                        {
+                          "recordsWritten": 0,
+                          "lastUpdateTime": "",
+                          "bytesWritten": 0,
+                          "recordsRead": 0,
+                          "bytesRead": 0,
+                          "streams": {
+                            "Sink": {
+                              "count": 0,
+                              "cached": false,
+                              "totalPartitions": 0,
+                              "partitionStatus": "Success",
+                              "partitionCounts": [],
+                              "type": "sink"
+                            },
+                            "DerivedColumns": {
+                              "count": 0,
+                              "cached": false,
+                              "totalPartitions": 0,
+                              "partitionStatus": "Success",
+                              "partitionCounts": [],
+                              "type": "derive"
+                            },
+                            "Source": {
+                              "count": 0,
+                              "cached": false,
+                              "totalPartitions": 0,
+                              "partitionStatus": "Success",
+                              "partitionCounts": [],
+                              "type": "source"
+                            }
+                          },
+                          "target": "Sink",
+                          "time": 0,
+                          "progressState": ""
+                        }
+                      ],
+                      "sinkPostProcessingTime": 0,
+                      "store": "blob",
+                      "rowsWritten": 0,
+                      "details": {},
+                      "progressState": {},
+                      "sources": {
+                        "Source": {
+                          "rowsRead": 0,
+                          "store": "blob",
+                          "details": {
+                            "pathResolutionDuration": [
+                              61
+                            ],
+                            "fileSystemInitDuration": [
+                              62
+                            ]
+                          },
+                          "format": "delimited"
+                        }
+                      },
+                      "sinkProcessingTime": 0
+                    }
+                  },
+                  "clusterComputeId": "99aa5de0-eb67-4ab1-9d70-393a0d2e317c",
+                  "dsl": "\nsource() ~> Source\n\nSource derive() ~> DerivedColumns\n\nDerivedColumns sink() ~> Sink"
+                },
+                "effectiveIntegrationRuntime": "AutoResolveIntegrationRuntime (Central India)",
+                "billingReference": {
+                  "activityType": "executedataflow",
+                  "billableDuration": [
+                    {
+                      "meterType": "General",
+                      "duration": 0.02915872811111111,
+                      "unit": "coreHour",
+                      "sessionType": "JobCluster"
+                    }
+                  ]
+                },
+                "reportLineageToPurview": {
+                  "status": "NotReported"
+                }
+              },
+              "error": {
+                "message": "{\"StatusCode\":\"DF-Executor-InvalidPath\",\"Message\":\"Job failed due to reason: at Source 'Source': Path /staged.csv does not resolve to any file(s). Please make sure the file/folder exists and is not hidden. At the same time, please ensure special character is not included in file/folder name, for example, name starting with _\",\"Details\":\"\"}",
+                "failureType": "UserError",
+                "target": "DataFlowActivity"
+              }
+            }
+          ],
+          "errors": [
+            {
+              "activity": "DataFlowActivity",
+              "type": "ExecuteDataFlow",
+              "error_code": "N/A",
+              "message": "{\"StatusCode\":\"DF-Executor-InvalidPath\",\"Message\":\"Job failed due to reason: at Source 'Source': Path /staged.csv does not resolve to any file(s). Please make sure the file/folder exists and is not hidden. At the same time, please ensure special character is not included in file/folder name, for example, name starting with _\",\"Details\":\"\"}",
+              "category": "UserError"
+            }
+          ],
+          "flags": [
+            "failed"
+          ],
+          "resources": {
+            "data_moved_bytes": 0,
+            "data_moved_display": "0 B",
+            "compute_units": [],
+            "activity_types": [
+              "ExecuteDataFlow"
+            ],
+            "data_flows": []
+          }
+        }
+      ],
+      "anomalies": [],
+      "resources": {
+        "total_data_moved_bytes": 0,
+        "total_data_moved_display": "0 B",
+        "compute_units_used": [],
+        "activity_type_counts": {
+          "ExecuteDataFlow": 4
+        },
+        "cloud_compute": {}
+      },
+      "stats": {
+        "mean_s": 19.2,
+        "median_s": 19.2,
+        "stdev_s": 2.7,
+        "min_s": 15.8,
+        "max_s": 22.4
+      }
+    },
     "Pipeline_Bronze_to_Silver": {
       "name": "Pipeline_Bronze_to_Silver",
       "runs": [
+        {
+          "run_id": "f1356e2f-986a-4786-9e96-063a3e4b188d",
+          "status": "Succeeded",
+          "started_at": "2026-03-30T21:05:48.274067+00:00",
+          "ended_at": "2026-03-30T21:08:42.998143+00:00",
+          "duration_s": 174.7,
+          "duration_display": "2m 54s",
+          "activities": [
+            {
+              "activity_name": "DataFlowActivity",
+              "activity_type": "ExecuteDataFlow",
+              "status": "Succeeded",
+              "started_at": "2026-03-30T21:05:55.968647+00:00",
+              "ended_at": "2026-03-30T21:08:42.029244+00:00",
+              "duration_s": 166.1,
+              "duration_display": "2m 46s",
+              "input": {
+                "dataflow": {
+                  "referenceName": "DF_Pipeline_Bronze_to_Silver_20260330210431",
+                  "type": "DataFlowReference"
+                },
+                "compute": {
+                  "coreCount": 4,
+                  "computeType": "General"
+                },
+                "staging": {
+                  "linkedService": {
+                    "referenceName": "LS_Blob_Storage",
+                    "type": "LinkedServiceReference"
+                  }
+                },
+                "dataFlowETag": "34007f44-0000-2000-0000-69cae5690000"
+              },
+              "output": {
+                "runStatus": {
+                  "idleTimeBeforeCurrentJob": 0,
+                  "sparkVersion": "3.4",
+                  "computeAcquisitionDuration": 144123,
+                  "version": "20260305.6",
+                  "profile": {
+                    "Source": {
+                      "computed": [],
+                      "lineage": {},
+                      "dropped": 0,
+                      "drifted": 0,
+                      "newer": 17,
+                      "total": 17,
+                      "updated": 0
+                    },
+                    "FilterRows": {
+                      "computed": [],
+                      "lineage": {},
+                      "dropped": 0,
+                      "drifted": 0,
+                      "newer": 0,
+                      "total": 17,
+                      "updated": 0
+                    },
+                    "DerivedColumns": {
+                      "computed": [],
+                      "lineage": {},
+                      "dropped": 0,
+                      "drifted": 0,
+                      "newer": 1,
+                      "total": 18,
+                      "updated": 0
+                    },
+                    "Sink": {
+                      "computed": [
+                        {
+                          "source": "Source",
+                          "columns": [
+                            "eggs"
+                          ]
+                        }
+                      ],
+                      "lineage": {
+                        "aquatic": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "aquatic"
+                              ]
+                            }
+                          ]
+                        },
+                        "toothed": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "toothed"
+                              ]
+                            }
+                          ]
+                        },
+                        "domestic": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "domestic"
+                              ]
+                            }
+                          ]
+                        },
+                        "hair": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "hair"
+                              ]
+                            }
+                          ]
+                        },
+                        "processed_time": {
+                          "mapped": false,
+                          "from": [
+                            {
+                              "source": "DerivedColumns",
+                              "columns": [
+                                "processed_time"
+                              ]
+                            }
+                          ]
+                        },
+                        "eggs": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "eggs"
+                              ]
+                            }
+                          ]
+                        },
+                        "milk": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "milk"
+                              ]
+                            }
+                          ]
+                        },
+                        "airborne": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "airborne"
+                              ]
+                            }
+                          ]
+                        },
+                        "feathers": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "feathers"
+                              ]
+                            }
+                          ]
+                        },
+                        "tail": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "tail"
+                              ]
+                            }
+                          ]
+                        },
+                        "animal_name": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "animal_name"
+                              ]
+                            }
+                          ]
+                        },
+                        "backbone": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "backbone"
+                              ]
+                            }
+                          ]
+                        },
+                        "catsize": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "catsize"
+                              ]
+                            }
+                          ]
+                        },
+                        "breathes": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "breathes"
+                              ]
+                            }
+                          ]
+                        },
+                        "legs": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "legs"
+                              ]
+                            }
+                          ]
+                        },
+                        "predator": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "predator"
+                              ]
+                            }
+                          ]
+                        },
+                        "fins": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "fins"
+                              ]
+                            }
+                          ]
+                        },
+                        "venomous": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "venomous"
+                              ]
+                            }
+                          ]
+                        }
+                      },
+                      "dropped": 0,
+                      "drifted": 0,
+                      "newer": 0,
+                      "total": 18,
+                      "updated": 18
+                    }
+                  },
+                  "metrics": {
+                    "Sink": {
+                      "format": "delimited",
+                      "stages": [
+                        {
+                          "stage": 1,
+                          "partitionTimes": [
+                            1109
+                          ],
+                          "recordsWritten": 59,
+                          "lastUpdateTime": "2026-03-30 21:08:39.548",
+                          "bytesWritten": 3611,
+                          "recordsRead": 101,
+                          "bytesRead": 7592,
+                          "partitionStatus": "Success",
+                          "streams": {
+                            "FilterRows": {
+                              "count": 59,
+                              "cached": false,
+                              "totalPartitions": 1,
+                              "partitionStatus": "Success",
+                              "partitionCounts": [
+                                59
+                              ],
+                              "type": "filter"
+                            },
+                            "Sink": {
+                              "count": 59,
+                              "cached": false,
+                              "totalPartitions": 1,
+                              "partitionStatus": "Success",
+                              "partitionCounts": [
+                                59
+                              ],
+                              "type": "sink"
+                            },
+                            "Source": {
+                              "count": 101,
+                              "cached": false,
+                              "totalPartitions": 1,
+                              "partitionStatus": "Success",
+                              "partitionCounts": [
+                                101
+                              ],
+                              "type": "source"
+                            },
+                            "DerivedColumns": {
+                              "count": 59,
+                              "cached": false,
+                              "totalPartitions": 1,
+                              "partitionStatus": "Success",
+                              "partitionCounts": [
+                                59
+                              ],
+                              "type": "derive"
+                            }
+                          },
+                          "target": "Sink",
+                          "time": 1596,
+                          "progressState": "Completed"
+                        }
+                      ],
+                      "sinkPostProcessingTime": 0,
+                      "store": "blob",
+                      "rowsWritten": 59,
+                      "details": {
+                        "preCommandsDuration": [
+                          0
+                        ],
+                        "mergeDuration": [
+                          138
+                        ],
+                        "postCommandsDuration": [
+                          2
+                        ]
+                      },
+                      "progressState": "Completed",
+                      "sources": {
+                        "Source": {
+                          "rowsRead": 101,
+                          "store": "blob",
+                          "details": {
+                            "pathResolutionDuration": [
+                              88
+                            ],
+                            "fileReadCount": [
+                              1
+                            ],
+                            "fileLoadDuration": [
+                              6692
+                            ],
+                            "fileSystemInitDuration": [
+                              6862
+                            ]
+                          },
+                          "format": "delimited"
+                        }
+                      },
+                      "sinkProcessingTime": 3040
+                    }
+                  },
+                  "clusterComputeId": "6e5b541c-042b-4b7b-a7b2-d397e4972892",
+                  "dsl": "\nsource() ~> Source\n\nSource filter() ~> FilterRows\n\nFilterRows derive() ~> DerivedColumns\n\nDerivedColumns sink() ~> Sink",
+                  "integrationRuntimeName": "General-4-1-ea9ae997-a120-4da6-8d2c-a42495d8ad87",
+                  "sparkRunId": "54"
+                },
+                "effectiveIntegrationRuntime": "AutoResolveIntegrationRuntime (Central India)",
+                "billingReference": {
+                  "activityType": "executedataflow",
+                  "billableDuration": [
+                    {
+                      "meterType": "General",
+                      "duration": 0.1711506108888889,
+                      "unit": "coreHour",
+                      "sessionType": "JobCluster"
+                    }
+                  ]
+                },
+                "reportLineageToPurview": {
+                  "status": "NotReported"
+                }
+              },
+              "error": {
+                "errorCode": "",
+                "message": "",
+                "failureType": "",
+                "target": "DataFlowActivity",
+                "details": ""
+              }
+            }
+          ],
+          "errors": [],
+          "flags": [],
+          "resources": {
+            "data_moved_bytes": 0,
+            "data_moved_display": "0 B",
+            "compute_units": [],
+            "activity_types": [
+              "ExecuteDataFlow"
+            ],
+            "data_flows": []
+          }
+        },
+        {
+          "run_id": "d38951d2-6eb0-4796-a7ce-353bcad2cd6b",
+          "status": "Failed",
+          "started_at": "2026-03-30T20:58:26.748420+00:00",
+          "ended_at": "2026-03-30T21:01:14.895594+00:00",
+          "duration_s": 168.1,
+          "duration_display": "2m 48s",
+          "activities": [
+            {
+              "activity_name": "DataFlowActivity",
+              "activity_type": "ExecuteDataFlow",
+              "status": "Failed",
+              "started_at": "2026-03-30T20:58:34.065776+00:00",
+              "ended_at": "2026-03-30T21:01:13.885148+00:00",
+              "duration_s": 159.8,
+              "duration_display": "2m 39s",
+              "input": {
+                "dataflow": {
+                  "referenceName": "DF_Pipeline_Bronze_to_Silver_20260330205708",
+                  "type": "DataFlowReference"
+                },
+                "compute": {
+                  "coreCount": 4,
+                  "computeType": "General"
+                },
+                "staging": {
+                  "linkedService": {
+                    "referenceName": "LS_Blob_Storage",
+                    "type": "LinkedServiceReference"
+                  }
+                },
+                "dataFlowETag": "3400013a-0000-2000-0000-69cae3b00000"
+              },
+              "output": {
+                "runStatus": {
+                  "idleTimeBeforeCurrentJob": 0,
+                  "sparkVersion": "3.4",
+                  "computeAcquisitionDuration": 142612,
+                  "version": "20260305.6",
+                  "profile": {},
+                  "metrics": {
+                    "Sink": {
+                      "format": "delimited",
+                      "stages": [
+                        {
+                          "recordsWritten": 0,
+                          "lastUpdateTime": "",
+                          "bytesWritten": 0,
+                          "recordsRead": 0,
+                          "bytesRead": 0,
+                          "streams": {
+                            "Sink": {
+                              "count": 0,
+                              "cached": false,
+                              "totalPartitions": 0,
+                              "partitionStatus": "Success",
+                              "partitionCounts": [],
+                              "type": "sink"
+                            },
+                            "DerivedColumns": {
+                              "count": 0,
+                              "cached": false,
+                              "totalPartitions": 0,
+                              "partitionStatus": "Success",
+                              "partitionCounts": [],
+                              "type": "derive"
+                            },
+                            "Source": {
+                              "count": 0,
+                              "cached": false,
+                              "totalPartitions": 0,
+                              "partitionStatus": "Success",
+                              "partitionCounts": [],
+                              "type": "source"
+                            },
+                            "FilterRows": {
+                              "count": 0,
+                              "cached": false,
+                              "totalPartitions": 0,
+                              "partitionStatus": "Success",
+                              "partitionCounts": [],
+                              "type": "filter"
+                            }
+                          },
+                          "target": "Sink",
+                          "time": 0,
+                          "progressState": ""
+                        }
+                      ],
+                      "sinkPostProcessingTime": 0,
+                      "store": "blob",
+                      "rowsWritten": 0,
+                      "details": {},
+                      "progressState": {},
+                      "sources": {
+                        "Source": {
+                          "rowsRead": 0,
+                          "store": "blob",
+                          "details": {
+                            "pathResolutionDuration": [
+                              42
+                            ],
+                            "fileSystemInitDuration": [
+                              57
+                            ]
+                          },
+                          "format": "delimited"
+                        }
+                      },
+                      "sinkProcessingTime": 0
+                    }
+                  },
+                  "clusterComputeId": "d55bd37c-22a3-42b5-8a17-cefb49eb920a",
+                  "dsl": "\nsource() ~> Source\n\nSource filter() ~> FilterRows\n\nFilterRows derive() ~> DerivedColumns\n\nDerivedColumns sink() ~> Sink",
+                  "integrationRuntimeName": "General-4-1-ea9ae997-a120-4da6-8d2c-a42495d8ad87",
+                  "sparkRunId": "53"
+                },
+                "effectiveIntegrationRuntime": "AutoResolveIntegrationRuntime (Central India)",
+                "billingReference": {
+                  "activityType": "executedataflow",
+                  "billableDuration": [
+                    {
+                      "meterType": "General",
+                      "duration": 0.15824994622222222,
+                      "unit": "coreHour",
+                      "sessionType": "JobCluster"
+                    }
+                  ]
+                },
+                "reportLineageToPurview": {
+                  "status": "NotReported"
+                }
+              },
+              "error": {
+                "message": "{\"StatusCode\":\"DF-Executor-InvalidPath\",\"Message\":\"Job failed due to reason: at Source 'Source': Path /\\\\*.csv does not resolve to any file(s). Please make sure the file/folder exists and is not hidden. At the same time, please ensure special character is not included in file/folder name, for example, name starting with _\",\"Details\":\"\"}",
+                "failureType": "UserError",
+                "target": "DataFlowActivity"
+              }
+            }
+          ],
+          "errors": [
+            {
+              "activity": "DataFlowActivity",
+              "type": "ExecuteDataFlow",
+              "error_code": "N/A",
+              "message": "{\"StatusCode\":\"DF-Executor-InvalidPath\",\"Message\":\"Job failed due to reason: at Source 'Source': Path /\\\\*.csv does not resolve to any file(s). Please make sure the file/folder exists and is not hidden. At the same time, please ensure special character is not included in file/folder name, for example, name starting with _\",\"Details\":\"\"}",
+              "category": "UserError"
+            }
+          ],
+          "flags": [
+            "failed"
+          ],
+          "resources": {
+            "data_moved_bytes": 0,
+            "data_moved_display": "0 B",
+            "compute_units": [],
+            "activity_types": [
+              "ExecuteDataFlow"
+            ],
+            "data_flows": []
+          }
+        },
+        {
+          "run_id": "b501d4d6-b288-4578-9382-f697bcc15344",
+          "status": "Succeeded",
+          "started_at": "2026-03-30T20:19:43.344992+00:00",
+          "ended_at": "2026-03-30T20:22:41.706881+00:00",
+          "duration_s": 178.4,
+          "duration_display": "2m 58s",
+          "activities": [
+            {
+              "activity_name": "DataFlowActivity",
+              "activity_type": "ExecuteDataFlow",
+              "status": "Succeeded",
+              "started_at": "2026-03-30T20:19:51.002747+00:00",
+              "ended_at": "2026-03-30T20:22:40.941719+00:00",
+              "duration_s": 169.9,
+              "duration_display": "2m 49s",
+              "input": {
+                "dataflow": {
+                  "referenceName": "DF_Pipeline_Bronze_to_Silver_20260330201823",
+                  "type": "DataFlowReference"
+                },
+                "compute": {
+                  "coreCount": 4,
+                  "computeType": "General"
+                },
+                "staging": {
+                  "linkedService": {
+                    "referenceName": "LS_Blob_Storage",
+                    "type": "LinkedServiceReference"
+                  }
+                },
+                "dataFlowETag": "3400d317-0000-2000-0000-69cada9a0000"
+              },
+              "output": {
+                "runStatus": {
+                  "idleTimeBeforeCurrentJob": 0,
+                  "sparkVersion": "3.4",
+                  "computeAcquisitionDuration": 148701,
+                  "version": "20260305.6",
+                  "profile": {
+                    "Source": {
+                      "computed": [],
+                      "lineage": {},
+                      "dropped": 0,
+                      "drifted": 0,
+                      "newer": 17,
+                      "total": 17,
+                      "updated": 0
+                    },
+                    "FilterRows": {
+                      "computed": [],
+                      "lineage": {},
+                      "dropped": 0,
+                      "drifted": 0,
+                      "newer": 0,
+                      "total": 17,
+                      "updated": 0
+                    },
+                    "DerivedColumns": {
+                      "computed": [],
+                      "lineage": {},
+                      "dropped": 0,
+                      "drifted": 0,
+                      "newer": 1,
+                      "total": 18,
+                      "updated": 0
+                    },
+                    "Sink": {
+                      "computed": [
+                        {
+                          "source": "Source",
+                          "columns": [
+                            "eggs"
+                          ]
+                        }
+                      ],
+                      "lineage": {
+                        "aquatic": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "aquatic"
+                              ]
+                            }
+                          ]
+                        },
+                        "toothed": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "toothed"
+                              ]
+                            }
+                          ]
+                        },
+                        "domestic": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "domestic"
+                              ]
+                            }
+                          ]
+                        },
+                        "hair": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "hair"
+                              ]
+                            }
+                          ]
+                        },
+                        "processed_time": {
+                          "mapped": false,
+                          "from": [
+                            {
+                              "source": "DerivedColumns",
+                              "columns": [
+                                "processed_time"
+                              ]
+                            }
+                          ]
+                        },
+                        "eggs": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "eggs"
+                              ]
+                            }
+                          ]
+                        },
+                        "milk": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "milk"
+                              ]
+                            }
+                          ]
+                        },
+                        "airborne": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "airborne"
+                              ]
+                            }
+                          ]
+                        },
+                        "feathers": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "feathers"
+                              ]
+                            }
+                          ]
+                        },
+                        "tail": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "tail"
+                              ]
+                            }
+                          ]
+                        },
+                        "animal_name": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "animal_name"
+                              ]
+                            }
+                          ]
+                        },
+                        "backbone": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "backbone"
+                              ]
+                            }
+                          ]
+                        },
+                        "catsize": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "catsize"
+                              ]
+                            }
+                          ]
+                        },
+                        "breathes": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "breathes"
+                              ]
+                            }
+                          ]
+                        },
+                        "legs": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "legs"
+                              ]
+                            }
+                          ]
+                        },
+                        "predator": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "predator"
+                              ]
+                            }
+                          ]
+                        },
+                        "fins": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "fins"
+                              ]
+                            }
+                          ]
+                        },
+                        "venomous": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "venomous"
+                              ]
+                            }
+                          ]
+                        }
+                      },
+                      "dropped": 0,
+                      "drifted": 0,
+                      "newer": 0,
+                      "total": 18,
+                      "updated": 18
+                    }
+                  },
+                  "metrics": {
+                    "Sink": {
+                      "format": "delimited",
+                      "stages": [
+                        {
+                          "stage": 1,
+                          "partitionTimes": [
+                            1395
+                          ],
+                          "recordsWritten": 59,
+                          "lastUpdateTime": "2026-03-30 20:22:38.100",
+                          "bytesWritten": 3611,
+                          "recordsRead": 101,
+                          "bytesRead": 7592,
+                          "partitionStatus": "Success",
+                          "streams": {
+                            "FilterRows": {
+                              "count": 59,
+                              "cached": false,
+                              "totalPartitions": 1,
+                              "partitionStatus": "Success",
+                              "partitionCounts": [
+                                59
+                              ],
+                              "type": "filter"
+                            },
+                            "Sink": {
+                              "count": 59,
+                              "cached": false,
+                              "totalPartitions": 1,
+                              "partitionStatus": "Success",
+                              "partitionCounts": [
+                                59
+                              ],
+                              "type": "sink"
+                            },
+                            "Source": {
+                              "count": 101,
+                              "cached": false,
+                              "totalPartitions": 1,
+                              "partitionStatus": "Success",
+                              "partitionCounts": [
+                                101
+                              ],
+                              "type": "source"
+                            },
+                            "DerivedColumns": {
+                              "count": 59,
+                              "cached": false,
+                              "totalPartitions": 1,
+                              "partitionStatus": "Success",
+                              "partitionCounts": [
+                                59
+                              ],
+                              "type": "derive"
+                            }
+                          },
+                          "target": "Sink",
+                          "time": 1866,
+                          "progressState": "Completed"
+                        }
+                      ],
+                      "sinkPostProcessingTime": 0,
+                      "store": "blob",
+                      "rowsWritten": 59,
+                      "details": {
+                        "preCommandsDuration": [
+                          0
+                        ],
+                        "mergeDuration": [
+                          132
+                        ],
+                        "postCommandsDuration": [
+                          0
+                        ]
+                      },
+                      "progressState": "Completed",
+                      "sources": {
+                        "Source": {
+                          "rowsRead": 101,
+                          "store": "blob",
+                          "details": {
+                            "pathResolutionDuration": [
+                              122
+                            ],
+                            "fileReadCount": [
+                              1
+                            ],
+                            "fileLoadDuration": [
+                              6528
+                            ],
+                            "fileSystemInitDuration": [
+                              6712
+                            ]
+                          },
+                          "format": "delimited"
+                        }
+                      },
+                      "sinkProcessingTime": 3078
+                    }
+                  },
+                  "clusterComputeId": "04feac56-758f-4961-9a06-0f8c527e76c9",
+                  "dsl": "\nsource() ~> Source\n\nSource filter() ~> FilterRows\n\nFilterRows derive() ~> DerivedColumns\n\nDerivedColumns sink() ~> Sink",
+                  "integrationRuntimeName": "General-4-1-ea9ae997-a120-4da6-8d2c-a42495d8ad87",
+                  "sparkRunId": "52"
+                },
+                "effectiveIntegrationRuntime": "AutoResolveIntegrationRuntime (Central India)",
+                "billingReference": {
+                  "activityType": "executedataflow",
+                  "billableDuration": [
+                    {
+                      "meterType": "General",
+                      "duration": 0.17759202544444444,
+                      "unit": "coreHour",
+                      "sessionType": "JobCluster"
+                    }
+                  ]
+                },
+                "reportLineageToPurview": {
+                  "status": "NotReported"
+                }
+              },
+              "error": {
+                "errorCode": "",
+                "message": "",
+                "failureType": "",
+                "target": "DataFlowActivity",
+                "details": ""
+              }
+            }
+          ],
+          "errors": [],
+          "flags": [],
+          "resources": {
+            "data_moved_bytes": 0,
+            "data_moved_display": "0 B",
+            "compute_units": [],
+            "activity_types": [
+              "ExecuteDataFlow"
+            ],
+            "data_flows": []
+          }
+        },
+        {
+          "run_id": "487ae80f-3b55-4b16-b24a-d9a74bbb882c",
+          "status": "Succeeded",
+          "started_at": "2026-03-30T17:37:14.833166+00:00",
+          "ended_at": "2026-03-30T17:42:06.342754+00:00",
+          "duration_s": 291.5,
+          "duration_display": "4m 51s",
+          "activities": [
+            {
+              "activity_name": "DataFlowActivity",
+              "activity_type": "ExecuteDataFlow",
+              "status": "Succeeded",
+              "started_at": "2026-03-30T17:37:22.271026+00:00",
+              "ended_at": "2026-03-30T17:42:05.477308+00:00",
+              "duration_s": 283.2,
+              "duration_display": "4m 43s",
+              "input": {
+                "dataflow": {
+                  "referenceName": "DF_Pipeline_Bronze_to_Silver_20260330173542",
+                  "type": "DataFlowReference"
+                },
+                "compute": {
+                  "coreCount": 4,
+                  "computeType": "General"
+                },
+                "staging": {
+                  "linkedService": {
+                    "referenceName": "LS_Blob_Storage",
+                    "type": "LinkedServiceReference"
+                  }
+                },
+                "dataFlowETag": "33003f26-0000-2000-0000-69cab4790000"
+              },
+              "output": {
+                "runStatus": {
+                  "idleTimeBeforeCurrentJob": 0,
+                  "sparkVersion": "3.4",
+                  "computeAcquisitionDuration": 261462,
+                  "version": "20260305.6",
+                  "profile": {
+                    "Source": {
+                      "computed": [],
+                      "lineage": {},
+                      "dropped": 0,
+                      "drifted": 0,
+                      "newer": 17,
+                      "total": 17,
+                      "updated": 0
+                    },
+                    "FilterRows": {
+                      "computed": [],
+                      "lineage": {},
+                      "dropped": 0,
+                      "drifted": 0,
+                      "newer": 0,
+                      "total": 17,
+                      "updated": 0
+                    },
+                    "DerivedColumns": {
+                      "computed": [],
+                      "lineage": {},
+                      "dropped": 0,
+                      "drifted": 0,
+                      "newer": 1,
+                      "total": 18,
+                      "updated": 0
+                    },
+                    "Sink": {
+                      "computed": [
+                        {
+                          "source": "Source",
+                          "columns": [
+                            "eggs"
+                          ]
+                        }
+                      ],
+                      "lineage": {
+                        "aquatic": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "aquatic"
+                              ]
+                            }
+                          ]
+                        },
+                        "toothed": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "toothed"
+                              ]
+                            }
+                          ]
+                        },
+                        "domestic": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "domestic"
+                              ]
+                            }
+                          ]
+                        },
+                        "hair": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "hair"
+                              ]
+                            }
+                          ]
+                        },
+                        "processed_time": {
+                          "mapped": false,
+                          "from": [
+                            {
+                              "source": "DerivedColumns",
+                              "columns": [
+                                "processed_time"
+                              ]
+                            }
+                          ]
+                        },
+                        "eggs": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "eggs"
+                              ]
+                            }
+                          ]
+                        },
+                        "milk": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "milk"
+                              ]
+                            }
+                          ]
+                        },
+                        "airborne": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "airborne"
+                              ]
+                            }
+                          ]
+                        },
+                        "feathers": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "feathers"
+                              ]
+                            }
+                          ]
+                        },
+                        "tail": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "tail"
+                              ]
+                            }
+                          ]
+                        },
+                        "animal_name": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "animal_name"
+                              ]
+                            }
+                          ]
+                        },
+                        "backbone": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "backbone"
+                              ]
+                            }
+                          ]
+                        },
+                        "catsize": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "catsize"
+                              ]
+                            }
+                          ]
+                        },
+                        "breathes": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "breathes"
+                              ]
+                            }
+                          ]
+                        },
+                        "legs": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "legs"
+                              ]
+                            }
+                          ]
+                        },
+                        "predator": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "predator"
+                              ]
+                            }
+                          ]
+                        },
+                        "fins": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "fins"
+                              ]
+                            }
+                          ]
+                        },
+                        "venomous": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "venomous"
+                              ]
+                            }
+                          ]
+                        }
+                      },
+                      "dropped": 0,
+                      "drifted": 0,
+                      "newer": 0,
+                      "total": 18,
+                      "updated": 18
+                    }
+                  },
+                  "metrics": {
+                    "Sink": {
+                      "format": "delimited",
+                      "stages": [
+                        {
+                          "stage": 1,
+                          "partitionTimes": [
+                            1336
+                          ],
+                          "recordsWritten": 59,
+                          "lastUpdateTime": "2026-03-30 17:42:00.439",
+                          "bytesWritten": 3611,
+                          "recordsRead": 101,
+                          "bytesRead": 7592,
+                          "partitionStatus": "Success",
+                          "streams": {
+                            "FilterRows": {
+                              "count": 59,
+                              "cached": false,
+                              "totalPartitions": 1,
+                              "partitionStatus": "Success",
+                              "partitionCounts": [
+                                59
+                              ],
+                              "type": "filter"
+                            },
+                            "Sink": {
+                              "count": 59,
+                              "cached": false,
+                              "totalPartitions": 1,
+                              "partitionStatus": "Success",
+                              "partitionCounts": [
+                                59
+                              ],
+                              "type": "sink"
+                            },
+                            "Source": {
+                              "count": 101,
+                              "cached": false,
+                              "totalPartitions": 1,
+                              "partitionStatus": "Success",
+                              "partitionCounts": [
+                                101
+                              ],
+                              "type": "source"
+                            },
+                            "DerivedColumns": {
+                              "count": 59,
+                              "cached": false,
+                              "totalPartitions": 1,
+                              "partitionStatus": "Success",
+                              "partitionCounts": [
+                                59
+                              ],
+                              "type": "derive"
+                            }
+                          },
+                          "target": "Sink",
+                          "time": 1833,
+                          "progressState": "Completed"
+                        }
+                      ],
+                      "sinkPostProcessingTime": 0,
+                      "store": "blob",
+                      "rowsWritten": 59,
+                      "details": {
+                        "preCommandsDuration": [
+                          0
+                        ],
+                        "mergeDuration": [
+                          163
+                        ],
+                        "postCommandsDuration": [
+                          0
+                        ]
+                      },
+                      "progressState": "Completed",
+                      "sources": {
+                        "Source": {
+                          "rowsRead": 101,
+                          "store": "blob",
+                          "details": {
+                            "pathResolutionDuration": [
+                              50
+                            ],
+                            "fileReadCount": [
+                              1
+                            ],
+                            "fileLoadDuration": [
+                              6485
+                            ],
+                            "fileSystemInitDuration": [
+                              6584
+                            ]
+                          },
+                          "format": "delimited"
+                        }
+                      },
+                      "sinkProcessingTime": 3203
+                    }
+                  },
+                  "clusterComputeId": "47376898-487d-4698-8e62-1d7a448f777b",
+                  "dsl": "\nsource() ~> Source\n\nSource filter() ~> FilterRows\n\nFilterRows derive() ~> DerivedColumns\n\nDerivedColumns sink() ~> Sink",
+                  "integrationRuntimeName": "General-4-1-ea9ae997-a120-4da6-8d2c-a42495d8ad87",
+                  "sparkRunId": "51"
+                },
+                "effectiveIntegrationRuntime": "AutoResolveIntegrationRuntime (Central India)",
+                "billingReference": {
+                  "activityType": "executedataflow",
+                  "billableDuration": [
+                    {
+                      "meterType": "General",
+                      "duration": 0.30050604266666664,
+                      "unit": "coreHour",
+                      "sessionType": "JobCluster"
+                    }
+                  ]
+                },
+                "reportLineageToPurview": {
+                  "status": "NotReported"
+                }
+              },
+              "error": {
+                "errorCode": "",
+                "message": "",
+                "failureType": "",
+                "target": "DataFlowActivity",
+                "details": ""
+              }
+            }
+          ],
+          "errors": [],
+          "flags": [],
+          "resources": {
+            "data_moved_bytes": 0,
+            "data_moved_display": "0 B",
+            "compute_units": [],
+            "activity_types": [
+              "ExecuteDataFlow"
+            ],
+            "data_flows": []
+          }
+        },
+        {
+          "run_id": "4e6ee3c8-a0af-400e-ae2e-54e0625a90ad",
+          "status": "Succeeded",
+          "started_at": "2026-03-30T17:08:55.824915+00:00",
+          "ended_at": "2026-03-30T17:11:52.197797+00:00",
+          "duration_s": 176.4,
+          "duration_display": "2m 56s",
+          "activities": [
+            {
+              "activity_name": "DataFlowActivity",
+              "activity_type": "ExecuteDataFlow",
+              "status": "Succeeded",
+              "started_at": "2026-03-30T17:09:03.452759+00:00",
+              "ended_at": "2026-03-30T17:11:51.230439+00:00",
+              "duration_s": 167.8,
+              "duration_display": "2m 47s",
+              "input": {
+                "dataflow": {
+                  "referenceName": "DF_Pipeline_Bronze_to_Silver_20260330170726",
+                  "type": "DataFlowReference"
+                },
+                "compute": {
+                  "coreCount": 4,
+                  "computeType": "General"
+                },
+                "staging": {
+                  "linkedService": {
+                    "referenceName": "LS_Blob_Storage",
+                    "type": "LinkedServiceReference"
+                  }
+                },
+                "dataFlowETag": "320094f9-0000-2000-0000-69caadd90000"
+              },
+              "output": {
+                "runStatus": {
+                  "idleTimeBeforeCurrentJob": 0,
+                  "sparkVersion": "3.4",
+                  "computeAcquisitionDuration": 145352,
+                  "version": "20260305.6",
+                  "profile": {
+                    "Source": {
+                      "computed": [],
+                      "lineage": {},
+                      "dropped": 0,
+                      "drifted": 0,
+                      "newer": 17,
+                      "total": 17,
+                      "updated": 0
+                    },
+                    "FilterRows": {
+                      "computed": [],
+                      "lineage": {},
+                      "dropped": 0,
+                      "drifted": 0,
+                      "newer": 0,
+                      "total": 17,
+                      "updated": 0
+                    },
+                    "DerivedColumns": {
+                      "computed": [],
+                      "lineage": {},
+                      "dropped": 0,
+                      "drifted": 0,
+                      "newer": 1,
+                      "total": 18,
+                      "updated": 0
+                    },
+                    "Sink": {
+                      "computed": [
+                        {
+                          "source": "Source",
+                          "columns": [
+                            "eggs"
+                          ]
+                        }
+                      ],
+                      "lineage": {
+                        "aquatic": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "aquatic"
+                              ]
+                            }
+                          ]
+                        },
+                        "toothed": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "toothed"
+                              ]
+                            }
+                          ]
+                        },
+                        "domestic": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "domestic"
+                              ]
+                            }
+                          ]
+                        },
+                        "hair": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "hair"
+                              ]
+                            }
+                          ]
+                        },
+                        "processed_time": {
+                          "mapped": false,
+                          "from": [
+                            {
+                              "source": "DerivedColumns",
+                              "columns": [
+                                "processed_time"
+                              ]
+                            }
+                          ]
+                        },
+                        "eggs": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "eggs"
+                              ]
+                            }
+                          ]
+                        },
+                        "milk": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "milk"
+                              ]
+                            }
+                          ]
+                        },
+                        "airborne": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "airborne"
+                              ]
+                            }
+                          ]
+                        },
+                        "feathers": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "feathers"
+                              ]
+                            }
+                          ]
+                        },
+                        "tail": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "tail"
+                              ]
+                            }
+                          ]
+                        },
+                        "animal_name": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "animal_name"
+                              ]
+                            }
+                          ]
+                        },
+                        "backbone": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "backbone"
+                              ]
+                            }
+                          ]
+                        },
+                        "catsize": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "catsize"
+                              ]
+                            }
+                          ]
+                        },
+                        "breathes": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "breathes"
+                              ]
+                            }
+                          ]
+                        },
+                        "legs": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "legs"
+                              ]
+                            }
+                          ]
+                        },
+                        "predator": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "predator"
+                              ]
+                            }
+                          ]
+                        },
+                        "fins": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "fins"
+                              ]
+                            }
+                          ]
+                        },
+                        "venomous": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "venomous"
+                              ]
+                            }
+                          ]
+                        }
+                      },
+                      "dropped": 0,
+                      "drifted": 0,
+                      "newer": 0,
+                      "total": 18,
+                      "updated": 18
+                    }
+                  },
+                  "metrics": {
+                    "Sink": {
+                      "format": "delimited",
+                      "stages": [
+                        {
+                          "stage": 1,
+                          "partitionTimes": [
+                            1071
+                          ],
+                          "recordsWritten": 59,
+                          "lastUpdateTime": "2026-03-30 17:11:46.301",
+                          "bytesWritten": 3611,
+                          "recordsRead": 101,
+                          "bytesRead": 7592,
+                          "partitionStatus": "Success",
+                          "streams": {
+                            "FilterRows": {
+                              "count": 59,
+                              "cached": false,
+                              "totalPartitions": 1,
+                              "partitionStatus": "Success",
+                              "partitionCounts": [
+                                59
+                              ],
+                              "type": "filter"
+                            },
+                            "Sink": {
+                              "count": 59,
+                              "cached": false,
+                              "totalPartitions": 1,
+                              "partitionStatus": "Success",
+                              "partitionCounts": [
+                                59
+                              ],
+                              "type": "sink"
+                            },
+                            "Source": {
+                              "count": 101,
+                              "cached": false,
+                              "totalPartitions": 1,
+                              "partitionStatus": "Success",
+                              "partitionCounts": [
+                                101
+                              ],
+                              "type": "source"
+                            },
+                            "DerivedColumns": {
+                              "count": 59,
+                              "cached": false,
+                              "totalPartitions": 1,
+                              "partitionStatus": "Success",
+                              "partitionCounts": [
+                                59
+                              ],
+                              "type": "derive"
+                            }
+                          },
+                          "target": "Sink",
+                          "time": 1506,
+                          "progressState": "Completed"
+                        }
+                      ],
+                      "sinkPostProcessingTime": 0,
+                      "store": "blob",
+                      "rowsWritten": 59,
+                      "details": {
+                        "preCommandsDuration": [
+                          0
+                        ],
+                        "mergeDuration": [
+                          117
+                        ],
+                        "postCommandsDuration": [
+                          0
+                        ]
+                      },
+                      "progressState": "Completed",
+                      "sources": {
+                        "Source": {
+                          "rowsRead": 101,
+                          "store": "blob",
+                          "details": {
+                            "pathResolutionDuration": [
+                              92
+                            ],
+                            "fileReadCount": [
+                              1
+                            ],
+                            "fileLoadDuration": [
+                              6355
+                            ],
+                            "fileSystemInitDuration": [
+                              6514
+                            ]
+                          },
+                          "format": "delimited"
+                        }
+                      },
+                      "sinkProcessingTime": 2777
+                    }
+                  },
+                  "clusterComputeId": "99aa5de0-eb67-4ab1-9d70-393a0d2e317c",
+                  "dsl": "\nsource() ~> Source\n\nSource filter() ~> FilterRows\n\nFilterRows derive() ~> DerivedColumns\n\nDerivedColumns sink() ~> Sink",
+                  "integrationRuntimeName": "General-4-1-ea9ae997-a120-4da6-8d2c-a42495d8ad87",
+                  "sparkRunId": "50"
+                },
+                "effectiveIntegrationRuntime": "AutoResolveIntegrationRuntime (Central India)",
+                "billingReference": {
+                  "activityType": "executedataflow",
+                  "billableDuration": [
+                    {
+                      "meterType": "General",
+                      "duration": 0.17225502422222222,
+                      "unit": "coreHour",
+                      "sessionType": "JobCluster"
+                    }
+                  ]
+                },
+                "reportLineageToPurview": {
+                  "status": "NotReported"
+                }
+              },
+              "error": {
+                "errorCode": "",
+                "message": "",
+                "failureType": "",
+                "target": "DataFlowActivity",
+                "details": ""
+              }
+            }
+          ],
+          "errors": [],
+          "flags": [],
+          "resources": {
+            "data_moved_bytes": 0,
+            "data_moved_display": "0 B",
+            "compute_units": [],
+            "activity_types": [
+              "ExecuteDataFlow"
+            ],
+            "data_flows": []
+          }
+        },
+        {
+          "run_id": "15b287f9-0d4c-4c67-a115-757bf83ec511",
+          "status": "Succeeded",
+          "started_at": "2026-03-30T10:43:53.136033+00:00",
+          "ended_at": "2026-03-30T10:46:58.206469+00:00",
+          "duration_s": 185.1,
+          "duration_display": "3m 5s",
+          "activities": [
+            {
+              "activity_name": "DataFlowActivity",
+              "activity_type": "ExecuteDataFlow",
+              "status": "Succeeded",
+              "started_at": "2026-03-30T10:44:00.419468+00:00",
+              "ended_at": "2026-03-30T10:46:57.245356+00:00",
+              "duration_s": 176.8,
+              "duration_display": "2m 56s",
+              "input": {
+                "dataflow": {
+                  "referenceName": "DF_Pipeline_Bronze_to_Silver_20260330104249",
+                  "type": "DataFlowReference"
+                },
+                "compute": {
+                  "coreCount": 16,
+                  "computeType": "MemoryOptimized"
+                },
+                "staging": {
+                  "linkedService": {
+                    "referenceName": "LS_Blob_Storage",
+                    "type": "LinkedServiceReference"
+                  }
+                },
+                "dataFlowETag": "2f007fbc-0000-2000-0000-69ca53b50000"
+              },
+              "output": {
+                "runStatus": {
+                  "idleTimeBeforeCurrentJob": 0,
+                  "sparkVersion": "3.4",
+                  "computeAcquisitionDuration": 148727,
+                  "version": "20260305.6",
+                  "profile": {
+                    "Source": {
+                      "computed": [],
+                      "lineage": {},
+                      "dropped": 0,
+                      "drifted": 0,
+                      "newer": 17,
+                      "total": 17,
+                      "updated": 0
+                    },
+                    "FilterRows": {
+                      "computed": [],
+                      "lineage": {},
+                      "dropped": 0,
+                      "drifted": 0,
+                      "newer": 0,
+                      "total": 17,
+                      "updated": 0
+                    },
+                    "DerivedColumns": {
+                      "computed": [],
+                      "lineage": {},
+                      "dropped": 0,
+                      "drifted": 0,
+                      "newer": 1,
+                      "total": 18,
+                      "updated": 0
+                    },
+                    "Sink": {
+                      "computed": [
+                        {
+                          "source": "Source",
+                          "columns": [
+                            "eggs"
+                          ]
+                        }
+                      ],
+                      "lineage": {
+                        "aquatic": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "aquatic"
+                              ]
+                            }
+                          ]
+                        },
+                        "toothed": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "toothed"
+                              ]
+                            }
+                          ]
+                        },
+                        "domestic": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "domestic"
+                              ]
+                            }
+                          ]
+                        },
+                        "hair": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "hair"
+                              ]
+                            }
+                          ]
+                        },
+                        "processed_time": {
+                          "mapped": false,
+                          "from": [
+                            {
+                              "source": "DerivedColumns",
+                              "columns": [
+                                "processed_time"
+                              ]
+                            }
+                          ]
+                        },
+                        "eggs": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "eggs"
+                              ]
+                            }
+                          ]
+                        },
+                        "milk": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "milk"
+                              ]
+                            }
+                          ]
+                        },
+                        "airborne": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "airborne"
+                              ]
+                            }
+                          ]
+                        },
+                        "feathers": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "feathers"
+                              ]
+                            }
+                          ]
+                        },
+                        "tail": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "tail"
+                              ]
+                            }
+                          ]
+                        },
+                        "animal_name": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "animal_name"
+                              ]
+                            }
+                          ]
+                        },
+                        "backbone": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "backbone"
+                              ]
+                            }
+                          ]
+                        },
+                        "catsize": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "catsize"
+                              ]
+                            }
+                          ]
+                        },
+                        "breathes": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "breathes"
+                              ]
+                            }
+                          ]
+                        },
+                        "legs": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "legs"
+                              ]
+                            }
+                          ]
+                        },
+                        "predator": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "predator"
+                              ]
+                            }
+                          ]
+                        },
+                        "fins": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "fins"
+                              ]
+                            }
+                          ]
+                        },
+                        "venomous": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "venomous"
+                              ]
+                            }
+                          ]
+                        }
+                      },
+                      "dropped": 0,
+                      "drifted": 0,
+                      "newer": 0,
+                      "total": 18,
+                      "updated": 18
+                    }
+                  },
+                  "metrics": {
+                    "Sink": {
+                      "format": "delimited",
+                      "stages": [
+                        {
+                          "stage": 1,
+                          "partitionTimes": [
+                            1198
+                          ],
+                          "recordsWritten": 59,
+                          "lastUpdateTime": "2026-03-30 10:46:52.565",
+                          "bytesWritten": 3611,
+                          "recordsRead": 101,
+                          "bytesRead": 7592,
+                          "partitionStatus": "Success",
+                          "streams": {
+                            "FilterRows": {
+                              "count": 59,
+                              "cached": false,
+                              "totalPartitions": 1,
+                              "partitionStatus": "Success",
+                              "partitionCounts": [
+                                59
+                              ],
+                              "type": "filter"
+                            },
+                            "Sink": {
+                              "count": 59,
+                              "cached": false,
+                              "totalPartitions": 1,
+                              "partitionStatus": "Success",
+                              "partitionCounts": [
+                                59
+                              ],
+                              "type": "sink"
+                            },
+                            "Source": {
+                              "count": 101,
+                              "cached": false,
+                              "totalPartitions": 1,
+                              "partitionStatus": "Success",
+                              "partitionCounts": [
+                                101
+                              ],
+                              "type": "source"
+                            },
+                            "DerivedColumns": {
+                              "count": 59,
+                              "cached": false,
+                              "totalPartitions": 1,
+                              "partitionStatus": "Success",
+                              "partitionCounts": [
+                                59
+                              ],
+                              "type": "derive"
+                            }
+                          },
+                          "target": "Sink",
+                          "time": 1908,
+                          "progressState": "Completed"
+                        }
+                      ],
+                      "sinkPostProcessingTime": 0,
+                      "store": "blob",
+                      "rowsWritten": 59,
+                      "details": {
+                        "preCommandsDuration": [
+                          0
+                        ],
+                        "mergeDuration": [
+                          133
+                        ],
+                        "postCommandsDuration": [
+                          0
+                        ]
+                      },
+                      "progressState": "Completed",
+                      "sources": {
+                        "Source": {
+                          "rowsRead": 101,
+                          "store": "blob",
+                          "details": {
+                            "pathResolutionDuration": [
+                              43
+                            ],
+                            "fileReadCount": [
+                              1
+                            ],
+                            "fileLoadDuration": [
+                              12361
+                            ],
+                            "fileSystemInitDuration": [
+                              12444
+                            ]
+                          },
+                          "format": "delimited"
+                        }
+                      },
+                      "sinkProcessingTime": 2930
+                    }
+                  },
+                  "clusterComputeId": "99b5fef6-40fc-43b2-b694-a499be0ef622",
+                  "dsl": "\nsource() ~> Source\n\nSource filter() ~> FilterRows\n\nFilterRows derive() ~> DerivedColumns\n\nDerivedColumns sink() ~> Sink",
+                  "integrationRuntimeName": "MemoryOptimized-16-1-ea9ae997-a120-4da6-8d2c-a42495d8ad87",
+                  "sparkRunId": "0"
+                },
+                "effectiveIntegrationRuntime": "AutoResolveIntegrationRuntime (Central India)",
+                "billingReference": {
+                  "activityType": "executedataflow",
+                  "billableDuration": [
+                    {
+                      "meterType": "MemoryOptimized",
+                      "duration": 0.7218035991111111,
+                      "unit": "coreHour",
+                      "sessionType": "JobCluster"
+                    }
+                  ]
+                },
+                "reportLineageToPurview": {
+                  "status": "NotReported"
+                }
+              },
+              "error": {
+                "errorCode": "",
+                "message": "",
+                "failureType": "",
+                "target": "DataFlowActivity",
+                "details": ""
+              }
+            }
+          ],
+          "errors": [],
+          "flags": [],
+          "resources": {
+            "data_moved_bytes": 0,
+            "data_moved_display": "0 B",
+            "compute_units": [],
+            "activity_types": [
+              "ExecuteDataFlow"
+            ],
+            "data_flows": []
+          }
+        },
         {
           "run_id": "325c83e0-ebf2-4b55-af6a-1d56f879585b",
           "status": "Failed",
@@ -576,21 +3744,917 @@
         "total_data_moved_display": "0 B",
         "compute_units_used": [],
         "activity_type_counts": {
-          "ExecuteDataFlow": 3
+          "ExecuteDataFlow": 9
         },
         "cloud_compute": {}
       },
       "stats": {
-        "mean_s": 65.8,
-        "median_s": 10.0,
-        "stdev_s": 96.8,
+        "mean_s": 152.4,
+        "median_s": 176.4,
+        "stdev_s": 89.2,
         "min_s": 9.9,
-        "max_s": 177.6
+        "max_s": 291.5
       }
     },
     "Pipeline_Incoming_to_Bronze": {
       "name": "Pipeline_Incoming_to_Bronze",
       "runs": [
+        {
+          "run_id": "e040fdf1-4b85-4971-88c2-8fc8d47180ab",
+          "status": "Succeeded",
+          "started_at": "2026-03-30T21:05:22.760491+00:00",
+          "ended_at": "2026-03-30T21:05:44.906390+00:00",
+          "duration_s": 22.1,
+          "duration_display": "22s",
+          "activities": [
+            {
+              "activity_name": "CopyActivity",
+              "activity_type": "Copy",
+              "status": "Succeeded",
+              "started_at": "2026-03-30T21:05:31.357513+00:00",
+              "ended_at": "2026-03-30T21:05:43.903130+00:00",
+              "duration_s": 12.5,
+              "duration_display": "12s",
+              "input": {
+                "source": {
+                  "type": "DelimitedTextSource",
+                  "wildcardFolderPath": "",
+                  "wildcardFileName": "*.csv",
+                  "recursive": true,
+                  "formatSettings": {
+                    "type": "DelimitedTextReadSettings",
+                    "quoteChar": "\"",
+                    "escapeChar": "\""
+                  }
+                },
+                "sink": {
+                  "type": "DelimitedTextSink",
+                  "storeSettings": {
+                    "type": "AzureBlobStorageWriteSettings",
+                    "fileName": "staged.csv"
+                  },
+                  "formatSettings": {
+                    "type": "DelimitedTextWriteSettings",
+                    "fileExtension": ".csv"
+                  },
+                  "copyBehavior": "MergeFiles"
+                },
+                "enableStaging": false,
+                "parallelCopies": 2,
+                "dataIntegrationUnits": 2
+              },
+              "output": {
+                "dataRead": 4053,
+                "dataWritten": 7592,
+                "filesRead": 1,
+                "filesWritten": 1,
+                "sourcePeakConnections": 1,
+                "sinkPeakConnections": 1,
+                "rowsRead": 101,
+                "rowsCopied": 101,
+                "copyDuration": 10,
+                "throughput": 2.026,
+                "errors": [],
+                "effectiveIntegrationRuntime": "AutoResolveIntegrationRuntime (Central India)",
+                "usedDataIntegrationUnits": 2,
+                "billingReference": {
+                  "activityType": "DataMovement",
+                  "billableDuration": [
+                    {
+                      "meterType": "AzureIR",
+                      "duration": 0.03333333333333333,
+                      "unit": "DIUHours"
+                    }
+                  ],
+                  "totalBillableDuration": [
+                    {
+                      "meterType": "AzureIR",
+                      "duration": 0.03333333333333333,
+                      "unit": "DIUHours"
+                    }
+                  ]
+                },
+                "usedParallelCopies": 1,
+                "executionDetails": [
+                  {
+                    "source": {
+                      "type": "AzureBlobStorage",
+                      "region": "Central India"
+                    },
+                    "sink": {
+                      "type": "AzureBlobStorage",
+                      "region": "Central India"
+                    },
+                    "status": "Succeeded",
+                    "start": "2026-03-30T21:05:32.1922181Z",
+                    "duration": 10,
+                    "usedDataIntegrationUnits": 2,
+                    "usedParallelCopies": 1,
+                    "profile": {
+                      "queue": {
+                        "status": "Completed",
+                        "duration": 6
+                      },
+                      "transfer": {
+                        "status": "Completed",
+                        "duration": 2,
+                        "details": {
+                          "listingSource": {
+                            "type": "AzureBlobStorage",
+                            "workingDuration": 0
+                          },
+                          "readingFromSource": {
+                            "type": "AzureBlobStorage",
+                            "workingDuration": 0
+                          },
+                          "writingToSink": {
+                            "type": "AzureBlobStorage",
+                            "workingDuration": 0
+                          }
+                        }
+                      }
+                    },
+                    "detailedDurations": {
+                      "queuingDuration": 6,
+                      "transferDuration": 2
+                    }
+                  }
+                ],
+                "dataConsistencyVerification": {
+                  "VerificationResult": "NotVerified"
+                },
+                "durationInQueue": {
+                  "integrationRuntimeQueue": 0
+                }
+              },
+              "error": {
+                "errorCode": "",
+                "message": "",
+                "failureType": "",
+                "target": "CopyActivity",
+                "details": ""
+              }
+            }
+          ],
+          "errors": [],
+          "flags": [],
+          "resources": {
+            "data_moved_bytes": 0,
+            "data_moved_display": "0 B",
+            "compute_units": [],
+            "activity_types": [
+              "Copy"
+            ],
+            "data_flows": []
+          }
+        },
+        {
+          "run_id": "4724802e-66c5-4acd-9145-e0ac1aa69fba",
+          "status": "Succeeded",
+          "started_at": "2026-03-30T20:58:00.975771+00:00",
+          "ended_at": "2026-03-30T20:58:22.722382+00:00",
+          "duration_s": 21.7,
+          "duration_display": "21s",
+          "activities": [
+            {
+              "activity_name": "CopyActivity",
+              "activity_type": "Copy",
+              "status": "Succeeded",
+              "started_at": "2026-03-30T20:58:09.099822+00:00",
+              "ended_at": "2026-03-30T20:58:21.863474+00:00",
+              "duration_s": 12.8,
+              "duration_display": "12s",
+              "input": {
+                "source": {
+                  "type": "DelimitedTextSource",
+                  "wildcardFolderPath": "",
+                  "wildcardFileName": "*.csv",
+                  "recursive": true,
+                  "formatSettings": {
+                    "type": "DelimitedTextReadSettings",
+                    "quoteChar": "\"",
+                    "escapeChar": "\""
+                  }
+                },
+                "sink": {
+                  "type": "DelimitedTextSink",
+                  "storeSettings": {
+                    "type": "AzureBlobStorageWriteSettings",
+                    "fileName": "staged.csv"
+                  },
+                  "formatSettings": {
+                    "type": "DelimitedTextWriteSettings",
+                    "fileExtension": ".csv"
+                  },
+                  "copyBehavior": "MergeFiles"
+                },
+                "enableStaging": false,
+                "parallelCopies": 2,
+                "dataIntegrationUnits": 2
+              },
+              "output": {
+                "dataRead": 4053,
+                "dataWritten": 7592,
+                "filesRead": 1,
+                "filesWritten": 1,
+                "sourcePeakConnections": 1,
+                "sinkPeakConnections": 1,
+                "rowsRead": 101,
+                "rowsCopied": 101,
+                "copyDuration": 11,
+                "throughput": 2.026,
+                "errors": [],
+                "effectiveIntegrationRuntime": "AutoResolveIntegrationRuntime (Central India)",
+                "usedDataIntegrationUnits": 2,
+                "billingReference": {
+                  "activityType": "DataMovement",
+                  "billableDuration": [
+                    {
+                      "meterType": "AzureIR",
+                      "duration": 0.03333333333333333,
+                      "unit": "DIUHours"
+                    }
+                  ],
+                  "totalBillableDuration": [
+                    {
+                      "meterType": "AzureIR",
+                      "duration": 0.03333333333333333,
+                      "unit": "DIUHours"
+                    }
+                  ]
+                },
+                "usedParallelCopies": 1,
+                "executionDetails": [
+                  {
+                    "source": {
+                      "type": "AzureBlobStorage",
+                      "region": "Central India"
+                    },
+                    "sink": {
+                      "type": "AzureBlobStorage",
+                      "region": "Central India"
+                    },
+                    "status": "Succeeded",
+                    "start": "2026-03-30T20:58:09.6111642Z",
+                    "duration": 11,
+                    "usedDataIntegrationUnits": 2,
+                    "usedParallelCopies": 1,
+                    "profile": {
+                      "queue": {
+                        "status": "Completed",
+                        "duration": 6
+                      },
+                      "transfer": {
+                        "status": "Completed",
+                        "duration": 2,
+                        "details": {
+                          "listingSource": {
+                            "type": "AzureBlobStorage",
+                            "workingDuration": 0
+                          },
+                          "readingFromSource": {
+                            "type": "AzureBlobStorage",
+                            "workingDuration": 0
+                          },
+                          "writingToSink": {
+                            "type": "AzureBlobStorage",
+                            "workingDuration": 0
+                          }
+                        }
+                      }
+                    },
+                    "detailedDurations": {
+                      "queuingDuration": 6,
+                      "transferDuration": 2
+                    }
+                  }
+                ],
+                "dataConsistencyVerification": {
+                  "VerificationResult": "NotVerified"
+                },
+                "durationInQueue": {
+                  "integrationRuntimeQueue": 0
+                }
+              },
+              "error": {
+                "errorCode": "",
+                "message": "",
+                "failureType": "",
+                "target": "CopyActivity",
+                "details": ""
+              }
+            }
+          ],
+          "errors": [],
+          "flags": [],
+          "resources": {
+            "data_moved_bytes": 0,
+            "data_moved_display": "0 B",
+            "compute_units": [],
+            "activity_types": [
+              "Copy"
+            ],
+            "data_flows": []
+          }
+        },
+        {
+          "run_id": "f548963b-5f7e-4e9a-8dde-1946fff26f03",
+          "status": "Succeeded",
+          "started_at": "2026-03-30T20:19:17.005939+00:00",
+          "ended_at": "2026-03-30T20:19:39.336391+00:00",
+          "duration_s": 22.3,
+          "duration_display": "22s",
+          "activities": [
+            {
+              "activity_name": "CopyActivity",
+              "activity_type": "Copy",
+              "status": "Succeeded",
+              "started_at": "2026-03-30T20:19:24.926228+00:00",
+              "ended_at": "2026-03-30T20:19:38.374115+00:00",
+              "duration_s": 13.4,
+              "duration_display": "13s",
+              "input": {
+                "source": {
+                  "type": "DelimitedTextSource",
+                  "wildcardFolderPath": "",
+                  "wildcardFileName": "*.csv",
+                  "recursive": true,
+                  "formatSettings": {
+                    "type": "DelimitedTextReadSettings",
+                    "quoteChar": "\"",
+                    "escapeChar": "\""
+                  }
+                },
+                "sink": {
+                  "type": "DelimitedTextSink",
+                  "storeSettings": {
+                    "type": "AzureBlobStorageWriteSettings",
+                    "fileName": "staged.csv"
+                  },
+                  "formatSettings": {
+                    "type": "DelimitedTextWriteSettings",
+                    "fileExtension": ".csv"
+                  },
+                  "copyBehavior": "MergeFiles"
+                },
+                "enableStaging": false,
+                "parallelCopies": 2,
+                "dataIntegrationUnits": 2
+              },
+              "output": {
+                "dataRead": 4053,
+                "dataWritten": 7592,
+                "filesRead": 1,
+                "filesWritten": 1,
+                "sourcePeakConnections": 1,
+                "sinkPeakConnections": 1,
+                "rowsRead": 101,
+                "rowsCopied": 101,
+                "copyDuration": 11,
+                "throughput": 2.026,
+                "errors": [],
+                "effectiveIntegrationRuntime": "AutoResolveIntegrationRuntime (Central India)",
+                "usedDataIntegrationUnits": 2,
+                "billingReference": {
+                  "activityType": "DataMovement",
+                  "billableDuration": [
+                    {
+                      "meterType": "AzureIR",
+                      "duration": 0.03333333333333333,
+                      "unit": "DIUHours"
+                    }
+                  ],
+                  "totalBillableDuration": [
+                    {
+                      "meterType": "AzureIR",
+                      "duration": 0.03333333333333333,
+                      "unit": "DIUHours"
+                    }
+                  ]
+                },
+                "usedParallelCopies": 1,
+                "executionDetails": [
+                  {
+                    "source": {
+                      "type": "AzureBlobStorage",
+                      "region": "Central India"
+                    },
+                    "sink": {
+                      "type": "AzureBlobStorage",
+                      "region": "Central India"
+                    },
+                    "status": "Succeeded",
+                    "start": "2026-03-30T20:19:25.6480595Z",
+                    "duration": 11,
+                    "usedDataIntegrationUnits": 2,
+                    "usedParallelCopies": 1,
+                    "profile": {
+                      "queue": {
+                        "status": "Completed",
+                        "duration": 7
+                      },
+                      "transfer": {
+                        "status": "Completed",
+                        "duration": 2,
+                        "details": {
+                          "listingSource": {
+                            "type": "AzureBlobStorage",
+                            "workingDuration": 0
+                          },
+                          "readingFromSource": {
+                            "type": "AzureBlobStorage",
+                            "workingDuration": 0
+                          },
+                          "writingToSink": {
+                            "type": "AzureBlobStorage",
+                            "workingDuration": 0
+                          }
+                        }
+                      }
+                    },
+                    "detailedDurations": {
+                      "queuingDuration": 7,
+                      "transferDuration": 2
+                    }
+                  }
+                ],
+                "dataConsistencyVerification": {
+                  "VerificationResult": "NotVerified"
+                },
+                "durationInQueue": {
+                  "integrationRuntimeQueue": 0
+                }
+              },
+              "error": {
+                "errorCode": "",
+                "message": "",
+                "failureType": "",
+                "target": "CopyActivity",
+                "details": ""
+              }
+            }
+          ],
+          "errors": [],
+          "flags": [],
+          "resources": {
+            "data_moved_bytes": 0,
+            "data_moved_display": "0 B",
+            "compute_units": [],
+            "activity_types": [
+              "Copy"
+            ],
+            "data_flows": []
+          }
+        },
+        {
+          "run_id": "58adf71f-9253-4989-a2c3-71486be4a29e",
+          "status": "Succeeded",
+          "started_at": "2026-03-30T17:36:39.031048+00:00",
+          "ended_at": "2026-03-30T17:37:03.985329+00:00",
+          "duration_s": 25.0,
+          "duration_display": "24s",
+          "activities": [
+            {
+              "activity_name": "CopyActivity",
+              "activity_type": "Copy",
+              "status": "Succeeded",
+              "started_at": "2026-03-30T17:36:46.646614+00:00",
+              "ended_at": "2026-03-30T17:37:03.057354+00:00",
+              "duration_s": 16.4,
+              "duration_display": "16s",
+              "input": {
+                "source": {
+                  "type": "DelimitedTextSource",
+                  "wildcardFolderPath": "",
+                  "wildcardFileName": "*.csv",
+                  "recursive": true,
+                  "formatSettings": {
+                    "type": "DelimitedTextReadSettings",
+                    "quoteChar": "\"",
+                    "escapeChar": "\""
+                  }
+                },
+                "sink": {
+                  "type": "DelimitedTextSink",
+                  "storeSettings": {
+                    "type": "AzureBlobStorageWriteSettings",
+                    "fileName": "staged.csv"
+                  },
+                  "formatSettings": {
+                    "type": "DelimitedTextWriteSettings",
+                    "fileExtension": ".csv"
+                  },
+                  "copyBehavior": "MergeFiles"
+                },
+                "enableStaging": false,
+                "parallelCopies": 2,
+                "dataIntegrationUnits": 2
+              },
+              "output": {
+                "dataRead": 4053,
+                "dataWritten": 7592,
+                "filesRead": 1,
+                "filesWritten": 1,
+                "sourcePeakConnections": 1,
+                "sinkPeakConnections": 1,
+                "rowsRead": 101,
+                "rowsCopied": 101,
+                "copyDuration": 12,
+                "throughput": 2.026,
+                "errors": [],
+                "effectiveIntegrationRuntime": "AutoResolveIntegrationRuntime (Central India)",
+                "usedDataIntegrationUnits": 2,
+                "billingReference": {
+                  "activityType": "DataMovement",
+                  "billableDuration": [
+                    {
+                      "meterType": "AzureIR",
+                      "duration": 0.03333333333333333,
+                      "unit": "DIUHours"
+                    }
+                  ],
+                  "totalBillableDuration": [
+                    {
+                      "meterType": "AzureIR",
+                      "duration": 0.03333333333333333,
+                      "unit": "DIUHours"
+                    }
+                  ]
+                },
+                "usedParallelCopies": 1,
+                "executionDetails": [
+                  {
+                    "source": {
+                      "type": "AzureBlobStorage",
+                      "region": "Central India"
+                    },
+                    "sink": {
+                      "type": "AzureBlobStorage",
+                      "region": "Central India"
+                    },
+                    "status": "Succeeded",
+                    "start": "2026-03-30T17:36:47.4115977Z",
+                    "duration": 12,
+                    "usedDataIntegrationUnits": 2,
+                    "usedParallelCopies": 1,
+                    "profile": {
+                      "queue": {
+                        "status": "Completed",
+                        "duration": 7
+                      },
+                      "transfer": {
+                        "status": "Completed",
+                        "duration": 2,
+                        "details": {
+                          "listingSource": {
+                            "type": "AzureBlobStorage",
+                            "workingDuration": 0
+                          },
+                          "readingFromSource": {
+                            "type": "AzureBlobStorage",
+                            "workingDuration": 0
+                          },
+                          "writingToSink": {
+                            "type": "AzureBlobStorage",
+                            "workingDuration": 0
+                          }
+                        }
+                      }
+                    },
+                    "detailedDurations": {
+                      "queuingDuration": 7,
+                      "transferDuration": 2
+                    }
+                  }
+                ],
+                "dataConsistencyVerification": {
+                  "VerificationResult": "NotVerified"
+                },
+                "durationInQueue": {
+                  "integrationRuntimeQueue": 0
+                }
+              },
+              "error": {
+                "errorCode": "",
+                "message": "",
+                "failureType": "",
+                "target": "CopyActivity",
+                "details": ""
+              }
+            }
+          ],
+          "errors": [],
+          "flags": [],
+          "resources": {
+            "data_moved_bytes": 0,
+            "data_moved_display": "0 B",
+            "compute_units": [],
+            "activity_types": [
+              "Copy"
+            ],
+            "data_flows": []
+          }
+        },
+        {
+          "run_id": "44083c19-bd53-44bd-bcda-ac8438d1baff",
+          "status": "Succeeded",
+          "started_at": "2026-03-30T17:08:19.451558+00:00",
+          "ended_at": "2026-03-30T17:08:46.782681+00:00",
+          "duration_s": 27.3,
+          "duration_display": "27s",
+          "activities": [
+            {
+              "activity_name": "CopyActivity",
+              "activity_type": "Copy",
+              "status": "Succeeded",
+              "started_at": "2026-03-30T17:08:27.047033+00:00",
+              "ended_at": "2026-03-30T17:08:45.847439+00:00",
+              "duration_s": 18.8,
+              "duration_display": "18s",
+              "input": {
+                "source": {
+                  "type": "DelimitedTextSource",
+                  "wildcardFolderPath": "",
+                  "wildcardFileName": "*.csv",
+                  "recursive": true,
+                  "formatSettings": {
+                    "type": "DelimitedTextReadSettings",
+                    "quoteChar": "\"",
+                    "escapeChar": "\""
+                  }
+                },
+                "sink": {
+                  "type": "DelimitedTextSink",
+                  "storeSettings": {
+                    "type": "AzureBlobStorageWriteSettings",
+                    "fileName": "staged.csv"
+                  },
+                  "formatSettings": {
+                    "type": "DelimitedTextWriteSettings",
+                    "fileExtension": ".csv"
+                  },
+                  "copyBehavior": "MergeFiles"
+                },
+                "enableStaging": false,
+                "parallelCopies": 2,
+                "dataIntegrationUnits": 2
+              },
+              "output": {
+                "dataRead": 4053,
+                "dataWritten": 7592,
+                "filesRead": 1,
+                "filesWritten": 1,
+                "sourcePeakConnections": 1,
+                "sinkPeakConnections": 1,
+                "rowsRead": 101,
+                "rowsCopied": 101,
+                "copyDuration": 16,
+                "throughput": 1.351,
+                "errors": [],
+                "effectiveIntegrationRuntime": "AutoResolveIntegrationRuntime (Central India)",
+                "usedDataIntegrationUnits": 2,
+                "billingReference": {
+                  "activityType": "DataMovement",
+                  "billableDuration": [
+                    {
+                      "meterType": "AzureIR",
+                      "duration": 0.03333333333333333,
+                      "unit": "DIUHours"
+                    }
+                  ],
+                  "totalBillableDuration": [
+                    {
+                      "meterType": "AzureIR",
+                      "duration": 0.03333333333333333,
+                      "unit": "DIUHours"
+                    }
+                  ]
+                },
+                "usedParallelCopies": 1,
+                "executionDetails": [
+                  {
+                    "source": {
+                      "type": "AzureBlobStorage",
+                      "region": "Central India"
+                    },
+                    "sink": {
+                      "type": "AzureBlobStorage",
+                      "region": "Central India"
+                    },
+                    "status": "Succeeded",
+                    "start": "2026-03-30T17:08:27.7059603Z",
+                    "duration": 16,
+                    "usedDataIntegrationUnits": 2,
+                    "usedParallelCopies": 1,
+                    "profile": {
+                      "queue": {
+                        "status": "Completed",
+                        "duration": 11
+                      },
+                      "transfer": {
+                        "status": "Completed",
+                        "duration": 3,
+                        "details": {
+                          "listingSource": {
+                            "type": "AzureBlobStorage",
+                            "workingDuration": 0
+                          },
+                          "readingFromSource": {
+                            "type": "AzureBlobStorage",
+                            "workingDuration": 0
+                          },
+                          "writingToSink": {
+                            "type": "AzureBlobStorage",
+                            "workingDuration": 0
+                          }
+                        }
+                      }
+                    },
+                    "detailedDurations": {
+                      "queuingDuration": 11,
+                      "transferDuration": 3
+                    }
+                  }
+                ],
+                "dataConsistencyVerification": {
+                  "VerificationResult": "NotVerified"
+                },
+                "durationInQueue": {
+                  "integrationRuntimeQueue": 0
+                }
+              },
+              "error": {
+                "errorCode": "",
+                "message": "",
+                "failureType": "",
+                "target": "CopyActivity",
+                "details": ""
+              }
+            }
+          ],
+          "errors": [],
+          "flags": [
+            "anomaly"
+          ],
+          "resources": {
+            "data_moved_bytes": 0,
+            "data_moved_display": "0 B",
+            "compute_units": [],
+            "activity_types": [
+              "Copy"
+            ],
+            "data_flows": []
+          }
+        },
+        {
+          "run_id": "efdb58a7-c6b5-4184-9612-7366af0ad7ee",
+          "status": "Succeeded",
+          "started_at": "2026-03-30T10:43:25.836674+00:00",
+          "ended_at": "2026-03-30T10:43:48.846843+00:00",
+          "duration_s": 23.0,
+          "duration_display": "23s",
+          "activities": [
+            {
+              "activity_name": "CopyActivity",
+              "activity_type": "Copy",
+              "status": "Succeeded",
+              "started_at": "2026-03-30T10:43:34.713961+00:00",
+              "ended_at": "2026-03-30T10:43:47.040084+00:00",
+              "duration_s": 12.3,
+              "duration_display": "12s",
+              "input": {
+                "source": {
+                  "type": "DelimitedTextSource",
+                  "wildcardFolderPath": "",
+                  "wildcardFileName": "*.csv",
+                  "recursive": true,
+                  "formatSettings": {
+                    "type": "DelimitedTextReadSettings",
+                    "quoteChar": "\"",
+                    "escapeChar": "\""
+                  }
+                },
+                "sink": {
+                  "type": "DelimitedTextSink",
+                  "storeSettings": {
+                    "type": "AzureBlobStorageWriteSettings",
+                    "fileName": "staged.csv"
+                  },
+                  "formatSettings": {
+                    "type": "DelimitedTextWriteSettings",
+                    "fileExtension": ".csv"
+                  },
+                  "copyBehavior": "MergeFiles"
+                },
+                "enableStaging": false,
+                "parallelCopies": 16,
+                "dataIntegrationUnits": 16
+              },
+              "output": {
+                "dataRead": 4053,
+                "dataWritten": 7592,
+                "filesRead": 1,
+                "filesWritten": 1,
+                "sourcePeakConnections": 1,
+                "sinkPeakConnections": 1,
+                "rowsRead": 101,
+                "rowsCopied": 101,
+                "copyDuration": 10,
+                "throughput": 2.026,
+                "errors": [],
+                "effectiveIntegrationRuntime": "AutoResolveIntegrationRuntime (Central India)",
+                "usedDataIntegrationUnits": 4,
+                "billingReference": {
+                  "activityType": "DataMovement",
+                  "billableDuration": [
+                    {
+                      "meterType": "AzureIR",
+                      "duration": 0.06666666666666667,
+                      "unit": "DIUHours"
+                    }
+                  ],
+                  "totalBillableDuration": [
+                    {
+                      "meterType": "AzureIR",
+                      "duration": 0.06666666666666667,
+                      "unit": "DIUHours"
+                    }
+                  ]
+                },
+                "usedParallelCopies": 1,
+                "executionDetails": [
+                  {
+                    "source": {
+                      "type": "AzureBlobStorage",
+                      "region": "Central India"
+                    },
+                    "sink": {
+                      "type": "AzureBlobStorage",
+                      "region": "Central India"
+                    },
+                    "status": "Succeeded",
+                    "start": "2026-03-30T10:43:35.3973606Z",
+                    "duration": 10,
+                    "usedDataIntegrationUnits": 4,
+                    "usedParallelCopies": 1,
+                    "profile": {
+                      "queue": {
+                        "status": "Completed",
+                        "duration": 6
+                      },
+                      "transfer": {
+                        "status": "Completed",
+                        "duration": 2,
+                        "details": {
+                          "listingSource": {
+                            "type": "AzureBlobStorage",
+                            "workingDuration": 0
+                          },
+                          "readingFromSource": {
+                            "type": "AzureBlobStorage",
+                            "workingDuration": 0
+                          },
+                          "writingToSink": {
+                            "type": "AzureBlobStorage",
+                            "workingDuration": 0
+                          }
+                        }
+                      }
+                    },
+                    "detailedDurations": {
+                      "queuingDuration": 6,
+                      "transferDuration": 2
+                    }
+                  }
+                ],
+                "dataConsistencyVerification": {
+                  "VerificationResult": "NotVerified"
+                },
+                "durationInQueue": {
+                  "integrationRuntimeQueue": 0
+                }
+              },
+              "error": {
+                "errorCode": "",
+                "message": "",
+                "failureType": "",
+                "target": "CopyActivity",
+                "details": ""
+              }
+            }
+          ],
+          "errors": [],
+          "flags": [],
+          "resources": {
+            "data_moved_bytes": 0,
+            "data_moved_display": "0 B",
+            "compute_units": [],
+            "activity_types": [
+              "Copy"
+            ],
+            "data_flows": []
+          }
+        },
         {
           "run_id": "40981076-c93c-4488-b425-3d268c1f6bd6",
           "status": "Succeeded",
@@ -890,22 +4954,811 @@
           }
         }
       ],
+      "anomalies": [
+        {
+          "run_id": "44083c19-bd53-44bd-bcda-ac8438d1baff",
+          "duration_s": 27.3,
+          "mean_s": 23.0,
+          "stdev_s": 2.1,
+          "z_score": 2.06,
+          "threshold_s": 27.2
+        }
+      ],
+      "resources": {
+        "total_data_moved_bytes": 0,
+        "total_data_moved_display": "0 B",
+        "compute_units_used": [],
+        "activity_type_counts": {
+          "Copy": 8
+        },
+        "cloud_compute": {}
+      },
+      "stats": {
+        "mean_s": 23.0,
+        "median_s": 22.2,
+        "stdev_s": 2.1,
+        "min_s": 21.4,
+        "max_s": 27.3
+      }
+    },
+    "Pipeline_Stage2_to_Stage3": {
+      "name": "Pipeline_Stage2_to_Stage3",
+      "runs": [
+        {
+          "run_id": "4eeb3eaa-c14f-4e20-9ed3-396d060c707f",
+          "status": "Failed",
+          "started_at": "2026-03-30T16:50:28.836746+00:00",
+          "ended_at": "2026-03-30T16:50:48.751203+00:00",
+          "duration_s": 19.9,
+          "duration_display": "19s",
+          "activities": [
+            {
+              "activity_name": "DataFlowActivity",
+              "activity_type": "ExecuteDataFlow",
+              "status": "Failed",
+              "started_at": "2026-03-30T16:50:36.275889+00:00",
+              "ended_at": "2026-03-30T16:50:47.844147+00:00",
+              "duration_s": 11.6,
+              "duration_display": "11s",
+              "input": {
+                "dataflow": {
+                  "referenceName": "DF_Pipeline_Stage2_to_Stage3_20260330164611",
+                  "type": "DataFlowReference"
+                },
+                "compute": {
+                  "coreCount": 4,
+                  "computeType": "General"
+                },
+                "staging": {
+                  "linkedService": {
+                    "referenceName": "LS_Blob_Storage",
+                    "type": "LinkedServiceReference"
+                  }
+                },
+                "dataFlowETag": "32005fd6-0000-2000-0000-69caa8df0000"
+              },
+              "output": {
+                "runStatus": {
+                  "idleTimeBeforeCurrentJob": 19585,
+                  "sparkVersion": "3.4",
+                  "computeAcquisitionDuration": 4772,
+                  "version": "20260305.6",
+                  "profile": {},
+                  "metrics": {
+                    "Sink": {
+                      "format": "delimited",
+                      "stages": [
+                        {
+                          "recordsWritten": 0,
+                          "lastUpdateTime": "",
+                          "bytesWritten": 0,
+                          "recordsRead": 0,
+                          "bytesRead": 0,
+                          "streams": {
+                            "Sink": {
+                              "count": 0,
+                              "cached": false,
+                              "totalPartitions": 0,
+                              "partitionStatus": "Success",
+                              "partitionCounts": [],
+                              "type": "sink"
+                            },
+                            "DerivedColumns": {
+                              "count": 0,
+                              "cached": false,
+                              "totalPartitions": 0,
+                              "partitionStatus": "Success",
+                              "partitionCounts": [],
+                              "type": "derive"
+                            },
+                            "Source": {
+                              "count": 0,
+                              "cached": false,
+                              "totalPartitions": 0,
+                              "partitionStatus": "Success",
+                              "partitionCounts": [],
+                              "type": "source"
+                            }
+                          },
+                          "target": "Sink",
+                          "time": 0,
+                          "progressState": ""
+                        }
+                      ],
+                      "sinkPostProcessingTime": 0,
+                      "store": "blob",
+                      "rowsWritten": 0,
+                      "details": {},
+                      "progressState": {},
+                      "sources": {
+                        "Source": {
+                          "rowsRead": 0,
+                          "store": "blob",
+                          "details": {
+                            "pathResolutionDuration": [
+                              32
+                            ],
+                            "fileSystemInitDuration": [
+                              34
+                            ]
+                          },
+                          "format": "delimited"
+                        }
+                      },
+                      "sinkProcessingTime": 0
+                    }
+                  },
+                  "clusterComputeId": "25cbfd72-a8e3-4dc7-b094-c3295d7bd806",
+                  "dsl": "\nsource() ~> Source\n\nSource derive() ~> DerivedColumns\n\nDerivedColumns sink() ~> Sink"
+                },
+                "effectiveIntegrationRuntime": "AutoResolveIntegrationRuntime (Central India)",
+                "billingReference": {
+                  "activityType": "executedataflow",
+                  "billableDuration": [
+                    {
+                      "meterType": "General",
+                      "duration": 0.029825442333333334,
+                      "unit": "coreHour",
+                      "sessionType": "JobCluster"
+                    }
+                  ]
+                },
+                "reportLineageToPurview": {
+                  "status": "NotReported"
+                }
+              },
+              "error": {
+                "message": "{\"StatusCode\":\"DF-Executor-InvalidPath\",\"Message\":\"Job failed due to reason: at Source 'Source': Path /staged.csv does not resolve to any file(s). Please make sure the file/folder exists and is not hidden. At the same time, please ensure special character is not included in file/folder name, for example, name starting with _\",\"Details\":\"\"}",
+                "failureType": "UserError",
+                "target": "DataFlowActivity"
+              }
+            }
+          ],
+          "errors": [
+            {
+              "activity": "DataFlowActivity",
+              "type": "ExecuteDataFlow",
+              "error_code": "N/A",
+              "message": "{\"StatusCode\":\"DF-Executor-InvalidPath\",\"Message\":\"Job failed due to reason: at Source 'Source': Path /staged.csv does not resolve to any file(s). Please make sure the file/folder exists and is not hidden. At the same time, please ensure special character is not included in file/folder name, for example, name starting with _\",\"Details\":\"\"}",
+              "category": "UserError"
+            }
+          ],
+          "flags": [
+            "failed"
+          ],
+          "resources": {
+            "data_moved_bytes": 0,
+            "data_moved_display": "0 B",
+            "compute_units": [],
+            "activity_types": [
+              "ExecuteDataFlow"
+            ],
+            "data_flows": []
+          }
+        }
+      ],
       "anomalies": [],
       "resources": {
         "total_data_moved_bytes": 0,
         "total_data_moved_display": "0 B",
         "compute_units_used": [],
         "activity_type_counts": {
-          "Copy": 2
+          "ExecuteDataFlow": 1
         },
         "cloud_compute": {}
       },
       "stats": {
-        "mean_s": 21.4,
-        "median_s": 21.4,
-        "stdev_s": 0.1,
-        "min_s": 21.4,
-        "max_s": 21.4
+        "mean_s": 19.9,
+        "median_s": 19.9,
+        "stdev_s": 0,
+        "min_s": 19.9,
+        "max_s": 19.9
+      }
+    },
+    "Pipeline_Stage1_to_Stage2": {
+      "name": "Pipeline_Stage1_to_Stage2",
+      "runs": [
+        {
+          "run_id": "6b228d09-df37-4803-8237-31d5ac9a3f9d",
+          "status": "Succeeded",
+          "started_at": "2026-03-30T16:47:13.438942+00:00",
+          "ended_at": "2026-03-30T16:50:27.345529+00:00",
+          "duration_s": 193.9,
+          "duration_display": "3m 13s",
+          "activities": [
+            {
+              "activity_name": "DataFlowActivity",
+              "activity_type": "ExecuteDataFlow",
+              "status": "Succeeded",
+              "started_at": "2026-03-30T16:47:20.919147+00:00",
+              "ended_at": "2026-03-30T16:50:26.198429+00:00",
+              "duration_s": 185.3,
+              "duration_display": "3m 5s",
+              "input": {
+                "dataflow": {
+                  "referenceName": "DF_Pipeline_Stage1_to_Stage2_20260330164552",
+                  "type": "DataFlowReference"
+                },
+                "compute": {
+                  "coreCount": 4,
+                  "computeType": "General"
+                },
+                "staging": {
+                  "linkedService": {
+                    "referenceName": "LS_Blob_Storage",
+                    "type": "LinkedServiceReference"
+                  }
+                },
+                "dataFlowETag": "3200e3d5-0000-2000-0000-69caa8cc0000"
+              },
+              "output": {
+                "runStatus": {
+                  "idleTimeBeforeCurrentJob": 0,
+                  "sparkVersion": "3.4",
+                  "computeAcquisitionDuration": 143605,
+                  "version": "20260305.6",
+                  "profile": {
+                    "Source": {
+                      "computed": [],
+                      "lineage": {},
+                      "dropped": 0,
+                      "drifted": 0,
+                      "newer": 17,
+                      "total": 17,
+                      "updated": 0
+                    },
+                    "FilterRows": {
+                      "computed": [],
+                      "lineage": {},
+                      "dropped": 0,
+                      "drifted": 0,
+                      "newer": 0,
+                      "total": 17,
+                      "updated": 0
+                    },
+                    "DerivedColumns": {
+                      "computed": [],
+                      "lineage": {},
+                      "dropped": 0,
+                      "drifted": 0,
+                      "newer": 1,
+                      "total": 18,
+                      "updated": 0
+                    },
+                    "Sink": {
+                      "computed": [
+                        {
+                          "source": "Source",
+                          "columns": [
+                            "eggs"
+                          ]
+                        }
+                      ],
+                      "lineage": {
+                        "aquatic": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "aquatic"
+                              ]
+                            }
+                          ]
+                        },
+                        "toothed": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "toothed"
+                              ]
+                            }
+                          ]
+                        },
+                        "domestic": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "domestic"
+                              ]
+                            }
+                          ]
+                        },
+                        "hair": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "hair"
+                              ]
+                            }
+                          ]
+                        },
+                        "processed_time": {
+                          "mapped": false,
+                          "from": [
+                            {
+                              "source": "DerivedColumns",
+                              "columns": [
+                                "processed_time"
+                              ]
+                            }
+                          ]
+                        },
+                        "eggs": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "eggs"
+                              ]
+                            }
+                          ]
+                        },
+                        "milk": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "milk"
+                              ]
+                            }
+                          ]
+                        },
+                        "airborne": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "airborne"
+                              ]
+                            }
+                          ]
+                        },
+                        "feathers": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "feathers"
+                              ]
+                            }
+                          ]
+                        },
+                        "tail": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "tail"
+                              ]
+                            }
+                          ]
+                        },
+                        "animal_name": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "animal_name"
+                              ]
+                            }
+                          ]
+                        },
+                        "backbone": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "backbone"
+                              ]
+                            }
+                          ]
+                        },
+                        "catsize": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "catsize"
+                              ]
+                            }
+                          ]
+                        },
+                        "breathes": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "breathes"
+                              ]
+                            }
+                          ]
+                        },
+                        "legs": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "legs"
+                              ]
+                            }
+                          ]
+                        },
+                        "predator": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "predator"
+                              ]
+                            }
+                          ]
+                        },
+                        "fins": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "fins"
+                              ]
+                            }
+                          ]
+                        },
+                        "venomous": {
+                          "mapped": true,
+                          "from": [
+                            {
+                              "source": "Source",
+                              "columns": [
+                                "venomous"
+                              ]
+                            }
+                          ]
+                        }
+                      },
+                      "dropped": 0,
+                      "drifted": 0,
+                      "newer": 0,
+                      "total": 18,
+                      "updated": 18
+                    }
+                  },
+                  "metrics": {
+                    "Sink": {
+                      "format": "delimited",
+                      "stages": [
+                        {
+                          "recordsWritten": 0,
+                          "lastUpdateTime": "2026-03-30 16:50:11.616",
+                          "bytesWritten": 0,
+                          "recordsRead": 0,
+                          "bytesRead": 0,
+                          "streams": {
+                            "Sink": {
+                              "count": 0,
+                              "cached": false,
+                              "totalPartitions": 0,
+                              "partitionStatus": "Success",
+                              "partitionCounts": [],
+                              "type": "sink"
+                            },
+                            "DerivedColumns": {
+                              "count": 0,
+                              "cached": false,
+                              "totalPartitions": 0,
+                              "partitionStatus": "Success",
+                              "partitionCounts": [],
+                              "type": "derive"
+                            },
+                            "Source": {
+                              "count": 0,
+                              "cached": false,
+                              "totalPartitions": 0,
+                              "partitionStatus": "Success",
+                              "partitionCounts": [],
+                              "type": "source"
+                            },
+                            "FilterRows": {
+                              "count": 0,
+                              "cached": false,
+                              "totalPartitions": 0,
+                              "partitionStatus": "Success",
+                              "partitionCounts": [],
+                              "type": "filter"
+                            }
+                          },
+                          "target": "Sink",
+                          "time": 2748,
+                          "progressState": "Completed"
+                        }
+                      ],
+                      "sinkPostProcessingTime": 0,
+                      "store": "blob",
+                      "rowsWritten": 0,
+                      "details": {
+                        "preCommandsDuration": [
+                          0
+                        ],
+                        "mergeDuration": [
+                          190
+                        ],
+                        "postCommandsDuration": [
+                          0
+                        ]
+                      },
+                      "progressState": "Completed",
+                      "sources": {
+                        "Source": {
+                          "rowsRead": 0,
+                          "store": "blob",
+                          "details": {
+                            "pathResolutionDuration": [
+                              39
+                            ],
+                            "fileReadCount": [
+                              1
+                            ],
+                            "fileLoadDuration": [
+                              6054
+                            ],
+                            "fileSystemInitDuration": [
+                              6138
+                            ]
+                          },
+                          "format": "delimited"
+                        }
+                      },
+                      "sinkProcessingTime": 2748
+                    }
+                  },
+                  "clusterComputeId": "25cbfd72-a8e3-4dc7-b094-c3295d7bd806",
+                  "dsl": "\nsource() ~> Source\n\nSource filter() ~> FilterRows\n\nFilterRows derive() ~> DerivedColumns\n\nDerivedColumns sink() ~> Sink",
+                  "integrationRuntimeName": "General-4-1-ea9ae997-a120-4da6-8d2c-a42495d8ad87",
+                  "sparkRunId": "49"
+                },
+                "effectiveIntegrationRuntime": "AutoResolveIntegrationRuntime (Central India)",
+                "billingReference": {
+                  "activityType": "executedataflow",
+                  "billableDuration": [
+                    {
+                      "meterType": "General",
+                      "duration": 0.1708640948888889,
+                      "unit": "coreHour",
+                      "sessionType": "JobCluster"
+                    }
+                  ]
+                },
+                "reportLineageToPurview": {
+                  "status": "NotReported"
+                }
+              },
+              "error": {
+                "errorCode": "",
+                "message": "",
+                "failureType": "",
+                "target": "DataFlowActivity",
+                "details": ""
+              }
+            }
+          ],
+          "errors": [],
+          "flags": [],
+          "resources": {
+            "data_moved_bytes": 0,
+            "data_moved_display": "0 B",
+            "compute_units": [],
+            "activity_types": [
+              "ExecuteDataFlow"
+            ],
+            "data_flows": []
+          }
+        }
+      ],
+      "anomalies": [],
+      "resources": {
+        "total_data_moved_bytes": 0,
+        "total_data_moved_display": "0 B",
+        "compute_units_used": [],
+        "activity_type_counts": {
+          "ExecuteDataFlow": 1
+        },
+        "cloud_compute": {}
+      },
+      "stats": {
+        "mean_s": 193.9,
+        "median_s": 193.9,
+        "stdev_s": 0,
+        "min_s": 193.9,
+        "max_s": 193.9
+      }
+    },
+    "Pipeline_Stage0_to_Stage1": {
+      "name": "Pipeline_Stage0_to_Stage1",
+      "runs": [
+        {
+          "run_id": "5954567c-9bbd-4900-8db8-fcc10a911cf9",
+          "status": "Succeeded",
+          "started_at": "2026-03-30T16:46:47.023090+00:00",
+          "ended_at": "2026-03-30T16:47:08.804237+00:00",
+          "duration_s": 21.8,
+          "duration_display": "21s",
+          "activities": [
+            {
+              "activity_name": "CopyActivity",
+              "activity_type": "Copy",
+              "status": "Succeeded",
+              "started_at": "2026-03-30T16:46:54.678323+00:00",
+              "ended_at": "2026-03-30T16:47:07.875802+00:00",
+              "duration_s": 13.2,
+              "duration_display": "13s",
+              "input": {
+                "source": {
+                  "type": "DelimitedTextSource",
+                  "wildcardFolderPath": "",
+                  "wildcardFileName": "*.csv",
+                  "recursive": true,
+                  "formatSettings": {
+                    "type": "DelimitedTextReadSettings",
+                    "quoteChar": "\"",
+                    "escapeChar": "\""
+                  }
+                },
+                "sink": {
+                  "type": "DelimitedTextSink",
+                  "storeSettings": {
+                    "type": "AzureBlobStorageWriteSettings",
+                    "fileName": "staged.csv"
+                  },
+                  "formatSettings": {
+                    "type": "DelimitedTextWriteSettings",
+                    "fileExtension": ".csv"
+                  },
+                  "copyBehavior": "MergeFiles"
+                },
+                "enableStaging": false,
+                "parallelCopies": 2,
+                "dataIntegrationUnits": 2
+              },
+              "output": {
+                "dataRead": 0,
+                "dataWritten": 5,
+                "filesRead": 0,
+                "filesWritten": 1,
+                "sourcePeakConnections": 1,
+                "sinkPeakConnections": 1,
+                "rowsRead": 0,
+                "rowsCopied": 0,
+                "copyDuration": 10,
+                "throughput": 0.0,
+                "errors": [],
+                "effectiveIntegrationRuntime": "AutoResolveIntegrationRuntime (Central India)",
+                "usedDataIntegrationUnits": 2,
+                "billingReference": {
+                  "activityType": "DataMovement",
+                  "billableDuration": [
+                    {
+                      "meterType": "AzureIR",
+                      "duration": 0.03333333333333333,
+                      "unit": "DIUHours"
+                    }
+                  ],
+                  "totalBillableDuration": [
+                    {
+                      "meterType": "AzureIR",
+                      "duration": 0.03333333333333333,
+                      "unit": "DIUHours"
+                    }
+                  ]
+                },
+                "usedParallelCopies": 1,
+                "executionDetails": [
+                  {
+                    "source": {
+                      "type": "AzureBlobStorage",
+                      "region": "Central India"
+                    },
+                    "sink": {
+                      "type": "AzureBlobStorage",
+                      "region": "Central India"
+                    },
+                    "status": "Succeeded",
+                    "start": "2026-03-30T16:46:55.40987Z",
+                    "duration": 10,
+                    "usedDataIntegrationUnits": 2,
+                    "usedParallelCopies": 1,
+                    "profile": {
+                      "queue": {
+                        "status": "Completed",
+                        "duration": 6
+                      },
+                      "transfer": {
+                        "status": "Completed",
+                        "duration": 2,
+                        "details": {
+                          "listingSource": {
+                            "type": "AzureBlobStorage",
+                            "workingDuration": 0
+                          },
+                          "readingFromSource": {
+                            "type": "AzureBlobStorage",
+                            "workingDuration": 0
+                          },
+                          "writingToSink": {
+                            "type": "AzureBlobStorage",
+                            "workingDuration": 0
+                          }
+                        }
+                      }
+                    },
+                    "detailedDurations": {
+                      "queuingDuration": 6,
+                      "transferDuration": 2
+                    }
+                  }
+                ],
+                "dataConsistencyVerification": {
+                  "VerificationResult": "NotVerified"
+                },
+                "durationInQueue": {
+                  "integrationRuntimeQueue": 0
+                }
+              },
+              "error": {
+                "errorCode": "",
+                "message": "",
+                "failureType": "",
+                "target": "CopyActivity",
+                "details": ""
+              }
+            }
+          ],
+          "errors": [],
+          "flags": [],
+          "resources": {
+            "data_moved_bytes": 0,
+            "data_moved_display": "0 B",
+            "compute_units": [],
+            "activity_types": [
+              "Copy"
+            ],
+            "data_flows": []
+          }
+        }
+      ],
+      "anomalies": [],
+      "resources": {
+        "total_data_moved_bytes": 0,
+        "total_data_moved_display": "0 B",
+        "compute_units_used": [],
+        "activity_type_counts": {
+          "Copy": 1
+        },
+        "cloud_compute": {}
+      },
+      "stats": {
+        "mean_s": 21.8,
+        "median_s": 21.8,
+        "stdev_s": 0,
+        "min_s": 21.8,
+        "max_s": 21.8
       }
     },
     "Pipeline_Raw_to_Bronze": {
@@ -1081,21 +5934,32 @@
     }
   },
   "issues": [
+    "[Pipeline_Silver_to_Gold] run 83ed79cb-b738-4a69-9ce6-90a02ec55213 ended with status 'Failed'",
+    "[Pipeline_Silver_to_Gold/DataFlowActivity] N/A: {\"StatusCode\":\"DF-Executor-InvalidPath\",\"Message\":\"Job failed due to reason: at Source 'Source': Path /staged.csv does not resolve to any file(s). Please make sure the file/folder exists and is not hidden. At the same time, please ensure special character is not included in file/folder name, for example, name starting with _\",\"Details\":\"\"}",
+    "[Pipeline_Silver_to_Gold] run ac174ab8-80e0-4253-ac28-c0b78c15786d ended with status 'Failed'",
+    "[Pipeline_Silver_to_Gold/DataFlowActivity] N/A: {\"StatusCode\":\"DF-Executor-InvalidPath\",\"Message\":\"Job failed due to reason: at Source 'Source': Path /staged.csv does not resolve to any file(s). Please make sure the file/folder exists and is not hidden. At the same time, please ensure special character is not included in file/folder name, for example, name starting with _\",\"Details\":\"\"}",
+    "[Pipeline_Silver_to_Gold] run 0688924f-6e3e-4fcc-88fd-ec2a1d5116b5 ended with status 'Failed'",
+    "[Pipeline_Silver_to_Gold/DataFlowActivity] N/A: {\"StatusCode\":\"DF-Executor-InvalidPath\",\"Message\":\"Job failed due to reason: at Source 'Source': Path /staged.csv does not resolve to any file(s). Please make sure the file/folder exists and is not hidden. At the same time, please ensure special character is not included in file/folder name, for example, name starting with _\",\"Details\":\"\"}",
+    "[Pipeline_Bronze_to_Silver] run d38951d2-6eb0-4796-a7ce-353bcad2cd6b ended with status 'Failed'",
+    "[Pipeline_Bronze_to_Silver/DataFlowActivity] N/A: {\"StatusCode\":\"DF-Executor-InvalidPath\",\"Message\":\"Job failed due to reason: at Source 'Source': Path /\\\\*.csv does not resolve to any file(s). Please make sure the file/folder exists and is not hidden. At the same time, please ensure special character is not included in file/folder name, for example, name starting with _\",\"Details\":\"\"}",
     "[Pipeline_Bronze_to_Silver] run 325c83e0-ebf2-4b55-af6a-1d56f879585b ended with status 'Failed'",
     "[Pipeline_Bronze_to_Silver/DataFlowActivity] BadRequest: The request failed with status code '\"BadRequest\"'.",
     "[Pipeline_Bronze_to_Silver] run 881dd4d7-e080-42af-b7c8-9eb4ca41dc01 ended with status 'Failed'",
-    "[Pipeline_Bronze_to_Silver/DataFlowActivity] BadRequest: The request failed with status code '\"BadRequest\"'."
+    "[Pipeline_Bronze_to_Silver/DataFlowActivity] BadRequest: The request failed with status code '\"BadRequest\"'.",
+    "[Pipeline_Incoming_to_Bronze] run 44083c19-bd53-44bd-bcda-ac8438d1baff is anomalously slow (27s vs mean 23s, stddev 2s, z=2.1)",
+    "[Pipeline_Stage2_to_Stage3] run 4eeb3eaa-c14f-4e20-9ed3-396d060c707f ended with status 'Failed'",
+    "[Pipeline_Stage2_to_Stage3/DataFlowActivity] N/A: {\"StatusCode\":\"DF-Executor-InvalidPath\",\"Message\":\"Job failed due to reason: at Source 'Source': Path /staged.csv does not resolve to any file(s). Please make sure the file/folder exists and is not hidden. At the same time, please ensure special character is not included in file/folder name, for example, name starting with _\",\"Details\":\"\"}"
   ],
   "summary": {
     "status": "issues_found",
-    "total_runs": 6,
+    "total_runs": 25,
     "running_runs": 0,
-    "completed_runs": 6,
-    "succeeded": 4,
-    "failed": 2,
+    "completed_runs": 25,
+    "succeeded": 18,
+    "failed": 7,
     "in_progress": 0,
-    "issue_count": 4,
-    "success_rate": 66.7
+    "issue_count": 15,
+    "success_rate": 72.0
   },
   "groq_advice": null
 }

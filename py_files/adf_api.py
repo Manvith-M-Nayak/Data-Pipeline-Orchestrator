@@ -268,20 +268,30 @@ def create_linked_service(token: str) -> requests.Response:
 # Sink datasets must never use a wildcard — ADF will write
 # a literal file called "*.csv" which breaks subsequent reads.
 # Sink filename is enforced as "output.csv".
-# Intermediate datasets are written by the copy pipeline as
-# "staged.csv" and read by the dataflow source from the same name.
+# Intermediate datasets have no filename - the wildcard pattern
+# is configured in the DataFlow source via wildcardFileName.
 # ============================================================
 def create_dataset(token: str, ds_config: dict) -> requests.Response:
     role     = ds_config.get("role", "source")
-    filename = ds_config.get("filename", "*.csv")
+    filename = ds_config.get("filename", "")
+
+    if role == "source":
+        print(f"   Source dataset '{ds_config['name']}': no filename (reads all files)")
 
     if role == "sink" and (not filename or filename.startswith("*")):
         filename = "output.csv"
         print(f"   Sink dataset '{ds_config['name']}': filename set to 'output.csv'")
 
     if role == "intermediate" and (not filename or filename.startswith("*")):
-        filename = "staged.csv"
-        print(f"   Intermediate dataset '{ds_config['name']}': filename set to 'staged.csv'")
+        filename = ""
+        print(f"   Intermediate dataset '{ds_config['name']}': no filename (wildcard configured in dataflow)")
+
+    location = {
+        "type":      "AzureBlobStorageLocation",
+        "container": ds_config["container"],
+    }
+    if filename:
+        location["fileName"] = filename
 
     body = {
         "properties": {
@@ -291,11 +301,7 @@ def create_dataset(token: str, ds_config: dict) -> requests.Response:
                 "type":          "LinkedServiceReference"
             },
             "typeProperties": {
-                "location": {
-                    "type":      "AzureBlobStorageLocation",
-                    "container": ds_config["container"],
-                    "fileName":  filename
-                },
+                "location": location,
                 "columnDelimiter":  ",",
                 "quoteChar":        '"',
                 "firstRowAsHeader": True,
@@ -478,6 +484,7 @@ def build_dataflow_script(
         "source(output(\n"
         + schema_str + "\n"
         + "     ),\n"
+        "     wildcardFileName: '*.csv',\n"
         "     allowSchemaDrift: true,\n"
         "     validateSchema: false,\n"
         "     ignoreNoFilesFound: false) ~> Source"
