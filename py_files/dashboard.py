@@ -36,6 +36,133 @@ html, body,
 [data-testid="stToolbar"],
 #MainMenu, footer { display: none !important; }
 
+/* Global text visibility - cover all text elements */
+div, span, p, label, li, td, th {
+    color: #1e293b !important;
+}
+
+/* Select box / dropdown styling */
+[data-testid="stSelectbox"] > div > div {
+    background-color: #1e293b !important;
+    color: #ffffff !important;
+    border-radius: 8px !important;
+    border: 1px solid #475569 !important;
+}
+
+[data-testid="stSelectbox"] input,
+[data-testid="stSelectbox"] input *,
+[data-testid="stSelectbox"] div,
+[data-testid="stSelectbox"] span,
+[data-testid="stSelectbox"] p {
+    color: #ffffff !important;
+    background-color: transparent !important;
+}
+
+/* ALL text inside selectbox dropdown - force white */
+div[data-baseweb="popover"] *,
+ul[data-baseweb="menu"] * {
+    color: #ffffff !important;
+}
+
+/* Dropdown menu / options - black background, white text */
+[data-testid="stSelectbox"] div[data-baseweb="select"],
+[data-testid="stSelectbox"] div[data-baseweb="popover"],
+[data-testid="stSelectbox"] div[role="listbox"],
+[data-testid="stSelectbox"] ul,
+[data-testid="stSelectbox"] li,
+[data-testid="stSelectbox"] span,
+[data-testid="stSelectbox"] div > div > div,
+ul[data-baseweb="menu"] li,
+div[data-baseweb="popover"] li,
+div[data-baseweb="menu"] div {
+    background-color: #1e293b !important;
+    color: #ffffff !important;
+}
+
+/* Dropdown options on hover */
+[data-testid="stSelectbox"] li:hover,
+[data-testid="stSelectbox"] div[role="option"]:hover,
+[data-testid="stSelectbox"] span:hover {
+    background-color: #334155 !important;
+    color: #ffffff !important;
+}
+
+/* Selected option in dropdown */
+[data-testid="stSelectbox"] li[aria-selected="true"],
+[data-testid="stSelectbox"] div[role="option"][aria-selected="true"] {
+    background-color: #3b82f6 !important;
+    color: #ffffff !important;
+}
+
+/* Hide the label text, show only value */
+[data-testid="stSelectbox"] label {
+    display: none !important;
+}
+
+/* Number input styling */
+[data-testid="stNumberInput"],
+[data-testid="stNumberInput"] > div,
+[data-testid="stNumberInput"] input {
+    color: #1e293b !important;
+    background-color: #ffffff !important;
+    border-radius: 8px !important;
+}
+
+[data-testid="stNumberInput"] input {
+    border: 1px solid #e2e8f0 !important;
+}
+
+[data-testid="stNumberInput"] input:focus {
+    border-color: #3b82f6 !important;
+    outline: none !important;
+}
+
+/* Show value below selectbox only */
+[data-testid="stSelectbox"] div[data-testid="stMarkdownContainer"] {
+    display: block !important;
+}
+
+/* File uploader - all text visibility */
+[data-testid="stFileUploader"],
+[data-testid="stFileUploader"] *,
+.stFileUploader,
+.stFileUploader *,
+[data-testid="stFileUploaderDropzone"],
+[data-testid="stFileUploaderDropzone"] *,
+[data-testid="stFileUploaderFileName"],
+[data-testid="stFileUploaderFileName"] *,
+[data-testid="stFileUploaderFileSize"],
+[data-testid="stFileUploaderFileSize"] *,
+[data-testid="stFileUploaderFileStatus"],
+[data-testid="stFileUploaderFileStatus"] *,
+[data-testid="stUploadedFileInfo"],
+[data-testid="stUploadedFileInfo"] *,
+[data-testid="stUploadedFile"],
+[data-testid="stUploadedFile"] * {
+    color: #1e293b !important;
+}
+
+/* Help text - lighter gray */
+[data-testid="stHelpContent"],
+.stHelpContent,
+small {
+    color: #64748b !important;
+}
+
+/* Text input styling */
+[data-testid="stTextInput"] input,
+[data-testid="stTextInput"] input:focus {
+    color: #1e293b !important;
+    background-color: #ffffff !important;
+    border-radius: 8px !important;
+    border: 1px solid #e2e8f0 !important;
+}
+
+[data-testid="stTextInput"] input:focus {
+    border-color: #3b82f6 !important;
+    outline: none !important;
+}
+
 .block-container { padding: 2rem 3rem 4rem !important; max-width: 1280px; }
 
 /* ── Header ── */
@@ -636,16 +763,35 @@ def render_plan(config: dict, schema: dict):
     rows = "".join(
         f"<tr><td>{p['name']}</td>"
         f"<td><span class='pill pill-{p['type']}'>{p['type']}</span></td>"
-        f"<td>{p['source_dataset']}</td><td>{p['sink_dataset']}</td></tr>"
+        f"<td>{p['source_dataset']}</td><td>{p['sink_dataset']}</td>"
+        f"<td>{p.get('compute_type', '-')}</td>"
+        f"<td>{p.get('core_count', '-')}</td>"
+        f"<td>{p.get('partition_count', '-')}</td></tr>"
         for p in config["pipelines"]
     )
     st.markdown(f"""
     <div class="card-label">Pipelines</div>
     <table class="plan-table">
-      <thead><tr><th>Name</th><th>Type</th><th>Source</th><th>Sink</th></tr></thead>
+      <thead><tr><th>Name</th><th>Type</th><th>Source</th><th>Sink</th><th>Compute</th><th>Cores</th><th>Partitions</th></tr></thead>
       <tbody>{rows}</tbody>
     </table>""", unsafe_allow_html=True)
     st.markdown("<br>", unsafe_allow_html=True)
+
+    if "recommended_settings" in config:
+        rec = config["recommended_settings"]
+        st.markdown(f"""
+        <div class="card-label">Recommended Settings</div>
+        <table class="plan-table">
+          <thead><tr><th>Setting</th><th>Value</th></tr></thead>
+          <tbody>
+            <tr><td>Compute Type</td><td>{rec.get('compute_type', 'N/A')}</td></tr>
+            <tr><td>Core Count</td><td>{rec.get('core_count', 'N/A')}</td></tr>
+            <tr><td>Partition Count</td><td>{rec.get('partition_count', 'N/A')}</td></tr>
+            <tr><td>Parallel Copies</td><td>{rec.get('parallel_copies', 'N/A')}</td></tr>
+            <tr><td>DIU</td><td>{rec.get('diu', 'N/A')}</td></tr>
+          </tbody>
+        </table>""", unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
 
     type_rows = "".join(
         f"<tr><td>{col}</td>"
@@ -1098,7 +1244,7 @@ if st.session_state.stage == "input":
             st.session_state.prompt_text = ""
 
         st.text_area(
-            "pipeline_prompt", height=130,
+            "pipeline_prompt", height=180,
             label_visibility="collapsed",
             key="prompt_text",
             placeholder=(
@@ -1108,12 +1254,10 @@ if st.session_state.stage == "input":
         )
         st.markdown("<br>", unsafe_allow_html=True)
 
-        # Plain button - no form to avoid rerun issues
         if st.button("Generate Plan", use_container_width=True):
             prompt_val = st.session_state.get("prompt_text", "").strip()
             csv_path = st.session_state.get("csv_tmp_path")
             
-            # Debug: show what's missing
             if not csv_path:
                 st.error(f"CSV not loaded: csv_tmp_path={csv_path}")
             elif not prompt_val:
@@ -1138,7 +1282,7 @@ if st.session_state.stage == "input":
                                 st.rerun()
                             except Exception as e:
                                 if "429" in str(e) and attempt < 2:
-                                    time.sleep(2)  # Wait before retry
+                                    time.sleep(2)
                                     continue
                                 else:
                                     raise
@@ -1157,9 +1301,184 @@ elif st.session_state.stage == "plan":
     render_plan(st.session_state.pipeline_config, st.session_state.schema)
     st.markdown('</div>', unsafe_allow_html=True)
 
+    config = st.session_state.pipeline_config
+    rec = config.get("recommended_settings", {})
+    schema = st.session_state.schema
+    
+    st.markdown('<div class="card" style="background-color:#f8fafc;padding:1rem;border-radius:0.5rem;margin-bottom:1rem;">', unsafe_allow_html=True)
+    st.markdown('<div style="color:#1e293b;font-weight:600;font-size:1rem;margin-bottom:0.5rem;">⚙️ Pipeline Configuration</div>', unsafe_allow_html=True)
+    st.markdown(f'<div style="color:#64748b;font-size:0.85rem;margin-bottom:1rem;">Recommended settings for {schema.get("size_hint", "medium")} data. Edit as needed.</div>', unsafe_allow_html=True)
+    
+    if "edit_num_stages" not in st.session_state:
+        st.session_state.edit_num_stages = config.get("num_containers", 3)
+    if "edit_compute_type" not in st.session_state:
+        st.session_state.edit_compute_type = rec.get("compute_type", "General")
+    if "edit_core_count" not in st.session_state:
+        st.session_state.edit_core_count = rec.get("core_count", 4)
+    if "edit_partition_count" not in st.session_state:
+        st.session_state.edit_partition_count = rec.get("partition_count", 4)
+    if "edit_parallel_copies" not in st.session_state:
+        st.session_state.edit_parallel_copies = rec.get("parallel_copies", 2)
+    if "edit_diu" not in st.session_state:
+        st.session_state.edit_diu = rec.get("diu", 2)
+    
+    st.markdown('<div style="color:#ffffff;font-weight:500;font-size:0.9rem;margin-top:1rem;">Number of Stages</div>', unsafe_allow_html=True)
+    new_num_stages = st.number_input(
+        "stages", 
+        min_value=2, max_value=5, 
+        value=st.session_state.edit_num_stages,
+        label_visibility="collapsed",
+        help="2-5 stages. More stages = more processing steps but longer execution time."
+    )
+    st.session_state.edit_num_stages = new_num_stages
+    
+    st.markdown('<div style="color:#ffffff;font-weight:500;font-size:0.9rem;margin-top:1rem;">Compute Settings</div>', unsafe_allow_html=True)
+    
+    compute_options = ["Cost Optimized", "Performance Optimized"]
+    current_compute_idx = compute_options.index(st.session_state.edit_compute_type) if st.session_state.edit_compute_type in compute_options else 0
+    st.markdown('<div style="color:#ffffff;font-size:0.85rem;margin-bottom:0.3rem;">Compute Type</div>', unsafe_allow_html=True)
+    new_compute = st.selectbox(
+        "compute_type",
+        compute_options,
+        index=current_compute_idx,
+        label_visibility="collapsed",
+        help="Cost Optimized = lower cost | Performance Optimized = faster processing"
+    )
+    st.session_state.edit_compute_type = new_compute
+    
+    if new_compute == "Cost Optimized":
+        core_options = [4, 8, 16]
+        partition_options = [2, 4, 8]
+        parallel_options = [1, 2, 4]
+        diu_options = [1, 2, 4]
+    else:
+        core_options = [8, 16, 32]
+        partition_options = [8, 16, 32]
+        parallel_options = [4, 8, 16]
+        diu_options = [4, 8, 16]
+    
+    if st.session_state.edit_core_count not in core_options:
+        st.session_state.edit_core_count = core_options[1]
+    if st.session_state.edit_partition_count not in partition_options:
+        st.session_state.edit_partition_count = partition_options[1]
+    if st.session_state.edit_parallel_copies not in parallel_options:
+        st.session_state.edit_parallel_copies = parallel_options[2]
+    if st.session_state.edit_diu not in diu_options:
+        st.session_state.edit_diu = diu_options[2]
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown('<div style="color:#ffffff;font-size:0.85rem;margin-bottom:0.3rem;">Core Count</div>', unsafe_allow_html=True)
+        current_core_idx = core_options.index(st.session_state.edit_core_count)
+        new_cores = st.selectbox(
+            "core_count",
+            core_options,
+            index=current_core_idx,
+            label_visibility="collapsed",
+            help="More cores = faster processing but higher cost"
+        )
+        st.session_state.edit_core_count = new_cores
+        
+        st.markdown('<div style="color:#ffffff;font-size:0.85rem;margin-bottom:0.3rem;margin-top:0.5rem;">Parallel Copies</div>', unsafe_allow_html=True)
+        current_parallel_idx = parallel_options.index(st.session_state.edit_parallel_copies)
+        new_parallel = st.selectbox(
+            "parallel_copies",
+            parallel_options,
+            index=current_parallel_idx,
+            label_visibility="collapsed",
+            help="Number of parallel copy operations"
+        )
+        st.session_state.edit_parallel_copies = new_parallel
+    
+    with col2:
+        st.markdown('<div style="color:#ffffff;font-size:0.85rem;margin-bottom:0.3rem;">Partition Count</div>', unsafe_allow_html=True)
+        current_partition_idx = partition_options.index(st.session_state.edit_partition_count)
+        new_partitions = st.selectbox(
+            "partition_count",
+            partition_options,
+            index=current_partition_idx,
+            label_visibility="collapsed",
+            help="More partitions = better parallelism but more overhead"
+        )
+        st.session_state.edit_partition_count = new_partitions
+        
+        st.markdown('<div style="color:#ffffff;font-size:0.85rem;margin-bottom:0.3rem;margin-top:0.5rem;">DIU (Data Integration Units)</div>', unsafe_allow_html=True)
+        current_diu_idx = diu_options.index(st.session_state.edit_diu)
+        new_diu = st.selectbox(
+            "diu",
+            diu_options,
+            index=current_diu_idx,
+            label_visibility="collapsed",
+            help="Higher DIU = faster data movement"
+        )
+        st.session_state.edit_diu = new_diu
+    
+    st.markdown("---")
+    if "edit_container_names" not in st.session_state:
+        current_containers = list(config.get("containers", {}).values())
+        st.session_state.edit_container_names = ", ".join(current_containers)
+    
+    new_containers = st.text_input(
+        "Container names (comma-separated)",
+        value=st.session_state.edit_container_names,
+        placeholder="e.g. raw, bronze, silver",
+        label_visibility="visible",
+        help="Leave empty to use default names from the plan"
+    )
+    st.session_state.edit_container_names = new_containers
+    
+    apply_btn = st.button("Apply Settings", type="primary", use_container_width=True)
+    
+    if apply_btn:
+        py_dir = os.path.dirname(os.path.abspath(__file__))
+        if py_dir not in sys.path:
+            sys.path.insert(0, py_dir)
+        from groq_brain import decide_pipeline_config
+        
+        container_list = None
+        if new_containers.strip():
+            container_list = [c.strip() for c in new_containers.split(",")]
+        
+        custom_settings = {
+            "compute_type": new_compute,
+            "core_count": new_cores,
+            "partition_count": new_partitions,
+            "parallel_copies": new_parallel,
+            "diu": new_diu
+        }
+        
+        with st.spinner("Regenerating pipeline plan with new settings..."):
+            try:
+                new_config = decide_pipeline_config(
+                    schema,
+                    st.session_state.get("user_prompt", ""),
+                    num_containers=new_num_stages,
+                    custom_settings=custom_settings,
+                    container_names=container_list if container_list and len(container_list) == new_num_stages else None
+                )
+                st.session_state.pipeline_config = new_config
+                st.session_state.edit_compute_type = new_compute
+                st.session_state.edit_core_count = new_cores
+                st.session_state.edit_partition_count = new_partitions
+                st.session_state.edit_parallel_copies = new_parallel
+                st.session_state.edit_diu = new_diu
+                st.session_state.edit_num_stages = new_num_stages
+                st.session_state.edit_container_names = ", ".join(list(new_config.get("containers", {}).values()))
+                st.success("Settings applied! Review the updated plan above.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error applying settings: {str(e)}")
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
+
     col_back, col_deploy = st.columns(2)
     with col_back:
         if st.button("← Back"):
+            for key in ["edit_compute_type", "edit_core_count", "edit_partition_count", 
+                        "edit_parallel_copies", "edit_diu", "edit_num_stages", 
+                        "edit_container_names"]:
+                st.session_state.pop(key, None)
             st.session_state.stage = "input"
             st.rerun()
     with col_deploy:

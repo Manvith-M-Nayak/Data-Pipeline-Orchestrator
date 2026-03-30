@@ -7,6 +7,17 @@ from config import *
 
 
 # ============================================================
+# MAP: Compute type to ADF expected values
+# ============================================================
+def map_compute_type(compute_type: str) -> str:
+    mapping = {
+        "Cost Optimized": "General",
+        "Performance Optimized": "MemoryOptimized"
+    }
+    return mapping.get(compute_type, compute_type)
+
+
+# ============================================================
 # AUTH: Get Azure Access Token
 # ============================================================
 def get_access_token() -> str:
@@ -626,6 +637,10 @@ def create_dataflow_pipeline(token: str, pipeline_config: dict, columns: list) -
 
     time.sleep(5)
 
+    compute_type = map_compute_type(pipeline_config.get("compute_type", "General"))
+    core_count = pipeline_config.get("core_count", 8)
+    print(f"   Pipeline compute: type={compute_type}, cores={core_count}")
+
     pipeline_body = {
         "properties": {
             "activities": [
@@ -638,8 +653,8 @@ def create_dataflow_pipeline(token: str, pipeline_config: dict, columns: list) -
                             "type":          "DataFlowReference"
                         },
                         "compute": {
-                            "coreCount":   pipeline_config.get("core_count", 8),
-                            "computeType": pipeline_config.get("compute_type", "General")
+                            "coreCount":   core_count,
+                            "computeType": compute_type
                         },
                         "staging": {
                             "linkedService": {

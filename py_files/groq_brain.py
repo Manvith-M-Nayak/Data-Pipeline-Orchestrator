@@ -2,35 +2,162 @@ import requests
 import json
 from config import GROQ_API_KEY
 
-# Groq API endpoint — completely free, no billing needed
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 
-# ============================================================
-# THE BRAIN: Groq reads the CSV schema + user prompt and
-# decides EVERYTHING about the pipeline dynamically
-# ============================================================
-def decide_pipeline_config(schema: dict, user_prompt: str) -> dict:
+RECOMMENDED_SETTINGS = {
+    "small": {
+        "compute_type": "General",
+        "core_count": 4,
+        "partition_count": 2,
+        "parallel_copies": 2,
+        "diu": 2
+    },
+    "medium": {
+        "compute_type": "General",
+        "core_count": 8,
+        "partition_count": 4,
+        "parallel_copies": 4,
+        "diu": 4
+    },
+    "large": {
+        "compute_type": "MemoryOptimized",
+        "core_count": 16,
+        "partition_count": 8,
+        "parallel_copies": 8,
+        "diu": 8
+    },
+    "xlarge": {
+        "compute_type": "MemoryOptimized",
+        "core_count": 32,
+        "partition_count": 16,
+        "parallel_copies": 16,
+        "diu": 16
+    }
+}
+
+CONTAINER_NAMING_CONVENTIONS = [
+    ["incoming", "bronze", "silver"],
+    ["raw", "stage", "curated"],
+    ["landing", "processing", "output"],
+    ["raw", "staging", " curated"],
+    ["input", "intermediate", "final"],
+]
+
+
+def get_recommended_settings(size_hint: str) -> dict:
+    """Return recommended settings based on file size."""
+    size_key = size_hint.lower().replace(" ", "").replace("<", "").replace(">", "").replace("mb", "").replace("gb", "")
+    
+    if "small" in size_key or "<5mb" in size_key or "5mb" in size_key:
+        return RECOMMENDED_SETTINGS["small"]
+    elif "medium" in size_key or "5mb50mb" in size_key or "50mb" in size_key:
+        return RECOMMENDED_SETTINGS["medium"]
+    elif "large" in size_key and "50mb" not in size_key:
+        return RECOMMENDED_SETTINGS["large"]
+    elif ">50mb" in size_key or "xlarge" in size_key:
+        return RECOMMENDED_SETTINGS["xlarge"]
+    
+    return RECOMMENDED_SETTINGS["medium"]
+
+
+def decide_pipeline_config(
+    schema: dict,
+    user_prompt: str,
+    num_containers: int = None,
+    custom_settings: dict = None,
+    container_names: list = None,
+) -> dict:
     """
     Sends CSV schema + user prompt to Groq LLaMA 3.3 70B.
     Groq returns a complete pipeline configuration as JSON.
+    
+    Args:
+        schema: CSV schema with columns, samples, inferred_types, row_count, size_hint
+        user_prompt: Natural language prompt describing desired transformations
+        num_containers: Number of containers/stages (default: 3, min: 2, max: 5)
+        custom_settings: Override recommended settings with custom values
+        custom_settings can include:
+            - compute_type, core_count, partition_count, parallel_copies, diu
+        container_names: Custom container names (list of strings)
     """
+    
+    rec = get_recommended_settings(schema.get("size_hint", "medium"))
+    
+    if custom_settings:
+        rec.update(custom_settings)
+    
+    if num_containers is None:
+        num_containers = 3
+    num_containers = max(2, min(5, num_containers))
+    
+    container_list = container_names if container_names else []
+    if len(container_list) != num_containers:
+        for conv in CONTAINER_NAMING_CONVENTIONS:
+            if len(conv) >= num_containers:
+                container_list = conv[:num_containers]
+                break
+        if not container_list:
+            container_list = [f"stage{i}" for i in range(num_containers)]
+    
+    containers_json = json.dumps({f"stage{i}": container_list[i] for i in range(num_containers)})
+    datasets_json = json.dumps([
+        {
+            "name": f"DS_{container_list[0].title()}",
+            "container": container_list[0],
+            "filename": "*.csv",
+            "role": "source"
+        }
+    ] + [
+        {
+            "name": f"DS_{container_list[i].title()}",
+            "container": container_list[i],
+            "filename": "*.csv" if i < num_containers - 1 else "output.csv",
+            "role": "intermediate" if i < num_containers - 1 else "sink"
+        }
+        for i in range(1, num_containers)
+    ])
+    
+    pipelines_json = json.dumps([
+        {
+            "name": f"Pipeline_{container_list[i].title()}_to_{container_list[i+1].title()}",
+            "type": "copy" if i == 0 else "dataflow",
+            "source_dataset": f"DS_{container_list[i].title()}",
+            "sink_dataset": f"DS_{container_list[i+1].title()}",
+            "parallel_copies": rec.get("parallel_copies", 2),
+            "diu": rec.get("diu", 2),
+            "transformations": ["processed_time = currentTimestamp()"] if i > 0 else [],
+            "partition_count": rec.get("partition_count", 4),
+            "compute_type": rec.get("compute_type", "General"),
+            "core_count": rec.get("core_count", 4)
+        }
+        for i in range(num_containers - 1)
+    ])
+    
+    execution_order_json = json.dumps([
+        f"Pipeline_{container_list[i].title()}_to_{container_list[i+1].title()}"
+        for i in range(num_containers - 1)
+    ])
 
-    system_context = """
+    system_context = f"""
 You are an Azure Data Factory (ADF) pipeline architect.
 
 Given a CSV schema and a user's natural language prompt, you must decide the COMPLETE pipeline configuration.
 You control everything: container names, dataset names, pipeline names, transformations, compute settings, partitioning, DIU, and execution order.
 
 Rules:
-1. Decide container names based on the prompt context (e.g. raw/stage/curated OR incoming/bronze/silver OR landing/processing/output)
-2. Decide how many pipelines are needed (usually 2: copy + dataflow, but decide based on the prompt)
-3. For "copy" type pipelines: use Copy Activity to move data between containers
-4. For "dataflow" type pipelines: use Data Flow Activity with Derived Column transformations
-5. Choose compute_type as "MemoryOptimized" for large data or "General" for small data
-6. Choose partition_count based on data size hints in the prompt (use 4 for small, 10 for large)
-7. Choose core_count: 4 for small datasets, 8 for large datasets
-8. For transformations, use ONLY valid ADF Data Flow expression syntax:
+1. The number of containers/stages has been PRE-DETERMINED: {num_containers} stages
+2. Container names: {container_list}
+3. Recommended settings for this data size ({schema.get('size_hint', 'medium')}):
+   - compute_type: {rec.get('compute_type', 'General')}
+   - core_count: {rec.get('core_count', 4)}
+   - partition_count: {rec.get('partition_count', 4)}
+   - parallel_copies: {rec.get('parallel_copies', 2)}
+   - diu: {rec.get('diu', 2)}
+   These can be adjusted based on the user's prompt or data characteristics.
+4. For "copy" type pipelines: use Copy Activity to move data between containers
+5. For "dataflow" type pipelines: use Data Flow Activity with Derived Column transformations
+6. For transformations, use ONLY valid ADF Data Flow expression syntax:
    - upper(col), lower(col), trim(col)
    - toInteger(col), toDouble(col), toString(col)
    - iifNull(col, 'default')
@@ -40,50 +167,35 @@ Rules:
    - substring(col, 1, 5)
    - regexReplace(col, '[^a-zA-Z0-9]', '')
    - Always include: processed_time = currentTimestamp()
-9. Always include a "reasoning" field explaining your decisions
+7. Always include a "reasoning" field explaining your decisions
+8. Include a "recommended_settings" object showing optimal values
+9. Include an "editable_settings" object with all configurable options
 
 Return ONLY a valid JSON object. No markdown, no explanation, no backticks.
 
 The JSON must follow this exact structure:
-{
-  "containers": {
-      "raw":    "incoming",
-      "stage1": "bronze",
-      "stage2": "silver"
-  },
-  "datasets": [
-      { "name": "DS_Raw",    "container": "incoming", "filename": "*.csv",      "role": "source" },
-      { "name": "DS_Bronze", "container": "bronze",   "filename": "*.csv",      "role": "intermediate" },
-      { "name": "DS_Silver", "container": "silver",   "filename": "output.csv", "role": "sink" }
-  ],
-  "pipelines": [
-      {
-          "name": "Pipeline_Raw_to_Bronze",
-          "type": "copy",
-          "source_dataset":  "DS_Raw",
-          "sink_dataset":    "DS_Bronze",
-          "merge_files":     true,
-          "parallel_copies": 4,
-          "diu":             4
-      },
-      {
-          "name": "Pipeline_Bronze_to_Silver",
-          "type": "dataflow",
-          "source_dataset":  "DS_Bronze",
-          "sink_dataset":    "DS_Silver",
-          "transformations": [
-              "processed_time = currentTimestamp()",
-              "name = upper(name)"
-          ],
-          "partition_count": 10,
-          "compute_type":    "MemoryOptimized",
-          "core_count":      8
-      }
-  ],
-  "containers_to_create": ["incoming", "bronze", "silver"],
-  "execution_order":      ["Pipeline_Raw_to_Bronze", "Pipeline_Bronze_to_Silver"],
-  "reasoning":            "Brief explanation of decisions made"
-}
+{{
+  "containers": {containers_json},
+  "datasets": {datasets_json},
+  "pipelines": {pipelines_json},
+  "containers_to_create": {json.dumps(container_list)},
+  "execution_order": {execution_order_json},
+  "recommended_settings": {{
+    "compute_type": "{rec.get('compute_type', 'General')}",
+    "core_count": {rec.get('core_count', 4)},
+    "partition_count": {rec.get('partition_count', 4)},
+    "parallel_copies": {rec.get('parallel_copies', 2)},
+    "diu": {rec.get('diu', 2)}
+  }},
+  "editable_settings": {{
+    "compute_type": ["General", "MemoryOptimized"],
+    "core_count": [4, 8, 16, 32],
+    "partition_count": [2, 4, 8, 16, 32, 64],
+    "parallel_copies": [1, 2, 4, 8, 16],
+    "diu": [1, 2, 4, 8, 16, 32]
+  }},
+  "reasoning": "Brief explanation of decisions made"
+}}
 """
 
     user_message = f"""
@@ -97,11 +209,11 @@ Sample Data:
 
 User Prompt: "{user_prompt}"
 
+Number of stages: {num_containers}
+Container names: {container_list}
+
 Return the complete ADF pipeline configuration JSON:
 """
-
-    # Combine system context + user message for Groq
-    full_prompt = system_context + "\n\n" + user_message
 
     payload = {
         "model": "llama-3.3-70b-versatile",
@@ -131,7 +243,6 @@ Return the complete ADF pipeline configuration JSON:
 
     raw = response.json()["choices"][0]["message"]["content"].strip()
 
-    # Strip any accidental markdown code fences Groq might add
     if "```" in raw:
         parts = raw.split("```")
         for part in parts:
@@ -146,11 +257,28 @@ Return the complete ADF pipeline configuration JSON:
 
     try:
         config = json.loads(raw)
+        
+        if "recommended_settings" not in config:
+            config["recommended_settings"] = rec
+        if "editable_settings" not in config:
+            config["editable_settings"] = {
+                "compute_type": ["General", "MemoryOptimized"],
+                "core_count": [4, 8, 16, 32],
+                "partition_count": [2, 4, 8, 16, 32, 64],
+                "parallel_copies": [1, 2, 4, 8, 16],
+                "diu": [1, 2, 4, 8, 16, 32]
+            }
+        
+        config["num_containers"] = num_containers
+        
         print("\n✅ Groq decided the following pipeline config:")
         print(f"   Containers  : {list(config['containers'].values())}")
         print(f"   Datasets    : {[d['name'] for d in config['datasets']]}")
         print(f"   Pipelines   : {[p['name'] for p in config['pipelines']]}")
         print(f"   Exec Order  : {config['execution_order']}")
+        print(f"\n📋 Recommended Settings:")
+        for k, v in config.get("recommended_settings", rec).items():
+            print(f"      {k}: {v}")
         print(f"\n💡 Reasoning  : {config.get('reasoning', 'N/A')}\n")
         return config
     except json.JSONDecodeError as e:

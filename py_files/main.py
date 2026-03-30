@@ -1,7 +1,7 @@
 import csv
 import os
 import json
-from groq_brain import decide_pipeline_config
+from groq_brain import decide_pipeline_config, get_recommended_settings
 from adf_api import (
     get_access_token,
     create_blob_container,
@@ -21,9 +21,6 @@ from azure.mgmt.datafactory import DataFactoryManagementClient
 from monitor_agent import MonitoringAgent
 
 
-# ============================================================
-# READ CSV: Extract schema + sample data for Groq
-# ============================================================
 def read_csv_schema(filepath: str, sample_rows: int = 5) -> dict:
     file_size = os.path.getsize(filepath)
 
@@ -31,8 +28,10 @@ def read_csv_schema(filepath: str, sample_rows: int = 5) -> dict:
         size_hint = "small (< 5MB)"
     elif file_size < 50 * 1024 * 1024:
         size_hint = "medium (5MB - 50MB)"
+    elif file_size < 200 * 1024 * 1024:
+        size_hint = "large (50MB - 200MB)"
     else:
-        size_hint = "large (> 50MB)"
+        size_hint = "xlarge (> 200MB)"
 
     with open(filepath, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
@@ -72,14 +71,12 @@ def _is_float(val: str) -> bool:
         return False
 
 
-# ============================================================
-# PREVIEW: Show Groq's decisions before deploying
-# ============================================================
-def preview_config(pipeline_config: dict):
+def preview_config(pipeline_config: dict, show_editable: bool = True):
     print("\n" + "=" * 60)
     print("  PIPELINE PLAN (decided by Groq LLaMA 3.3 70B)")
     print("=" * 60)
 
+    print(f"\nNumber of stages: {pipeline_config.get('num_containers', len(pipeline_config['containers']))}")
     print("\nContainers to create:")
     for label, name in pipeline_config["containers"].items():
         print(f"  {label:10} -> '{name}'")
@@ -109,19 +106,139 @@ def preview_config(pipeline_config: dict):
             print(f"    parallel_copies: {p.get('parallel_copies')} | DIU: {p.get('diu')}")
 
     print(f"\nExecution order: {' -> '.join(pipeline_config['execution_order'])}")
+    
+    if show_editable and "recommended_settings" in pipeline_config:
+        print("\n" + "-" * 40)
+        print("  RECOMMENDED SETTINGS (based on data size):")
+        print("-" * 40)
+        rec = pipeline_config["recommended_settings"]
+        for key, val in rec.items():
+            print(f"  {key:20}: {val}")
+        
+        if "editable_settings" in pipeline_config:
+            print("\n  Available options:")
+            edit = pipeline_config["editable_settings"]
+            for key, options in edit.items():
+                print(f"    {key}: {options}")
+    
     print(f"\nReasoning: {pipeline_config.get('reasoning', 'N/A')}")
     print("=" * 60)
 
 
-# ============================================================
-# MAIN
-# ============================================================
+def edit_pipeline_config(pipeline_config: dict) -> dict:
+    """Allow user to edit pipeline configuration settings."""
+    print("\n--- Edit Pipeline Configuration ---")
+    print("Current recommended settings:")
+    rec = pipeline_config.get("recommended_settings", {})
+    for key, val in rec.items():
+        print(f"  {key}: {val}")
+    
+    print("\nAvailable settings to edit:")
+    print("  1. compute_type (General/MemoryOptimized)")
+    print("  2. core_count")
+    print("  3. partition_count")
+    print("  4. parallel_copies")
+    print("  5. diu")
+    print("  6. Add custom transformations")
+    print("  7. Done - proceed with current config")
+    
+    while True:
+        choice = input("\nEnter choice (1-7): ").strip()
+        
+        if choice == "7":
+            break
+        
+        elif choice == "1":
+            print(f"Current: {pipeline_config['pipelines'][0].get('compute_type', 'General')}")
+            new_val = input("Enter compute_type (General/MemoryOptimized): ").strip()
+            if new_val in ["General", "MemoryOptimized"]:
+                for p in pipeline_config["pipelines"]:
+                    if p["type"] == "dataflow":
+                        p["compute_type"] = new_val
+                print(f"  Updated compute_type to {new_val}")
+        
+        elif choice == "2":
+            print(f"Current core_count: {pipeline_config['pipelines'][0].get('core_count', 4)}")
+            try:
+                new_val = int(input("Enter core_count (4/8/16/32): ").strip())
+                if new_val in [4, 8, 16, 32]:
+                    for p in pipeline_config["pipelines"]:
+                        if p["type"] == "dataflow":
+                            p["core_count"] = new_val
+                    print(f"  Updated core_count to {new_val}")
+            except ValueError:
+                print("  Invalid number")
+        
+        elif choice == "3":
+            print(f"Current partition_count: {pipeline_config['pipelines'][0].get('partition_count', 4)}")
+            try:
+                new_val = int(input("Enter partition_count: ").strip())
+                if new_val > 0:
+                    for p in pipeline_config["pipelines"]:
+                        if p["type"] == "dataflow":
+                            p["partition_count"] = new_val
+                    print(f"  Updated partition_count to {new_val}")
+            except ValueError:
+                print("  Invalid number")
+        
+        elif choice == "4":
+            print(f"Current parallel_copies: {pipeline_config['pipelines'][0].get('parallel_copies', 2)}")
+            try:
+                new_val = int(input("Enter parallel_copies: ").strip())
+                if new_val > 0:
+                    for p in pipeline_config["pipelines"]:
+                        if p["type"] == "copy":
+                            p["parallel_copies"] = new_val
+                    print(f"  Updated parallel_copies to {new_val}")
+            except ValueError:
+                print("  Invalid number")
+        
+        elif choice == "5":
+            print(f"Current DIU: {pipeline_config['pipelines'][0].get('diu', 2)}")
+            try:
+                new_val = int(input("Enter DIU: ").strip())
+                if new_val > 0:
+                    for p in pipeline_config["pipelines"]:
+                        if p["type"] == "copy":
+                            p["diu"] = new_val
+                    print(f"  Updated DIU to {new_val}")
+            except ValueError:
+                print("  Invalid number")
+        
+        elif choice == "6":
+            print("\nCurrent transformations:")
+            for i, p in enumerate(pipeline_config["pipelines"]):
+                if p["type"] == "dataflow":
+                    print(f"  Pipeline {i+1}: {p.get('transformations', [])}")
+            
+            print("\nEnter new transformation (format: column = expression)")
+            print("Examples:")
+            print("  name = upper(name)")
+            print("  amount = toDouble(amount)")
+            print("  email = lower(email)")
+            print("(Press Enter with empty line to stop adding)")
+            
+            while True:
+                trans = input("Add transformation (or Enter to skip): ").strip()
+                if not trans:
+                    break
+                if "=" in trans:
+                    for p in pipeline_config["pipelines"]:
+                        if p["type"] == "dataflow":
+                            if "transformations" not in p:
+                                p["transformations"] = []
+                            if "processed_time = currentTimestamp()" not in trans:
+                                p["transformations"].append(trans)
+                    print(f"  Added: {trans}")
+    
+    return pipeline_config
+
+
 def main():
     print("\n" + "=" * 60)
     print("  ADF Dynamic Pipeline Generator — Powered by Groq LLaMA 3.3 70B")
     print("=" * 60 + "\n")
 
-    # -- User inputs
     csv_filepath = input("Path to your CSV file        : ").strip()
     user_prompt  = input("What should the pipeline do? : ").strip()
 
@@ -132,35 +249,85 @@ def main():
         print(f"File must be a .csv — got: '{csv_filepath}'")
         return
 
-    # -- Step 1: Read CSV schema
     print("\n--- Step 1: Reading CSV ---")
     schema = read_csv_schema(csv_filepath)
 
-    # -- Step 2: Groq decides the pipeline config
-    print("\n--- Step 2: Groq AI is deciding pipeline configuration ---")
-    pipeline_config = decide_pipeline_config(schema, user_prompt)
+    print("\n--- Step 2: Configure Pipeline ---")
+    print("Number of stages (containers/pipelines):")
+    print("  2 stages: raw -> silver (copy + dataflow)")
+    print("  3 stages: incoming -> bronze -> silver (copy + 2 dataflows)")
+    print("  4 stages: raw -> stage1 -> stage2 -> stage3")
+    print("  5 stages: raw -> stage1 -> stage2 -> stage3 -> stage4")
+    
+    num_containers_input = input("Number of stages (default 3, min 2, max 5): ").strip()
+    num_containers = 3
+    if num_containers_input:
+        try:
+            num_containers = max(2, min(5, int(num_containers_input)))
+        except ValueError:
+            print("Invalid input, using default 3 stages")
+    
+    rec_settings = get_recommended_settings(schema["size_hint"])
+    print(f"\nRecommended settings for {schema['size_hint']} data:")
+    for k, v in rec_settings.items():
+        print(f"  {k}: {v}")
+    
+    customize = input("\nCustomize settings? (yes/no, default no): ").strip().lower()
+    custom_settings = None
+    if customize == "yes" or customize == "y":
+        custom_settings = {}
+        for key in ["compute_type", "core_count", "partition_count", "parallel_copies", "diu"]:
+            val = input(f"  {key} (recommended: {rec_settings.get(key)}): ").strip()
+            if val:
+                if key == "compute_type":
+                    custom_settings[key] = val
+                else:
+                    try:
+                        custom_settings[key] = int(val)
+                    except ValueError:
+                        pass
+    
+    custom_container_names = input("\nCustom container names? (comma-separated, or Enter for default): ").strip()
+    container_names = None
+    if custom_container_names:
+        container_names = [c.strip() for c in custom_container_names.split(",")]
+        if len(container_names) != num_containers:
+            print(f"Warning: Expected {num_containers} names, got {len(container_names)}. Using defaults.")
+            container_names = None
+
+    print("\n--- Step 3: Groq AI is deciding pipeline configuration ---")
+    pipeline_config = decide_pipeline_config(
+        schema, 
+        user_prompt,
+        num_containers=num_containers,
+        custom_settings=custom_settings,
+        container_names=container_names
+    )
 
     preview_config(pipeline_config)
+    
+    edit_choice = input("\nEdit pipeline settings before deployment? (yes/no): ").strip().lower()
+    if edit_choice == "yes" or edit_choice == "y":
+        pipeline_config = edit_pipeline_config(pipeline_config)
+        preview_config(pipeline_config, show_editable=False)
+
     confirm = input("\nDeploy this pipeline to ADF? (yes/no): ").strip().lower()
     if confirm not in ["yes", "y"]:
         print("Aborted. No changes made to Azure.")
         return
 
-    # -- Step 3: Create Blob Containers
-    print("\n--- Step 3: Creating Blob Containers ---")
+    print("\n--- Step 4: Creating Blob Containers ---")
     for container_name in pipeline_config["containers"].values():
         create_blob_container(container_name)
 
-    # -- Step 3b: Purge intermediate and output containers
-    print("\n--- Step 3b: Purging intermediate and output containers ---")
-    for key in ["stage1", "stage2"]:
+    print("\n--- Step 4b: Purging intermediate and output containers ---")
+    for key in list(pipeline_config["containers"].keys())[1:]:
         cname = pipeline_config["containers"].get(key)
         if cname:
             purge_container(cname)
 
-    # -- Step 4: Upload CSV to raw container
-    print("\n--- Step 4: Uploading CSV to raw container ---")
-    raw_container = pipeline_config["containers"].get("raw", "incoming")
+    print("\n--- Step 5: Uploading CSV to raw container ---")
+    raw_container = pipeline_config["containers"].get("stage0") or pipeline_config["containers"].get("raw") or list(pipeline_config["containers"].values())[0]
     uploaded_filename = upload_csv(csv_filepath, raw_container)
 
     print(f"\n   Verifying upload in '{raw_container}'...")
@@ -168,24 +335,20 @@ def main():
         print("Upload verification failed — aborting before touching ADF")
         return
 
-    # -- Step 5: Authenticate with Azure
-    print("\n--- Step 5: Authenticating with Azure ---")
+    print("\n--- Step 6: Authenticating with Azure ---")
     token = get_access_token()
 
-    # -- Step 6: Create Linked Service
-    print("\n--- Step 6: Creating Linked Service ---")
+    print("\n--- Step 7: Creating Linked Service ---")
     create_linked_service(token)
 
-    # -- Step 7: Create Datasets
-    print("\n--- Step 7: Creating Datasets ---")
+    print("\n--- Step 8: Creating Datasets ---")
     for ds in pipeline_config["datasets"]:
         r = create_dataset(token, ds)
         if r.status_code not in [200, 201]:
             print(f"Dataset creation failed for '{ds['name']}' — aborting")
             return
 
-    # -- Step 8: Create Pipelines
-    print("\n--- Step 8: Creating Pipelines ---")
+    print("\n--- Step 9: Creating Pipelines ---")
     for p in pipeline_config["pipelines"]:
         if p["type"] == "copy":
             r = create_copy_pipeline(token, p)
@@ -200,12 +363,10 @@ def main():
             print(f"Pipeline creation failed for '{p['name']}' — aborting")
             return
 
-    # -- Step 9: Publish to live layer
-    print("\n--- Step 9: Publishing factory to live layer ---")
+    print("\n--- Step 10: Publishing factory to live layer ---")
     publish_factory(token)
 
-    # -- Step 10: Trigger and monitor pipelines
-    print("\n--- Step 10: Triggering Pipelines and Monitoring ---")
+    print("\n--- Step 11: Triggering Pipelines and Monitoring ---")
     all_succeeded = True
 
     for pipeline_name in pipeline_config["execution_order"]:
@@ -246,7 +407,7 @@ def main():
                     break
 
     if all_succeeded:
-        print("\n--- Step 11: Monitoring Pipelines ---")
+        print("\n--- Step 12: Monitoring Pipelines ---")
 
         from azure.identity import ClientSecretCredential
         from azure.mgmt.datafactory import DataFactoryManagementClient

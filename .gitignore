@@ -7,3 +7,5 @@ __pycache__/
 .DS_Store
 
 config.py
+
+PLANNER_AGENT.md
