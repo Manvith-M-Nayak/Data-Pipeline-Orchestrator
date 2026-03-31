@@ -393,6 +393,14 @@ Return the complete ADF pipeline configuration JSON:
             
             config["num_containers"] = num_containers
             
+            expected_pipelines = num_containers - 1
+            if len(config.get("pipelines", [])) > expected_pipelines:
+                removed = config["pipelines"][expected_pipelines:]
+                removed_names = [p["name"] for p in removed]
+                print(f"⚠️  LLM generated {len(config['pipelines'])} pipelines (expected {expected_pipelines}). Removing extra: {removed_names}")
+                config["pipelines"] = config["pipelines"][:expected_pipelines]
+                config["execution_order"] = [name for name in config.get("execution_order", []) if name not in removed_names]
+            
             print("\n✅ Groq decided the following pipeline config:")
             print(f"   Containers  : {list(config['containers'].values())}")
             print(f"   Datasets    : {[d['name'] for d in config['datasets']]}")

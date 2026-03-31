@@ -418,6 +418,11 @@ def rewrite_column_refs(expr: str, columns_lower: set) -> str:
 # FILTER EXPRESSION NORMALISER
 # ============================================================
 def _normalize_filter_expr(expr: str, columns_lower: set) -> str:
+    # Normalize single = to == first (handles LLM outputs like "eggs = 1")
+    expr = re.sub(r'(\w+)\s*=\s*(\d+)', r'\1 == \2', expr)
+    # Fix malformed "= =" pattern back to "=="
+    expr = re.sub(r'\s*=\s*=\s*', ' == ', expr)
+
     # iif(col == 1, true, false)  ->  equals(toInteger(col), 1)
     iif_eq = re.compile(
         r"iif\(\s*(\w+)\s*==\s*(\d+)\s*,\s*true\s*,\s*false\s*\)", re.IGNORECASE
@@ -493,6 +498,7 @@ def build_dataflow_script(
     use_filter = bool(filter_condition and filter_condition.strip())
 
     if use_filter:
+        filter_condition = re.sub(r'\s*=\s*=\s*', ' == ', filter_condition)
         middle = (
             "Source filter(" + filter_condition + ") ~> FilterRows\n"
             "FilterRows derive(" + col_expr + ") ~> DerivedColumns"
@@ -560,6 +566,13 @@ def create_dataflow_pipeline(token: str, pipeline_config: dict, columns: list) -
             print(f"   Filter promoted from derived column '{col}': {filter_condition}")
 
         else:
+            normalized_expr = re.sub(r'(\w+)\s*=\s*(\d+)', r'\1 == \2', expr)
+            if bool(re.match(r'^(\w+)\s*==\s*(\d+)$', normalized_expr.strip())):
+                print(f"   Detected filter-like expression '{col} = {expr}' — promoting to filter_condition")
+                filter_condition = _normalize_filter_expr(normalized_expr.strip(), columns_lower)
+                filter_condition = rewrite_column_refs(filter_condition, columns_lower)
+                continue
+
             tokens  = re.findall(r'\b([a-zA-Z_][a-zA-Z0-9_]*)\b', expr)
             invalid = [
                 tk for tk in tokens

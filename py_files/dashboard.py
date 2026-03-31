@@ -755,7 +755,7 @@ def render_status_badge():
     )
 
 
-def render_plan(config: dict, schema: dict, used_fallback: bool = False):
+def render_plan(config: dict, schema: dict, used_fallback: bool = False, hide_compute: bool = False):
     if used_fallback:
         st.markdown("""
         <div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:12px;margin-bottom:16px;">
@@ -768,21 +768,37 @@ def render_plan(config: dict, schema: dict, used_fallback: bool = False):
             st.metric(role.upper(), name)
     st.markdown("<br>", unsafe_allow_html=True)
 
-    rows = "".join(
-        f"<tr><td>{p['name']}</td>"
-        f"<td><span class='pill pill-{p['type']}'>{p['type']}</span></td>"
-        f"<td>{p['source_dataset']}</td><td>{p['sink_dataset']}</td>"
-        f"<td>{p.get('compute_type', '-')}</td>"
-        f"<td>{p.get('core_count', '-')}</td>"
-        f"<td>{p.get('partition_count', '-')}</td></tr>"
-        for p in config["pipelines"]
-    )
-    st.markdown(f"""
-    <div class="card-label">Pipelines</div>
-    <table class="plan-table">
-      <thead><tr><th>Name</th><th>Type</th><th>Source</th><th>Sink</th><th>Compute</th><th>Cores</th><th>Partitions</th></tr></thead>
-      <tbody>{rows}</tbody>
-    </table>""", unsafe_allow_html=True)
+    if hide_compute:
+        rows = "".join(
+            f"<tr><td>{p['name']}</td>"
+            f"<td>{p['type']}</td>"
+            f"<td>{p['source_dataset']}</td>"
+            f"<td>{p['sink_dataset']}</td></tr>"
+            for p in config["pipelines"]
+        )
+        st.markdown(f"""
+        <div class="card-label">Pipelines</div>
+        <table class="plan-table">
+          <thead><tr><th>Name</th><th>Type</th><th>Source</th><th>Sink</th></tr></thead>
+          <tbody>{rows}</tbody>
+        </table>""", unsafe_allow_html=True)
+    else:
+        rows = "".join(
+            f"<tr><td>{p['name']}</td>"
+            f"<td>{p['type']}</td>"
+            f"<td>{p['source_dataset']}</td>"
+            f"<td>{p['sink_dataset']}</td>"
+            f"<td>{p.get('compute_type', '-')}</td>"
+            f"<td>{p.get('core_count', '-')}</td>"
+            f"<td>{p.get('partition_count', '-')}</td></tr>"
+            for p in config["pipelines"]
+        )
+        st.markdown(f"""
+        <div class="card-label">Pipelines</div>
+        <table class="plan-table">
+          <thead><tr><th>Name</th><th>Type</th><th>Source</th><th>Sink</th><th>Compute</th><th>Cores</th><th>Partitions</th></tr></thead>
+          <tbody>{rows}</tbody>
+        </table>""", unsafe_allow_html=True)
     st.markdown("<br>", unsafe_allow_html=True)
 
     if "recommended_settings" in config:
@@ -1682,7 +1698,7 @@ elif st.session_state.stage == "done":
 
         with left_col:
             st.markdown('<div class="card"><div class="card-label">Pipeline Summary</div>', unsafe_allow_html=True)
-            render_plan(st.session_state.pipeline_config, st.session_state.schema, st.session_state.get("used_fallback", False))
+            render_plan(st.session_state.pipeline_config, st.session_state.schema, st.session_state.get("used_fallback", False), hide_compute=True)
             st.markdown('</div>', unsafe_allow_html=True)
 
         with right_col:
