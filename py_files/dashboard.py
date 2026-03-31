@@ -163,6 +163,39 @@ small {
     outline: none !important;
 }
 
+/* Container names input - always visible */
+[data-testid="stTextInput"] label,
+[data-testid="stTextInput"] p,
+.stTextInput label,
+.stTextInput p,
+input[type="text"] {
+    color: #1e293b !important;
+    opacity: 1 !important;
+}
+
+/* Force text input to always be fully visible */
+div[data-testid="stTextInput"] input {
+    color: #1e293b !important;
+    background-color: #ffffff !important;
+    opacity: 1 !important;
+}
+
+/* Prevent any dimming during rerenders - force full visibility */
+.stApp > * {
+    animation: none !important;
+    transition: none !important;
+}
+
+[data-testid="stMetric"],
+[data-testid="stMetric"] * {
+    opacity: 1 !important;
+}
+
+div, span, p, label, li, td, th, input, textarea, select {
+    opacity: 1 !important;
+    animation: none !important;
+}
+
 .block-container { padding: 2rem 3rem 4rem !important; max-width: 1280px; }
 
 /* ── Header ── */
@@ -1302,7 +1335,7 @@ if st.session_state.stage == "input":
             elif not st.session_state.get("schema"):
                 st.error("Schema not loaded")
             else:
-                with st.spinner("Generating pipeline plan with Groq..."):
+                with st.spinner("Generating pipeline plan..."):
                     try:
                         py_dir = os.path.dirname(os.path.abspath(__file__))
                         if py_dir not in sys.path:
@@ -1459,7 +1492,6 @@ elif st.session_state.stage == "plan":
     new_containers = st.text_input(
         "Container names (comma-separated)",
         value=st.session_state.edit_container_names,
-        placeholder="e.g. raw, bronze, silver",
         label_visibility="visible",
         help="Leave empty to use default names from the plan"
     )
@@ -1512,7 +1544,7 @@ elif st.session_state.stage == "plan":
 
     col_back, col_deploy = st.columns(2)
     with col_back:
-        if st.button("← Back"):
+        if st.button("← Back", use_container_width=True):
             for key in ["edit_compute_type", "edit_core_count", "edit_partition_count", 
                         "edit_parallel_copies", "edit_diu", "edit_num_stages", 
                         "edit_container_names"]:
@@ -1520,16 +1552,17 @@ elif st.session_state.stage == "plan":
             st.session_state.stage = "input"
             st.rerun()
     with col_deploy:
-        if st.button("⚡ Deploy to ADF"):
-            st.session_state.stage              = "running"
-            st.session_state.logs               = []
-            st.session_state.monitor_logs_current = []
-            st.session_state.monitor_logs_all    = []
-            st.session_state.monitor_report     = None
-            st.session_state.progress           = 0
-            st.session_state.pipeline_start_ts  = time.time()
-            st.session_state.pipeline_end_ts    = None
-            st.rerun()
+        if st.session_state.stage != "running":
+            if st.button("⚡ Deploy to ADF", use_container_width=True):
+                st.session_state.stage              = "running"
+                st.session_state.logs               = []
+                st.session_state.monitor_logs_current = []
+                st.session_state.monitor_logs_all    = []
+                st.session_state.monitor_report     = None
+                st.session_state.progress           = 0
+                st.session_state.pipeline_start_ts  = time.time()
+                st.session_state.pipeline_end_ts    = None
+                st.rerun()
 
 
 # ════════════════════════════════════════════════════════════════
@@ -1554,17 +1587,6 @@ elif st.session_state.stage == "running":
     prog_ph_top.progress(prog / 100)
 
     st.markdown("<br>", unsafe_allow_html=True)
-
-    # ── Monitor settings ─────────────────────────────────────────
-    col_settings, col_tabs = st.columns([1, 4])
-    with col_settings:
-        scan_past = st.toggle(
-            "Scan Past Pipelines",
-            value=st.session_state.scan_past_pipelines,
-            help="When enabled, monitors both running and past pipelines. When disabled, only scans currently running pipelines for live monitoring."
-        )
-        if scan_past != st.session_state.scan_past_pipelines:
-            st.session_state.scan_past_pipelines = scan_past
 
     # ── Three tabs ────────────────────────────────────────────────
     tab_exec, tab_mon_curr, tab_mon_all = st.tabs(["⚡ Execution Log", "📊 Monitor (Current)", "🌐 Monitor (All)"])

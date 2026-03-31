@@ -401,6 +401,24 @@ ADF_RESERVED_WORDS = {
 
 
 # ============================================================
+# SAFE EQUALITY NORMALISER
+#
+# Converts a bare single `=` to `==` ONLY when it is not already
+# part of a two-character operator (==, !=, <=, >=).
+#
+# The previous approach used re.sub(r'(\w+)\s*=\s*(\d+)', ...)
+# which would match the second `=` in an already-correct `==`
+# and turn `eggs == 1` into `eggs = = 1` on a second pass.
+#
+# This version uses a negative lookbehind (?<![=!<>]) and a
+# negative lookahead (?!=) so it only touches truly bare `=`.
+# ============================================================
+def _fix_bare_equals(expr: str) -> str:
+    """Replace bare `=` with `==`, leaving existing ==, !=, <=, >= untouched."""
+    return re.sub(r'(?<![=!<>])=(?!=)', '==', expr)
+
+
+# ============================================================
 # COLUMN REFERENCE REWRITER
 # ============================================================
 def rewrite_column_refs(expr: str, columns_lower: set) -> str:
@@ -416,12 +434,13 @@ def rewrite_column_refs(expr: str, columns_lower: set) -> str:
 
 # ============================================================
 # FILTER EXPRESSION NORMALISER
+#
+# All equality normalisation is now delegated to _fix_bare_equals
+# so there is exactly ONE place that touches `=` operators.
 # ============================================================
 def _normalize_filter_expr(expr: str, columns_lower: set) -> str:
-    # Normalize single = to == first (handles LLM outputs like "eggs = 1")
-    expr = re.sub(r'(\w+)\s*=\s*(\d+)', r'\1 == \2', expr)
-    # Fix malformed "= =" pattern back to "=="
-    expr = re.sub(r'\s*=\s*=\s*', ' == ', expr)
+    # Normalise bare `=` to `==` safely (no double-substitution risk)
+    expr = _fix_bare_equals(expr)
 
     # iif(col == 1, true, false)  ->  equals(toInteger(col), 1)
     iif_eq = re.compile(
@@ -472,6 +491,10 @@ def build_dataflow_script(
     the schema at design/compile time. Without this the Source node
     shows "Columns: 0 total" and column references in filter() or
     derive() resolve to nothing (DF-EXPR-010).
+
+    NOTE: filter_condition must already be fully normalised before
+    being passed here. This function does NOT re-run any equality
+    substitutions to avoid double-processing.
     """
     schema_parts = []
     for col in columns:
@@ -498,7 +521,6 @@ def build_dataflow_script(
     use_filter = bool(filter_condition and filter_condition.strip())
 
     if use_filter:
-        filter_condition = re.sub(r'\s*=\s*=\s*', ' == ', filter_condition)
         middle = (
             "Source filter(" + filter_condition + ") ~> FilterRows\n"
             "FilterRows derive(" + col_expr + ") ~> DerivedColumns"
@@ -534,6 +556,11 @@ def create_dataflow_pipeline(token: str, pipeline_config: dict, columns: list) -
         col  = col.strip()
         expr = expr.strip()
 
+        # Normalise the raw expression ONCE here — all downstream
+        # functions receive the already-normalised value and must
+        # NOT re-run _fix_bare_equals to avoid double-substitution.
+        expr = _fix_bare_equals(expr)
+
         _iif_pattern = re.compile(
             r"^iif\(\s*(\w+)\s*(==|!=)\s*(\d+)\s*,\s*true\s*,\s*false\s*\)$",
             re.IGNORECASE
@@ -550,6 +577,8 @@ def create_dataflow_pipeline(token: str, pipeline_config: dict, columns: list) -
             if filter_condition is not None:
                 continue
 
+            # expr is already normalised — pass directly to
+            # _normalize_filter_expr which handles iif -> equals rewrites.
             candidate = _normalize_filter_expr(expr.strip(), columns_lower)
             candidate = rewrite_column_refs(candidate, columns_lower)
 
@@ -566,11 +595,14 @@ def create_dataflow_pipeline(token: str, pipeline_config: dict, columns: list) -
             print(f"   Filter promoted from derived column '{col}': {filter_condition}")
 
         else:
-            normalized_expr = re.sub(r'(\w+)\s*=\s*(\d+)', r'\1 == \2', expr)
-            if bool(re.match(r'^(\w+)\s*==\s*(\d+)$', normalized_expr.strip())):
+            # Check if this non-filter expression looks like a filter anyway
+            # (e.g. LLM emitted "some_col = eggs == 1")
+            if bool(re.match(r'^(\w+)\s*==\s*(\d+)$', expr.strip())):
                 print(f"   Detected filter-like expression '{col} = {expr}' — promoting to filter_condition")
-                filter_condition = _normalize_filter_expr(normalized_expr.strip(), columns_lower)
-                filter_condition = rewrite_column_refs(filter_condition, columns_lower)
+                if filter_condition is None:
+                    candidate = _normalize_filter_expr(expr.strip(), columns_lower)
+                    candidate = rewrite_column_refs(candidate, columns_lower)
+                    filter_condition = candidate
                 continue
 
             tokens  = re.findall(r'\b([a-zA-Z_][a-zA-Z0-9_]*)\b', expr)
