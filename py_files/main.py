@@ -71,9 +71,9 @@ def _is_float(val: str) -> bool:
         return False
 
 
-def preview_config(pipeline_config: dict, show_editable: bool = True):
+def preview_config(pipeline_config: dict, show_editable: bool = True, use_fallback: bool = False):
     print("\n" + "=" * 60)
-    print("  PIPELINE PLAN (decided by Groq LLaMA 3.3 70B)")
+    print(f"  PIPELINE PLAN ({'Default Configuration' if use_fallback else 'Decided by Groq LLaMA 3.3 70B'})")
     print("=" * 60)
 
     print(f"\nNumber of stages: {pipeline_config.get('num_containers', len(pipeline_config['containers']))}")
@@ -295,16 +295,21 @@ def main():
             print(f"Warning: Expected {num_containers} names, got {len(container_names)}. Using defaults.")
             container_names = None
 
-    print("\n--- Step 3: Groq AI is deciding pipeline configuration ---")
-    pipeline_config = decide_pipeline_config(
+    print("\n--- Step 3: Configure Pipeline (AI or Default) ---")
+    pipeline_config, used_fallback = decide_pipeline_config(
         schema, 
         user_prompt,
         num_containers=num_containers,
         custom_settings=custom_settings,
         container_names=container_names
     )
+    
+    if used_fallback:
+        print("⚠️  Using default configuration (Groq API unavailable)")
+    else:
+        print("✅ Using Groq AI configuration")
 
-    preview_config(pipeline_config)
+    preview_config(pipeline_config, use_fallback=used_fallback)
     
     edit_choice = input("\nEdit pipeline settings before deployment? (yes/no): ").strip().lower()
     if edit_choice == "yes" or edit_choice == "y":

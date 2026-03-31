@@ -739,7 +739,8 @@ def _get_with_retry(url: str, headers: dict, max_retries: int = 5) -> requests.R
         try:
             return requests.get(url, headers=headers, timeout=30)
         except (requests.exceptions.ConnectionError,
-                requests.exceptions.Timeout) as e:
+                requests.exceptions.Timeout,
+                Exception) as e:
             if attempt == max_retries:
                 raise
             print(f"   Network error (attempt {attempt}/{max_retries}): {e}")
@@ -765,7 +766,8 @@ def check_pipeline_status(token: str, pipeline_name: str, run_id: str, max_wait:
         try:
             r = _get_with_retry(url, headers)
         except (requests.exceptions.ConnectionError,
-                requests.exceptions.Timeout) as e:
+                requests.exceptions.Timeout,
+                Exception) as e:
             print(f"   Persistent network error: {e} — waiting 30s...")
             time.sleep(30)
             elapsed += 30

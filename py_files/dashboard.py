@@ -755,7 +755,13 @@ def render_status_badge():
     )
 
 
-def render_plan(config: dict, schema: dict):
+def render_plan(config: dict, schema: dict, used_fallback: bool = False):
+    if used_fallback:
+        st.markdown("""
+        <div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:12px;margin-bottom:16px;">
+            <strong>⚠️ Using Default Configuration</strong> — Groq API unavailable. Running with default 3-stage pipeline.
+        </div>""", unsafe_allow_html=True)
+    
     cols = st.columns(len(config["containers"]))
     for i, (role, name) in enumerate(config["containers"].items()):
         with cols[i]:
@@ -1289,8 +1295,9 @@ if st.session_state.stage == "input":
                         import time
                         for attempt in range(3):
                             try:
-                                config = decide_pipeline_config(st.session_state.schema, prompt_val)
+                                config, used_fallback = decide_pipeline_config(st.session_state.schema, prompt_val)
                                 st.session_state.pipeline_config = config
+                                st.session_state.used_fallback = used_fallback
                                 st.session_state.user_prompt = prompt_val
                                 st.session_state.stage = "plan"
                                 st.session_state.logs = []
@@ -1311,9 +1318,9 @@ if st.session_state.stage == "input":
 # STAGE: plan
 # ══════════════════════════════════════════════════════════════════════
 elif st.session_state.stage == "plan":
-
+    used_fallback = st.session_state.get("used_fallback", False)
     st.markdown('<div class="card"><div class="card-label">Pipeline Plan</div>', unsafe_allow_html=True)
-    render_plan(st.session_state.pipeline_config, st.session_state.schema)
+    render_plan(st.session_state.pipeline_config, st.session_state.schema, used_fallback)
     st.markdown('</div>', unsafe_allow_html=True)
 
     config = st.session_state.pipeline_config
@@ -1464,7 +1471,7 @@ elif st.session_state.stage == "plan":
         
         with st.spinner("Regenerating pipeline plan with new settings..."):
             try:
-                new_config = decide_pipeline_config(
+                new_config, _ = decide_pipeline_config(
                     schema,
                     st.session_state.get("user_prompt", ""),
                     num_containers=new_num_stages,
@@ -1675,7 +1682,7 @@ elif st.session_state.stage == "done":
 
         with left_col:
             st.markdown('<div class="card"><div class="card-label">Pipeline Summary</div>', unsafe_allow_html=True)
-            render_plan(st.session_state.pipeline_config, st.session_state.schema)
+            render_plan(st.session_state.pipeline_config, st.session_state.schema, st.session_state.get("used_fallback", False))
             st.markdown('</div>', unsafe_allow_html=True)
 
         with right_col:

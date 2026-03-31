@@ -1,8 +1,61 @@
 import requests
 import json
+from urllib3.exceptions import ProtocolError, HTTPError as HTTPErrorFromUrllib3
 from config import GROQ_API_KEY
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+
+DEFAULT_CONTAINERS = {
+    "stage0": "incoming",
+    "stage1": "bronze", 
+    "stage2": "silver"
+}
+
+DEFAULT_DATASETS = [
+    {"name": "DS_Incoming", "container": "incoming", "filename": "", "role": "source"},
+    {"name": "DS_Bronze", "container": "bronze", "filename": "*.csv", "role": "intermediate"},
+    {"name": "DS_Silver", "container": "silver", "filename": "output.csv", "role": "sink"}
+]
+
+DEFAULT_PIPELINES = [
+    {
+        "name": "Pipeline_Incoming_to_Bronze",
+        "type": "copy",
+        "source_dataset": "DS_Incoming",
+        "sink_dataset": "DS_Bronze",
+        "parallel_copies": 2,
+        "diu": 2,
+        "transformations": [],
+        "partition_count": 2,
+        "compute_type": "General",
+        "core_count": 4
+    },
+    {
+        "name": "Pipeline_Bronze_to_Silver",
+        "type": "dataflow",
+        "source_dataset": "DS_Bronze",
+        "sink_dataset": "DS_Silver",
+        "parallel_copies": 2,
+        "diu": 2,
+        "transformations": ["processed_time = currentTimestamp()"],
+        "partition_count": 4,
+        "compute_type": "General",
+        "core_count": 4
+    }
+]
+
+DEFAULT_EXECUTION_ORDER = [
+    "Pipeline_Incoming_to_Bronze",
+    "Pipeline_Bronze_to_Silver"
+]
+
+DEFAULT_EDITABLE_SETTINGS = {
+    "compute_type": ["General", "MemoryOptimized"],
+    "core_count": [4, 8, 16, 32],
+    "partition_count": [2, 4, 8, 16, 32, 64],
+    "parallel_copies": [1, 2, 4, 8, 16],
+    "diu": [1, 2, 4, 8, 16, 32]
+}
 
 
 RECOMMENDED_SETTINGS = {
@@ -61,16 +114,84 @@ def get_recommended_settings(size_hint: str) -> dict:
     return RECOMMENDED_SETTINGS["medium"]
 
 
+def build_default_config(schema: dict, user_prompt: str, num_containers: int = 3, custom_settings: dict = None, container_names: list = None) -> dict:
+    """
+    Build a default 3-stage pipeline configuration without using Groq API.
+    Uses sensible defaults based on file size.
+    """
+    rec = get_recommended_settings(schema.get("size_hint", "medium"))
+    
+    if custom_settings:
+        rec.update(custom_settings)
+    
+    num_containers = max(2, min(5, num_containers))
+    
+    if container_names and len(container_names) == num_containers:
+        container_list = container_names
+    else:
+        container_list = ["incoming", "bronze", "silver"][:num_containers]
+        if len(container_list) < num_containers:
+            container_list.extend([f"stage{i}" for i in range(len(container_list), num_containers)])
+    
+    containers = {f"stage{i}": container_list[i] for i in range(num_containers)}
+    
+    datasets = []
+    for i in range(num_containers):
+        role = "source" if i == 0 else ("intermediate" if i < num_containers - 1 else "sink")
+        datasets.append({
+            "name": f"DS_{container_list[i].title()}",
+            "container": container_list[i],
+            "filename": "" if i == 0 else ("*.csv" if i < num_containers - 1 else "output.csv"),
+            "role": role
+        })
+    
+    pipelines = []
+    for i in range(num_containers - 1):
+        pipeline = {
+            "name": f"Pipeline_{container_list[i].title()}_to_{container_list[i+1].title()}",
+            "type": "copy" if i == 0 else "dataflow",
+            "source_dataset": f"DS_{container_list[i].title()}",
+            "sink_dataset": f"DS_{container_list[i+1].title()}",
+            "parallel_copies": rec.get("parallel_copies", 2),
+            "diu": rec.get("diu", 2),
+            "transformations": ["processed_time = currentTimestamp()"] if i > 0 else [],
+            "partition_count": rec.get("partition_count", 4),
+            "compute_type": rec.get("compute_type", "General"),
+            "core_count": rec.get("core_count", 4)
+        }
+        pipelines.append(pipeline)
+    
+    execution_order = [p["name"] for p in pipelines]
+    
+    reasoning = f"Default 3-stage pipeline: raw data in '{container_list[0]}', processed in '{container_list[1]}', output in '{container_list[2]}'. Copy pipeline moves data, Data Flow applies transformations."
+    
+    return {
+        "containers": containers,
+        "datasets": datasets,
+        "pipelines": pipelines,
+        "containers_to_create": container_list,
+        "execution_order": execution_order,
+        "num_containers": num_containers,
+        "recommended_settings": rec,
+        "editable_settings": DEFAULT_EDITABLE_SETTINGS,
+        "reasoning": reasoning
+    }
+
+
 def decide_pipeline_config(
     schema: dict,
     user_prompt: str,
     num_containers: int = None,
     custom_settings: dict = None,
     container_names: list = None,
-) -> dict:
+) -> tuple[dict, bool]:
     """
     Sends CSV schema + user prompt to Groq LLaMA 3.3 70B.
     Groq returns a complete pipeline configuration as JSON.
+    Falls back to default config if API is unavailable.
+    
+    Returns:
+        tuple: (config_dict, used_fallback_bool)
     
     Args:
         schema: CSV schema with columns, samples, inferred_types, row_count, size_hint
@@ -228,60 +349,86 @@ Return the complete ADF pipeline configuration JSON:
 
     print("🤖 Groq LLaMA 3.3 70B is analyzing your data and prompt...")
 
-    response = requests.post(
-        GROQ_URL,
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {GROQ_API_KEY}"
-        },
-        json=payload
-    )
-
-    if response.status_code != 200:
-        print(f"❌ Groq API error: {response.status_code} — {response.text}")
-        response.raise_for_status()
-
-    raw = response.json()["choices"][0]["message"]["content"].strip()
-
-    if "```" in raw:
-        parts = raw.split("```")
-        for part in parts:
-            part = part.strip()
-            if part.startswith("json"):
-                part = part[4:].strip()
-            if part.startswith("{"):
-                raw = part
-                break
-
-    raw = raw.strip()
-
     try:
-        config = json.loads(raw)
+        response = requests.post(
+            GROQ_URL,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {GROQ_API_KEY}"
+            },
+            json=payload,
+            timeout=30
+        )
+
+        if response.status_code != 200:
+            raise requests.exceptions.HTTPError(f"HTTP {response.status_code}: {response.text}")
+
+        raw = response.json()["choices"][0]["message"]["content"].strip()
+
+        if "```" in raw:
+            parts = raw.split("```")
+            for part in parts:
+                part = part.strip()
+                if part.startswith("json"):
+                    part = part[4:].strip()
+                if part.startswith("{"):
+                    raw = part
+                    break
+
+        raw = raw.strip()
+
+        try:
+            config = json.loads(raw)
+            
+            if "recommended_settings" not in config:
+                config["recommended_settings"] = rec
+            if "editable_settings" not in config:
+                config["editable_settings"] = {
+                    "compute_type": ["General", "MemoryOptimized"],
+                    "core_count": [4, 8, 16, 32],
+                    "partition_count": [2, 4, 8, 16, 32, 64],
+                    "parallel_copies": [1, 2, 4, 8, 16],
+                    "diu": [1, 2, 4, 8, 16, 32]
+                }
+            
+            config["num_containers"] = num_containers
+            
+            print("\n✅ Groq decided the following pipeline config:")
+            print(f"   Containers  : {list(config['containers'].values())}")
+            print(f"   Datasets    : {[d['name'] for d in config['datasets']]}")
+            print(f"   Pipelines   : {[p['name'] for p in config['pipelines']]}")
+            print(f"   Exec Order  : {config['execution_order']}")
+            print(f"\n📋 Recommended Settings:")
+            for k, v in config.get("recommended_settings", rec).items():
+                print(f"      {k}: {v}")
+            print(f"\n💡 Reasoning  : {config.get('reasoning', 'N/A')}\n")
+            return config, False
+        except json.JSONDecodeError as e:
+            raise Exception(f"Groq returned invalid JSON: {e}")
+            
+    except Exception as e:
+        error_str = str(e)
+        is_network_error = (
+            isinstance(e, (requests.exceptions.ConnectionError,
+                          requests.exceptions.Timeout,
+                          ProtocolError,
+                          HTTPErrorFromUrllib3)) or
+            "Connection" in error_str or
+            "RemoteDisconnected" in error_str or
+            "Connection aborted" in error_str
+        )
         
-        if "recommended_settings" not in config:
-            config["recommended_settings"] = rec
-        if "editable_settings" not in config:
-            config["editable_settings"] = {
-                "compute_type": ["General", "MemoryOptimized"],
-                "core_count": [4, 8, 16, 32],
-                "partition_count": [2, 4, 8, 16, 32, 64],
-                "parallel_copies": [1, 2, 4, 8, 16],
-                "diu": [1, 2, 4, 8, 16, 32]
-            }
+        if is_network_error:
+            print(f"⚠️  Groq API network error: {e}")
+            print("🔄 Falling back to default 3-stage pipeline configuration...")
+        else:
+            print(f"⚠️  Groq API unavailable or error: {e}")
+            print("🔄 Falling back to default 3-stage pipeline configuration...")
         
-        config["num_containers"] = num_containers
-        
-        print("\n✅ Groq decided the following pipeline config:")
-        print(f"   Containers  : {list(config['containers'].values())}")
-        print(f"   Datasets    : {[d['name'] for d in config['datasets']]}")
-        print(f"   Pipelines   : {[p['name'] for p in config['pipelines']]}")
-        print(f"   Exec Order  : {config['execution_order']}")
-        print(f"\n📋 Recommended Settings:")
-        for k, v in config.get("recommended_settings", rec).items():
-            print(f"      {k}: {v}")
-        print(f"\n💡 Reasoning  : {config.get('reasoning', 'N/A')}\n")
-        return config
-    except json.JSONDecodeError as e:
-        print(f"❌ Groq returned invalid JSON: {e}")
-        print(f"Raw output:\n{raw}")
-        raise
+        return build_default_config(
+            schema,
+            user_prompt,
+            num_containers=num_containers,
+            custom_settings=custom_settings,
+            container_names=container_names
+        ), True

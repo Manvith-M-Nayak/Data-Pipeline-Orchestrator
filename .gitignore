@@ -9,3 +9,4 @@ __pycache__/
 config.py
 
 PLANNER_AGENT.md
+planner.xml
