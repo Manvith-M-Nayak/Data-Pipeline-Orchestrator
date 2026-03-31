@@ -588,10 +588,47 @@ def run_pipeline_thread(csv_path: str, pipeline_config: dict,
                 publish_factory, trigger_pipeline, check_pipeline_status,
             )
 
+            # ── Pre-deployment self-healing ──────────────────────────────
+            # If Groq generated transforms with unknown column/function
+            # references (e.g. "uppercase animal_name", "create danger_score
+            # from aggression_level"), the planner stores them as
+            # _dropped_transforms. Fix the config HERE before touching Azure.
+            def _has_dropped_transforms(cfg):
+                return any(p.get("_dropped_transforms") for p in cfg.get("pipelines", []))
+
+            if _has_dropped_transforms(pipeline_config):
+                dropped_summary = []
+                for p in pipeline_config.get("pipelines", []):
+                    for d in p.get("_dropped_transforms", []):
+                        dropped_summary.append(
+                            f"Pipeline '{p['name']}': transform '{d.get('transform', '?')}'"
+                            f" — reason: {d.get('reason', 'unknown')}"
+                        )
+                result_q.put(("log", "\n⚠️  Planner could not fully resolve all requested transforms:"))
+                for line in dropped_summary:
+                    result_q.put(("log", f"   {line}"))
+                result_q.put(("log", "\n🛠  Activating Self-Healing Agent to fix config before deployment..."))
+
+                from self_healing_agent import SelfHealingAgent
+                healer = SelfHealingAgent(token=None)
+                healed, pipeline_config = healer.heal(
+                    error_message="invalid_transforms",
+                    pipeline_config=pipeline_config,
+                    csv_columns=schema["columns"],
+                )
+                if not healed:
+                    result_q.put(("error", "Self-healing could not fix the config — aborting"))
+                    return
+                result_q.put(("log", "✅ Config healed. Proceeding with deployment..."))
+
             result_q.put(("log", "--- Step 1: Creating Blob Containers ---"))
             for cname in pipeline_config["containers"].values():
                 create_blob_container(cname)
-            raw_container = pipeline_config["containers"].get("stage0") or pipeline_config["containers"].get("raw") or list(pipeline_config["containers"].values())[0]
+            raw_container = (
+                pipeline_config["containers"].get("stage0")
+                or pipeline_config["containers"].get("raw")
+                or list(pipeline_config["containers"].values())[0]
+            )
             purge_container(raw_container)
             for key in ["stage1", "stage2"]:
                 cname = pipeline_config["containers"].get(key)
@@ -600,7 +637,14 @@ def run_pipeline_thread(csv_path: str, pipeline_config: dict,
             result_q.put(("progress", 20))
 
             result_q.put(("log", "--- Step 2: Uploading CSV ---"))
-            raw_container = pipeline_config["containers"].get("stage0") or pipeline_config["containers"].get("raw") or list(pipeline_config["containers"].values())[0]
+            # Robust container lookup (upstream) + store csv path for
+            # self-healing agent to re-upload if container vanishes (stash)
+            raw_container = (
+                pipeline_config["containers"].get("stage0")
+                or pipeline_config["containers"].get("raw")
+                or list(pipeline_config["containers"].values())[0]
+            )
+            pipeline_config["_csv_path"] = csv_path
             upload_csv(csv_path, raw_container)
             if not check_blob_has_rows(raw_container):
                 result_q.put(("error", "Upload verification failed — no rows in raw container."))
@@ -640,14 +684,74 @@ def run_pipeline_thread(csv_path: str, pipeline_config: dict,
             total      = len(pipeline_config["execution_order"])
 
             for i, pl_name in enumerate(pipeline_config["execution_order"]):
+                result_q.put(("log", f"\n▶ Triggering: {pl_name}"))
                 run_id = trigger_pipeline(token, pl_name)
                 if not run_id:
                     result_q.put(("error", f"Could not trigger: {pl_name}"))
                     return
+
                 result = check_pipeline_status(token, pl_name, run_id)
+
                 if result["status"] != "Succeeded":
-                    result_q.put(("error", f"{pl_name} ended with status: {result['status']}"))
-                    return
+                    error_msg = result.get("error") or f"{pl_name} failed with unknown error"
+                    result_q.put(("log", f"\n❌ \'{pl_name}\' FAILED"))
+                    result_q.put(("log", f"   Error: {error_msg}"))
+                    result_q.put(("log", "\n🛠  Activating Self-Healing Agent..."))
+
+                    from self_healing_agent import SelfHealingAgent
+                    healer = SelfHealingAgent(token)
+
+                    # heal() returns (bool, dict) — must capture both
+                    healed, fixed_config = healer.heal(
+                        error_msg, pipeline_config,
+                        csv_columns=schema["columns"],
+                    )
+
+                    if not healed:
+                        result_q.put(("log", "❌ Self-healing could not fix the issue"))
+                        result_q.put(("error", error_msg))
+                        return
+
+                    pipeline_config = fixed_config
+                    result_q.put(("log", "✅ Pipeline config updated with healing fix"))
+
+                    # Redeploy the fixed pipeline before retrying
+                    result_q.put(("log", f"\n🔁 Redeploying fixed pipeline: {pl_name}"))
+                    failed_p = next(
+                        (p for p in pipeline_config["pipelines"] if p["name"] == pl_name), None
+                    )
+                    if failed_p:
+                        if failed_p["type"] == "copy":
+                            r = create_copy_pipeline(token, failed_p)
+                        elif failed_p["type"] == "dataflow":
+                            failed_p["inferred_types"] = schema["inferred_types"]
+                            r = create_dataflow_pipeline(token, failed_p, schema["columns"])
+                        else:
+                            r = None
+                        if r is None or r.status_code not in [200, 201]:
+                            result_q.put(("error", f"Redeploy failed for \'{pl_name}\'"))
+                            return
+                        result_q.put(("log", f"   ✅ Redeployed \'{pl_name}\' successfully"))
+
+                    import time as _t
+                    result_q.put(("log", "   Waiting 15s for ADF to pick up the fix..."))
+                    _t.sleep(15)
+
+                    result_q.put(("log", f"\n▶ Re-triggering healed pipeline: {pl_name}"))
+                    retry_run_id = trigger_pipeline(token, pl_name)
+                    if not retry_run_id:
+                        result_q.put(("error", f"Could not re-trigger \'{pl_name}\' after healing"))
+                        return
+
+                    retry_result = check_pipeline_status(token, pl_name, retry_run_id)
+                    if retry_result["status"] == "Succeeded":
+                        result_q.put(("log", f"\n✅ \'{pl_name}\' SUCCEEDED after self-healing! 🎉"))
+                    else:
+                        result_q.put(("error", f"{pl_name} still failing after healing: {retry_result.get('error', 'unknown')}"))
+                        return
+                else:
+                    result_q.put(("log", f"✅ \'{pl_name}\' succeeded on first run"))
+
                 if pl_name in copy_names:
                     copy_cfg = next(p for p in pipeline_config["pipelines"] if p["name"] == pl_name)
                     sink_ds  = next((d for d in pipeline_config["datasets"]
@@ -664,7 +768,6 @@ def run_pipeline_thread(csv_path: str, pipeline_config: dict,
 
 def run_monitor_thread(result_q, history_limit=20, current_pipeline_name=None):
     try:
-        
         from azure.mgmt.datafactory import DataFactoryManagementClient
         from azure.identity import ClientSecretCredential
         from monitor_agent import MonitoringAgent
@@ -696,8 +799,8 @@ def run_monitor_thread(result_q, history_limit=20, current_pipeline_name=None):
             limit = min(history_limit, actual_count)
             runs = runs[:limit]
 
-            succ = sum(1 for r in runs if r["status"] == "Succeeded")
-            fail = sum(1 for r in runs if r["status"] == "Failed")
+            succ    = sum(1 for r in runs if r["status"] == "Succeeded")
+            fail    = sum(1 for r in runs if r["status"] == "Failed")
             running = sum(1 for r in runs if r["status"] in ["InProgress", "Queued", "Running"])
 
             result_q.put((
@@ -707,20 +810,22 @@ def run_monitor_thread(result_q, history_limit=20, current_pipeline_name=None):
 
             for run in runs:
                 live_runs.append({
-                    "pipeline": pl_name,
-                    "status": run.get("status"),
-                    "duration": run.get("duration_display"),
-                    "run_id": run.get("run_id"),
-                    "started": run.get("started_at"),
+                    "pipeline":   pl_name,
+                    "status":     run.get("status"),
+                    "duration":   run.get("duration_display"),
+                    "run_id":     run.get("run_id"),
+                    "started":    run.get("started_at"),
                     "activities": run.get("activities", []),
-                    "errors": run.get("errors", []),
-                    "flags": run.get("flags", [])
+                    "errors":     run.get("errors", []),
+                    "flags":      run.get("flags", [])
                 })
 
         result_q.put(("live_runs", live_runs))
 
     except Exception as e:
         result_q.put(("monitor_log", f"Error: {str(e)}"))
+
+
 # ── Render helpers ─────────────────────────────────────────────────────────────
 
 def render_header():
@@ -823,27 +928,45 @@ def render_plan(config: dict, schema: dict):
 def render_logs():
     def colour(line: str) -> str:
         l = line.lower()
+
+        # 🔥 Self-healing highlight (priority)
+        if "self-healing" in l or "auto-fixed" in l:
+            return f'<span style="color:#8b5cf6;font-weight:600;">{line}</span>'
+
+        # ❌ Errors
         if any(x in l for x in ["failed", "error", "abort", "invalid"]):
             return f'<span class="log-error">{line}</span>'
+
+        # ✅ Success
         if any(x in l for x in ["succeeded", "created", "uploaded", "triggered",
-                                  "verified", "ready", "obtained", "done"]):
+                               "verified", "ready", "obtained", "done"]):
             return f'<span class="log-success">{line}</span>'
+
+        # ⚠️ Warnings
         if any(x in l for x in ["waiting", "retrying", "propagat",
-                                  "timeout", "warn", "skipping", "purging"]):
+                               "timeout", "warn", "skipping", "purging"]):
             return f'<span class="log-warn">{line}</span>'
+
+        # ℹ️ Info
         if any(x in l for x in ["step", "---", "groq", "publishing",
-                                  "authenticat", "setting"]):
+                               "authenticat", "setting"]):
             return f'<span class="log-info">{line}</span>'
+
+        # 📊 Monitor logs
         if "[monitor]" in l or "monitor" in l:
             return f'<span class="log-monitor">{line}</span>'
+
+        # Default
         return f'<span class="log-default">{line}</span>'
 
-    lines   = st.session_state.logs
+    lines = st.session_state.logs
+
     content = (
         '<span class="log-default">Waiting for pipeline to start…</span>'
         if not lines
         else "\n".join(colour(l) for l in lines)
     )
+
     st.markdown(f'<div class="log-box">{content}</div>', unsafe_allow_html=True)
 
 
@@ -857,7 +980,7 @@ def render_monitor_logs():
         if any(x in l for x in ["succeeded", "healthy", "all clear"]):
             return f'<span style="color:#22c55e;">{line}</span>'
         return f'<span style="color:#94a3b8;">{line}</span>'
-    
+
     lines   = st.session_state.monitor_logs
     content = (
         '<span style="color:#94a3b8;">Monitoring agent not yet active…</span>'
@@ -879,7 +1002,7 @@ def render_monitor_logs_with_limit(logs: list):
         if any(x in l for x in ["in progress", "running", "queued", "⏳"]):
             return f'<span style="color:#3b82f6;">{line}</span>'
         return f'<span style="color:#94a3b8;">{line}</span>'
-    
+
     content = (
         '<span style="color:#94a3b8;">No logs yet...</span>'
         if not logs
@@ -1197,8 +1320,8 @@ if "history_limit" not in st.session_state:
 # Global guard: If pipeline is running, redirect to running stage
 # This prevents showing config/deploy during execution
 pipeline_in_progress = (
-    st.session_state.stage in ["plan", "input"] and 
-    (st.session_state.get("pipeline_start_ts") is not None or 
+    st.session_state.stage in ["plan", "input"] and
+    (st.session_state.get("pipeline_start_ts") is not None or
      st.session_state.get("progress", 0) > 0 or
      "_q" in st.session_state)
 )
@@ -1215,7 +1338,7 @@ if st.session_state.stage == "input":
     def go_to_monitor():
         st.session_state.stage = "monitor"
         st.session_state.monitor_only = True
-    
+
     col_title, col_btn = st.columns([4, 1])
     with col_title:
         st.markdown("""
@@ -1272,7 +1395,7 @@ if st.session_state.stage == "input":
         if st.button("Generate Plan", use_container_width=True):
             prompt_val = st.session_state.get("prompt_text", "").strip()
             csv_path = st.session_state.get("csv_tmp_path")
-            
+
             if not csv_path:
                 st.error(f"CSV not loaded: csv_tmp_path={csv_path}")
             elif not prompt_val:
@@ -1303,7 +1426,7 @@ if st.session_state.stage == "input":
                                     raise
                     except Exception as e:
                         st.error(f"Error generating plan: {str(e)}")
-        
+
         st.markdown('</div>', unsafe_allow_html=True)
 
 
@@ -1317,13 +1440,13 @@ elif st.session_state.stage == "plan":
     st.markdown('</div>', unsafe_allow_html=True)
 
     config = st.session_state.pipeline_config
-    rec = config.get("recommended_settings", {})
+    rec    = config.get("recommended_settings", {})
     schema = st.session_state.schema
-    
+
     st.markdown('<div class="card" style="background-color:#f8fafc;padding:1rem;border-radius:0.5rem;margin-bottom:1rem;">', unsafe_allow_html=True)
     st.markdown('<div style="color:#1e293b;font-weight:600;font-size:1rem;margin-bottom:0.5rem;">⚙️ Pipeline Configuration</div>', unsafe_allow_html=True)
     st.markdown(f'<div style="color:#64748b;font-size:0.85rem;margin-bottom:1rem;">Recommended settings for {schema.get("size_hint", "medium")} data. Edit as needed.</div>', unsafe_allow_html=True)
-    
+
     if "edit_num_stages" not in st.session_state:
         st.session_state.edit_num_stages = config.get("num_containers", 3)
     if "edit_compute_type" not in st.session_state:
@@ -1336,21 +1459,31 @@ elif st.session_state.stage == "plan":
         st.session_state.edit_parallel_copies = rec.get("parallel_copies", 2)
     if "edit_diu" not in st.session_state:
         st.session_state.edit_diu = rec.get("diu", 2)
-    
+
     st.markdown('<div style="color:#ffffff;font-weight:500;font-size:0.9rem;margin-top:1rem;">Number of Stages</div>', unsafe_allow_html=True)
     new_num_stages = st.number_input(
-        "stages", 
-        min_value=2, max_value=5, 
+        "stages",
+        min_value=2, max_value=5,
         value=st.session_state.edit_num_stages,
         label_visibility="collapsed",
         help="2-5 stages. More stages = more processing steps but longer execution time."
     )
     st.session_state.edit_num_stages = new_num_stages
-    
+
     st.markdown('<div style="color:#ffffff;font-weight:500;font-size:0.9rem;margin-top:1rem;">Compute Settings</div>', unsafe_allow_html=True)
-    
+
     compute_options = ["Cost Optimized", "Performance Optimized"]
-    current_compute_idx = compute_options.index(st.session_state.edit_compute_type) if st.session_state.edit_compute_type in compute_options else 0
+    # Map ADF internal values ("General"/"MemoryOptimized") to display labels
+    _compute_to_display = {
+        "General":           "Cost Optimized",
+        "MemoryOptimized":   "Performance Optimized",
+        "Cost Optimized":    "Cost Optimized",
+        "Performance Optimized": "Performance Optimized",
+    }
+    _display_compute = _compute_to_display.get(
+        st.session_state.edit_compute_type, "Cost Optimized"
+    )
+    current_compute_idx = compute_options.index(_display_compute)
     st.markdown('<div style="color:#ffffff;font-size:0.85rem;margin-bottom:0.3rem;">Compute Type</div>', unsafe_allow_html=True)
     new_compute = st.selectbox(
         "compute_type",
@@ -1360,18 +1493,18 @@ elif st.session_state.stage == "plan":
         help="Cost Optimized = lower cost | Performance Optimized = faster processing"
     )
     st.session_state.edit_compute_type = new_compute
-    
+
     if new_compute == "Cost Optimized":
-        core_options = [4, 8, 16]
+        core_options      = [4, 8, 16]
         partition_options = [2, 4, 8]
-        parallel_options = [1, 2, 4]
-        diu_options = [1, 2, 4]
+        parallel_options  = [1, 2, 4]
+        diu_options       = [1, 2, 4]
     else:
-        core_options = [8, 16, 32]
+        core_options      = [8, 16, 32]
         partition_options = [8, 16, 32]
-        parallel_options = [4, 8, 16]
-        diu_options = [4, 8, 16]
-    
+        parallel_options  = [4, 8, 16]
+        diu_options       = [4, 8, 16]
+
     if st.session_state.edit_core_count not in core_options:
         st.session_state.edit_core_count = core_options[1]
     if st.session_state.edit_partition_count not in partition_options:
@@ -1380,7 +1513,7 @@ elif st.session_state.stage == "plan":
         st.session_state.edit_parallel_copies = parallel_options[2]
     if st.session_state.edit_diu not in diu_options:
         st.session_state.edit_diu = diu_options[2]
-    
+
     col1, col2 = st.columns(2)
     with col1:
         st.markdown('<div style="color:#ffffff;font-size:0.85rem;margin-bottom:0.3rem;">Core Count</div>', unsafe_allow_html=True)
@@ -1393,7 +1526,7 @@ elif st.session_state.stage == "plan":
             help="More cores = faster processing but higher cost"
         )
         st.session_state.edit_core_count = new_cores
-        
+
         st.markdown('<div style="color:#ffffff;font-size:0.85rem;margin-bottom:0.3rem;margin-top:0.5rem;">Parallel Copies</div>', unsafe_allow_html=True)
         current_parallel_idx = parallel_options.index(st.session_state.edit_parallel_copies)
         new_parallel = st.selectbox(
@@ -1404,7 +1537,7 @@ elif st.session_state.stage == "plan":
             help="Number of parallel copy operations"
         )
         st.session_state.edit_parallel_copies = new_parallel
-    
+
     with col2:
         st.markdown('<div style="color:#ffffff;font-size:0.85rem;margin-bottom:0.3rem;">Partition Count</div>', unsafe_allow_html=True)
         current_partition_idx = partition_options.index(st.session_state.edit_partition_count)
@@ -1416,7 +1549,7 @@ elif st.session_state.stage == "plan":
             help="More partitions = better parallelism but more overhead"
         )
         st.session_state.edit_partition_count = new_partitions
-        
+
         st.markdown('<div style="color:#ffffff;font-size:0.85rem;margin-bottom:0.3rem;margin-top:0.5rem;">DIU (Data Integration Units)</div>', unsafe_allow_html=True)
         current_diu_idx = diu_options.index(st.session_state.edit_diu)
         new_diu = st.selectbox(
@@ -1427,12 +1560,12 @@ elif st.session_state.stage == "plan":
             help="Higher DIU = faster data movement"
         )
         st.session_state.edit_diu = new_diu
-    
+
     st.markdown("---")
     if "edit_container_names" not in st.session_state:
         current_containers = list(config.get("containers", {}).values())
         st.session_state.edit_container_names = ", ".join(current_containers)
-    
+
     new_containers = st.text_input(
         "Container names (comma-separated)",
         value=st.session_state.edit_container_names,
@@ -1441,27 +1574,27 @@ elif st.session_state.stage == "plan":
         help="Leave empty to use default names from the plan"
     )
     st.session_state.edit_container_names = new_containers
-    
+
     apply_btn = st.button("Apply Settings", type="primary", use_container_width=True)
-    
+
     if apply_btn:
         py_dir = os.path.dirname(os.path.abspath(__file__))
         if py_dir not in sys.path:
             sys.path.insert(0, py_dir)
         from groq_brain import decide_pipeline_config
-        
+
         container_list = None
         if new_containers.strip():
             container_list = [c.strip() for c in new_containers.split(",")]
-        
+
         custom_settings = {
-            "compute_type": new_compute,
-            "core_count": new_cores,
+            "compute_type":    new_compute,
+            "core_count":      new_cores,
             "partition_count": new_partitions,
             "parallel_copies": new_parallel,
-            "diu": new_diu
+            "diu":             new_diu,
         }
-        
+
         with st.spinner("Regenerating pipeline plan with new settings..."):
             try:
                 new_config = decide_pipeline_config(
@@ -1471,41 +1604,41 @@ elif st.session_state.stage == "plan":
                     custom_settings=custom_settings,
                     container_names=container_list if container_list and len(container_list) == new_num_stages else None
                 )
-                st.session_state.pipeline_config = new_config
-                st.session_state.edit_compute_type = new_compute
-                st.session_state.edit_core_count = new_cores
-                st.session_state.edit_partition_count = new_partitions
-                st.session_state.edit_parallel_copies = new_parallel
-                st.session_state.edit_diu = new_diu
-                st.session_state.edit_num_stages = new_num_stages
-                st.session_state.edit_container_names = ", ".join(list(new_config.get("containers", {}).values()))
+                st.session_state.pipeline_config        = new_config
+                st.session_state.edit_compute_type      = new_compute
+                st.session_state.edit_core_count        = new_cores
+                st.session_state.edit_partition_count   = new_partitions
+                st.session_state.edit_parallel_copies   = new_parallel
+                st.session_state.edit_diu               = new_diu
+                st.session_state.edit_num_stages        = new_num_stages
+                st.session_state.edit_container_names   = ", ".join(list(new_config.get("containers", {}).values()))
                 st.success("Settings applied! Review the updated plan above.")
                 st.rerun()
             except Exception as e:
                 st.error(f"Error applying settings: {str(e)}")
-    
+
     st.markdown('</div>', unsafe_allow_html=True)
     st.markdown("<br>", unsafe_allow_html=True)
 
     col_back, col_deploy = st.columns(2)
     with col_back:
         if st.button("← Back"):
-            for key in ["edit_compute_type", "edit_core_count", "edit_partition_count", 
-                        "edit_parallel_copies", "edit_diu", "edit_num_stages", 
+            for key in ["edit_compute_type", "edit_core_count", "edit_partition_count",
+                        "edit_parallel_copies", "edit_diu", "edit_num_stages",
                         "edit_container_names"]:
                 st.session_state.pop(key, None)
             st.session_state.stage = "input"
             st.rerun()
     with col_deploy:
         if st.button("⚡ Deploy to ADF"):
-            st.session_state.stage              = "running"
-            st.session_state.logs               = []
+            st.session_state.stage                = "running"
+            st.session_state.logs                 = []
             st.session_state.monitor_logs_current = []
-            st.session_state.monitor_logs_all    = []
-            st.session_state.monitor_report     = None
-            st.session_state.progress           = 0
-            st.session_state.pipeline_start_ts  = time.time()
-            st.session_state.pipeline_end_ts    = None
+            st.session_state.monitor_logs_all     = []
+            st.session_state.monitor_report       = None
+            st.session_state.progress             = 0
+            st.session_state.pipeline_start_ts    = time.time()
+            st.session_state.pipeline_end_ts      = None
             st.rerun()
 
 
@@ -1560,7 +1693,7 @@ elif st.session_state.stage == "running":
 
     # ── Spin up threads on first pass ───────────────────────────
     if "_q" not in st.session_state:
-        q: queue.Queue = queue.Queue()
+        q:  queue.Queue = queue.Queue()
         mq: queue.Queue = queue.Queue()
         st.session_state._q  = q
         st.session_state._mq = mq
@@ -1579,7 +1712,7 @@ elif st.session_state.stage == "running":
 
         threading.Thread(
             target=run_monitor_thread,
-            args=(mq, st.session_state["history_limit"]),
+            args=(mq, st.session_state.get("history_limit", 20)),
             daemon=True,
         ).start()
 
@@ -1602,8 +1735,8 @@ elif st.session_state.stage == "running":
             st.session_state.pop("_mq", None)
             done = True; break
         elif kind == "error":
-            st.session_state.run_error   = payload
-            st.session_state.stage       = "failed"
+            st.session_state.run_error       = payload
+            st.session_state.stage           = "failed"
             st.session_state.pipeline_end_ts = time.time()
             st.session_state.pop("_q",  None)
             st.session_state.pop("_mq", None)
@@ -1615,6 +1748,7 @@ elif st.session_state.stage == "running":
         if kind == "monitor_log":
             st.session_state.monitor_logs.append(payload)
             st.session_state.monitor_logs_all.append(payload)
+            st.session_state.monitor_logs_current.append(payload)
         elif kind == "live_runs":
             st.session_state.live_runs = payload
 
@@ -1775,13 +1909,13 @@ elif st.session_state.stage == "failed":
     col_retry, col_new = st.columns(2)
     with col_retry:
         if st.button("↩ Retry"):
-            st.session_state.stage              = "running"
-            st.session_state.logs               = []
+            st.session_state.stage                = "running"
+            st.session_state.logs                 = []
             st.session_state.monitor_logs_current = []
-            st.session_state.monitor_logs_all    = []
-            st.session_state.progress           = 0
-            st.session_state.pipeline_start_ts  = time.time()
-            st.session_state.pipeline_end_ts    = None
+            st.session_state.monitor_logs_all     = []
+            st.session_state.progress             = 0
+            st.session_state.pipeline_start_ts    = time.time()
+            st.session_state.pipeline_end_ts      = None
             st.session_state.pop("_q",  None)
             st.session_state.pop("_mq", None)
             st.rerun()
@@ -1823,24 +1957,24 @@ elif st.session_state.stage == "monitor":
     st.markdown('<hr class="sec-divider">', unsafe_allow_html=True)
 
     # Check if we need to fetch new data
-    trigger_key = "_monitor_trigger"
-    report_key = "_cached_report"
-    
-    current_trigger = st.session_state.get(trigger_key, 0)
+    trigger_key  = "_monitor_trigger"
+    report_key   = "_cached_report"
+
+    current_trigger  = st.session_state.get(trigger_key, 0)
     previous_trigger = st.session_state.get("_previous_trigger", -1)
-    
+
     # Only fetch on first entry (previous_trigger == -1) or when refresh is clicked
     should_fetch = (previous_trigger == -1) or (current_trigger > previous_trigger)
-    
+
     if should_fetch:
         from monitor_agent import MonitoringAgent
         from azure.mgmt.datafactory import DataFactoryManagementClient
         from azure.identity import ClientSecretCredential
         from config import (AZURE_SUBSCRIPTION_ID, AZURE_RESOURCE_GROUP, AZURE_DATA_FACTORY,
-                           AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET)
-        
+                            AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET)
+
         mq = queue.Queue()
-        
+
         def run_standalone_monitor(mq, history_limit=20):
             try:
                 credential = ClientSecretCredential(
@@ -1857,14 +1991,14 @@ elif st.session_state.stage == "monitor":
                 mq.put(("report", report))
             except Exception as e:
                 mq.put(("error", str(e)))
-        
-        history_limit = st.session_state.get("history_limit", 20)
+
+        history_limit  = st.session_state.get("history_limit", 20)
         monitor_thread = threading.Thread(target=run_standalone_monitor, args=(mq, history_limit), daemon=True)
         monitor_thread.start()
-        
+
         # Wait for report
-        report = None
-        max_wait = 60
+        report    = None
+        max_wait  = 60
         wait_count = 0
         while report is None and wait_count < max_wait:
             time.sleep(1)
@@ -1874,9 +2008,9 @@ elif st.session_state.stage == "monitor":
                     report = data
                     # Also add to logs
                     for pl_name, pl_data in data.get("pipelines", {}).items():
-                        runs = pl_data.get("runs", [])
-                        succ = sum(1 for r in runs if r["status"] == "Succeeded")
-                        fail = sum(1 for r in runs if r["status"] == "Failed")
+                        runs    = pl_data.get("runs", [])
+                        succ    = sum(1 for r in runs if r["status"] == "Succeeded")
+                        fail    = sum(1 for r in runs if r["status"] == "Failed")
                         running = sum(1 for r in runs if r["status"] in ["InProgress", "Queued", "Running"])
                         st.session_state.monitor_logs_all.append(
                             f"{pl_name} → Last {len(runs)} runs | Success={succ} | Failed={fail} | Running={running}"
@@ -1887,23 +2021,23 @@ elif st.session_state.stage == "monitor":
             wait_count += 1
             if report:
                 break
-        
+
         # Update trigger to prevent re-fetch
         st.session_state["_previous_trigger"] = current_trigger
         st.session_state[report_key] = report
     else:
         report = st.session_state.get(report_key)
-    
+
     st.markdown('<div class="card"><div class="card-label">Pipeline Status Overview</div>', unsafe_allow_html=True)
-    
+
     if report:
-        summary = report.get("summary", {})
-        total = summary.get("total_runs", 0)
-        succeeded = summary.get("succeeded", 0)
-        failed = summary.get("failed", 0)
-        in_progress = summary.get("in_progress", 0)
+        summary      = report.get("summary", {})
+        total        = summary.get("total_runs", 0)
+        succeeded    = summary.get("succeeded", 0)
+        failed       = summary.get("failed", 0)
+        in_progress  = summary.get("in_progress", 0)
         success_rate = summary.get("success_rate", 0)
-        
+
         col1, col2, col3, col4, col5 = st.columns(5)
         with col1:
             st.metric("Total Runs", total)
@@ -1915,90 +2049,83 @@ elif st.session_state.stage == "monitor":
             st.metric("In Progress", in_progress)
         with col5:
             st.metric("Success Rate", f"{success_rate}%")
-        
+
         st.markdown('</div>', unsafe_allow_html=True)
-        
+
         issues = report.get("issues", [])
         if issues:
             st.markdown('<div class="card"><div class="card-label" style="color:#ef4444;">Issues Detected</div>', unsafe_allow_html=True)
             for issue in issues[:10]:
                 st.markdown(f"- {issue}")
             st.markdown('</div>', unsafe_allow_html=True)
-        
+
         pipelines = report.get("pipelines", {})
         if pipelines:
             st.markdown('<div class="card"><div class="card-label">Pipeline Runs</div>', unsafe_allow_html=True)
             for pl_name, pl_data in pipelines.items():
-                runs = pl_data.get("runs", [])
-                stats = pl_data.get("stats", {})
+                runs      = pl_data.get("runs", [])
+                stats     = pl_data.get("stats", {})
                 resources = pl_data.get("resources", {})
-                
-                # Build header with stats
+
                 stat_line = ""
                 if stats:
                     mean_dur = stats.get("mean_s")
                     if mean_dur:
                         stat_line = f" | avg: {_format_duration(mean_dur)}"
-                
+
                 if runs:
                     with st.expander(f"📦 {pl_name} ({len(runs)} runs){stat_line}"):
-                        # Show pipeline resources if available
                         if resources:
                             compute_types = resources.get("cloud_compute", {})
-                            act_types = resources.get("activity_type_counts", {})
-                            
+                            act_types     = resources.get("activity_type_counts", {})
                             if compute_types:
-                                compute_str = ", ".join(compute_types.keys())
-                                st.markdown(f"**Compute:** {compute_str}")
+                                st.markdown(f"**Compute:** {', '.join(compute_types.keys())}")
                             if act_types:
-                                acts_str = ", ".join(f"{k}: {v}" for k, v in act_types.items())
-                                st.markdown(f"**Activities:** {acts_str}")
+                                st.markdown(f"**Activities:** {', '.join(f'{k}: {v}' for k, v in act_types.items())}")
                             st.markdown("---")
-                        
+
                         for run in runs:
-                            status = run.get("status", "Unknown")
-                            duration = run.get("duration_display", "N/A")
-                            run_id = run.get("run_id", "")[:16]
-                            started = run.get("started_at", "")[:19] if run.get("started_at") else "N/A"
-                            ended = run.get("ended_at", "")[:19] if run.get("ended_at") else "N/A"
-                            duration_s = run.get("duration_s")
-                            
-                            # Get activities info
+                            status    = run.get("status", "Unknown")
+                            duration  = run.get("duration_display", "N/A")
+                            run_id    = run.get("run_id", "")[:16]
+                            started   = run.get("started_at", "")[:19] if run.get("started_at") else "N/A"
+                            ended     = run.get("ended_at", "")[:19]   if run.get("ended_at")   else "N/A"
+
                             activities = run.get("activities", [])
-                            act_types = list(set(a.get("activity_type", "Unknown") for a in activities))
-                            
-                            flags = run.get("flags", [])
+                            act_types  = list(set(a.get("activity_type", "Unknown") for a in activities))
+
+                            flags     = run.get("flags", [])
                             flags_str = " | ".join(flags) if flags else ""
-                            
+
                             if status == "Succeeded":
                                 st.success(f"✓ {run_id} | {status} | {duration} | started: {started} | ended: {ended}")
                             elif status == "Failed":
                                 st.error(f"✗ {run_id} | {status} | {duration} | started: {started} | ended: {ended}")
                                 for err in run.get("errors", []):
                                     st.markdown(f"  → **{err.get('activity', 'N/A')}**: {err.get('error_code', '')}: {err.get('message', '')[:100]}")
-                            elif status == "InProgress" or status == "Running":
+                            elif status in ("InProgress", "Running"):
                                 st.info(f"⏳ {run_id} | {status} | {duration} | started: {started}")
                             else:
                                 st.markdown(f"⚪ {run_id} | {status} | {duration} | started: {started} | ended: {ended}")
-                            
-                            # Show activity types and flags
+
                             if act_types:
                                 st.markdown(f"  *Activities: {', '.join(act_types)}*")
                             if flags_str:
                                 st.markdown(f"  *Flags: {flags_str}*")
+
             st.markdown('</div>', unsafe_allow_html=True)
     else:
         st.info("Loading pipeline data from ADF...")
-    
+
     st.markdown("<br>", unsafe_allow_html=True)
-    
+
     # Refresh button
     col_refresh = st.columns([1])
     with col_refresh[0]:
         if st.button("🔄 Refresh Now"):
             st.session_state["_monitor_trigger"] = st.session_state.get("_monitor_trigger", 0) + 1
             st.rerun()
-    
+
     # Display logs
     st.markdown('<div class="card"><div class="card-label">Monitor Logs (All ADF Pipelines)</div>', unsafe_allow_html=True)
     render_monitor_logs_with_limit(st.session_state.monitor_logs_all)

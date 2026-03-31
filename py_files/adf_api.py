@@ -49,9 +49,9 @@ def adf_put(token: str, resource_type: str, name: str, body: dict) -> requests.R
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     r = requests.put(url, headers=headers, json=body)
     if r.status_code in [200, 201]:
-        print(f"   Created {resource_type}/{name}")
+        print(f"   ✅ Created {resource_type}/{name}")
     else:
-        print(f"   Failed {resource_type}/{name} -> {r.status_code}: {r.text}")
+        print(f"   ❌ Failed {resource_type}/{name} -> {r.status_code}: {r.text[:300]}")
     return r
 
 
@@ -68,23 +68,11 @@ def delete_adf_resource(token: str, resource_type: str, name: str):
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     r = requests.delete(url, headers=headers)
     if r.status_code not in [200, 204, 404]:
-        print(f"   Could not delete {resource_type}/{name} -> {r.status_code}: {r.text[:200]}")
+        print(f"   ⚠️  Could not delete {resource_type}/{name} -> {r.status_code}: {r.text[:200]}")
 
 
 # ============================================================
-# PUBLISH: Wait for ADF to register all resources
-#
-# NOTE: When ADF is used WITHOUT Git integration (which is the
-# case here — no "Set up code repository" was configured), all
-# REST API PUT calls write directly to the live layer. There is
-# no separate draft/publish step and the /publishAll endpoint
-# does not exist (returns 404).
-#
-# With Git integration the flow is: REST -> draft -> publishAll -> live.
-# Without Git integration the flow is: REST -> live (immediate).
-#
-# We simply wait a few seconds to let ADF finish internal
-# propagation before triggering runs.
+# PUBLISH
 # ============================================================
 def publish_factory(token: str):
     print("   No Git integration — resources are live immediately via REST API")
@@ -94,7 +82,7 @@ def publish_factory(token: str):
 
 
 # ============================================================
-# BLOB: Create a container in Azure Storage
+# BLOB: Create container
 # ============================================================
 def create_blob_container(container_name: str):
     token_url = f"https://login.microsoftonline.com/{AZURE_TENANT_ID}/oauth2/token"
@@ -118,15 +106,15 @@ def create_blob_container(container_name: str):
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     r = requests.put(url, headers=headers, json={"properties": {"publicAccess": "None"}})
     if r.status_code in [200, 201]:
-        print(f"   Container '{container_name}' created")
+        print(f"   ✅ Container '{container_name}' created")
     elif r.status_code == 409:
-        print(f"   Container '{container_name}' already exists")
+        print(f"   ℹ️  Container '{container_name}' already exists")
     else:
-        print(f"   Container '{container_name}' failed -> {r.status_code}: {r.text}")
+        print(f"   ❌ Container '{container_name}' failed -> {r.status_code}: {r.text}")
 
 
 # ============================================================
-# BLOB: Purge all blobs from a container
+# BLOB: Purge container
 # ============================================================
 def purge_container(container_name: str):
     try:
@@ -141,9 +129,9 @@ def purge_container(container_name: str):
         container = client.get_container_client(container_name)
         blobs = list(container.list_blobs())
         if not blobs:
-            print(f"   '{container_name}' is already empty")
+            print(f"   ℹ️  '{container_name}' is already empty")
             return
-        print(f"   Purging {len(blobs)} blob(s) from '{container_name}'...")
+        print(f"   🗑️  Purging {len(blobs)} blob(s) from '{container_name}'...")
         for blob in blobs:
             container.delete_blob(blob.name)
     except ImportError:
@@ -153,12 +141,7 @@ def purge_container(container_name: str):
 
 
 # ============================================================
-# BLOB: Upload CSV — purge container first, then upload only
-#       the current file.
-#
-# Every run wipes ALL existing blobs from the container before
-# uploading the new CSV. This guarantees the copy pipeline
-# never merges stale files from previous runs into staged.csv.
+# BLOB: Upload CSV
 # ============================================================
 def upload_csv(filepath: str, container_name: str) -> str:
     import os
@@ -166,16 +149,12 @@ def upload_csv(filepath: str, container_name: str) -> str:
         from azure.storage.blob import BlobServiceClient
     except ImportError:
         print("   azure-storage-blob not installed -> pip install azure-storage-blob")
-        print(f"   Manually upload '{filepath}' to container '{container_name}'")
         return os.path.basename(filepath)
 
     filename = os.path.basename(filepath)
 
     if not filename or filename.startswith("*") or not filename.lower().endswith(".csv"):
-        raise ValueError(
-            f"Invalid blob filename '{filename}'. "
-            f"Provide the actual CSV file path, not a wildcard pattern."
-        )
+        raise ValueError(f"Invalid blob filename '{filename}'.")
 
     conn_str = (
         f"DefaultEndpointsProtocol=https;"
@@ -194,12 +173,12 @@ def upload_csv(filepath: str, container_name: str) -> str:
 
     with open(filepath, "rb") as f:
         container.upload_blob(name=filename, data=f, overwrite=True)
-    print(f"   '{filename}' uploaded to container '{container_name}'")
+    print(f"   ✅ '{filename}' uploaded to container '{container_name}'")
     return filename
 
 
 # ============================================================
-# BLOB: Verify container has real data before running dataflow
+# BLOB: Verify container has data
 # ============================================================
 def check_blob_has_rows(container_name: str) -> bool:
     try:
@@ -221,17 +200,14 @@ def check_blob_has_rows(container_name: str) -> bool:
         valid_blobs = 0
         for blob in blobs:
             if blob.name == "*.csv":
-                print(f"   Stale wildcard blob '*.csv' found in '{container_name}'")
+                print(f"   ⚠️  Stale wildcard blob '*.csv' found in '{container_name}'")
             elif blob.size == 0:
-                print(f"   '{blob.name}' is 0 bytes — skipping")
+                print(f"   ⚠️  '{blob.name}' is 0 bytes — skipping")
             else:
-                print(f"   '{blob.name}' — {blob.size:,} bytes")
+                print(f"   ✅ '{blob.name}' — {blob.size:,} bytes")
                 valid_blobs += 1
 
-        if valid_blobs == 0:
-            print(f"   No valid blobs in '{container_name}'")
-            return False
-        return True
+        return valid_blobs > 0
 
     except ImportError:
         print("   azure-storage-blob not installed — skipping blob check")
@@ -242,7 +218,7 @@ def check_blob_has_rows(container_name: str) -> bool:
 
 
 # ============================================================
-# LINKED SERVICE: ADF <-> Azure Blob Storage
+# LINKED SERVICE
 # ============================================================
 def create_linked_service(token: str) -> requests.Response:
     body = {
@@ -309,19 +285,12 @@ def create_dataset(token: str, ds_config: dict) -> requests.Response:
             }
         }
     }
+
     return adf_put(token, "datasets", ds_config["name"], body)
 
 
 # ============================================================
-# PIPELINE: Copy Activity (raw -> stage1)
-#
-# The sink dataset may carry fileName="*.csv" because it is also
-# used as a dataflow source (wildcard read). When ADF executes
-# a copy sink with fileName="*.csv" it creates a literal blob
-# named "*.csv". To prevent this, we override the fileName at
-# the pipeline level via storeSettings.fileName = "staged.csv".
-# This takes precedence over the dataset-level fileName without
-# changing the dataset definition.
+# COPY PIPELINE
 # ============================================================
 def create_copy_pipeline(token: str, pipeline_config: dict) -> requests.Response:
     body = {
@@ -418,25 +387,21 @@ def rewrite_column_refs(expr: str, columns_lower: set) -> str:
 # FILTER EXPRESSION NORMALISER
 # ============================================================
 def _normalize_filter_expr(expr: str, columns_lower: set) -> str:
-    # iif(col == 1, true, false)  ->  equals(toInteger(col), 1)
     iif_eq = re.compile(
         r"iif\(\s*(\w+)\s*==\s*(\d+)\s*,\s*true\s*,\s*false\s*\)", re.IGNORECASE
     )
     expr = iif_eq.sub(lambda m: f"equals(toInteger({m.group(1)}), {m.group(2)})", expr)
 
-    # iif(col != 0, true, false)  ->  notEquals(toInteger(col), 0)
     iif_neq = re.compile(
         r"iif\(\s*(\w+)\s*!=\s*(\d+)\s*,\s*true\s*,\s*false\s*\)", re.IGNORECASE
     )
     expr = iif_neq.sub(lambda m: f"notEquals(toInteger({m.group(1)}), {m.group(2)})", expr)
 
-    # bare: col == 1  ->  equals(toInteger(col), 1)
     bare_eq = re.compile(r"^(\w+)\s*==\s*(\d+)$")
     m = bare_eq.match(expr.strip())
     if m and m.group(1).lower() in columns_lower:
         expr = f"equals(toInteger({m.group(1)}), {m.group(2)})"
 
-    # bare: col != 0  ->  notEquals(toInteger(col), 0)
     bare_neq = re.compile(r"^(\w+)\s*!=\s*(\d+)$")
     m = bare_neq.match(expr.strip())
     if m and m.group(1).lower() in columns_lower:
@@ -449,7 +414,6 @@ def _normalize_filter_expr(expr: str, columns_lower: set) -> str:
 # DATAFLOW SCRIPT BUILDER
 # ============================================================
 def _adf_type(inferred: str) -> str:
-    """Map inferred Python type to an ADF DataFlow type string."""
     return {"integer": "integer", "double": "double"}.get(inferred, "string")
 
 
@@ -463,10 +427,10 @@ def build_dataflow_script(
     """
     Returns (script_string, use_filter_bool).
 
-    Declares every column with its type inside output() so ADF knows
-    the schema at design/compile time. Without this the Source node
-    shows "Columns: 0 total" and column references in filter() or
-    derive() resolve to nothing (DF-EXPR-010).
+    Source: schema drift ON, validate OFF  — permissive read, accepts any CSV.
+    Sink  : schema drift OFF, validate ON  — strict write, rejects nulls in
+            integer columns so ADF raises a real DF-Executor-InvalidData error
+            when the data has nulls. This is what triggers runtime self-healing.
     """
     schema_parts = []
     for col in columns:
@@ -480,6 +444,7 @@ def build_dataflow_script(
         else "processed_time = currentTimestamp()"
     )
 
+    # ── Source: permissive — read whatever comes in
     source_block = (
         "source(output(\n"
         + schema_str + "\n"
@@ -500,6 +465,13 @@ def build_dataflow_script(
     else:
         middle = "Source derive(" + col_expr + ") ~> DerivedColumns"
 
+    # ── Sink: permissive — schema drift ON, validate OFF
+    # Blob storage sinks cannot enforce column mappings without explicit
+    # schema definitions. validateSchema: true with allowSchemaDrift: false
+    # causes ADF to report 0 output columns and fail before even reading data.
+    # Runtime null errors are surfaced by bare toInteger() in the derive step
+    # (no iifNull wrapper) — Groq is instructed not to add null safety so
+    # real DF-Executor-InvalidData errors reach self-healing naturally.
     sink_block = (
         "DerivedColumns sink(allowSchemaDrift: true,\n"
         "     validateSchema: false,\n"
@@ -512,25 +484,46 @@ def build_dataflow_script(
 
 
 # ============================================================
-# PIPELINE: Data Flow Activity (stage1 -> stage2)
+# DATAFLOW PIPELINE — main entry point
 # ============================================================
-def create_dataflow_pipeline(token: str, pipeline_config: dict, columns: list) -> requests.Response:
+def create_dataflow_pipeline(
+    token: str,
+    pipeline_config: dict,
+    columns: list,
+) -> requests.Response:
+    """
+    Build and deploy a Mapping Data Flow pipeline.
+
+    `columns` must be the list of CSV column names (strings without '=').
+    Transformations are read from pipeline_config["transformations"].
+    """
+    # ── normalise columns — must be plain column names, not expressions
+    if columns and isinstance(columns[0], str) and "=" in columns[0]:
+        columns = []
+        print("   ⚠️  columns list contained expressions — using empty list (schema drift only)")
+
     columns_lower = {c.lower() for c in columns}
 
     derived_columns  = []
     filter_condition = None
+    dropped_count    = 0
+
+    print(f"\n   📋 Processing {len(pipeline_config.get('transformations', []))} transformation(s)...")
 
     for t in pipeline_config.get("transformations", []):
         if "=" not in t:
+            print(f"   ⚠️  Skipping (no '='): {t}")
+            dropped_count += 1
             continue
 
         col, expr = t.split("=", 1)
         col  = col.strip()
         expr = expr.strip()
 
+        # ── detect filter intent
         _iif_pattern = re.compile(
             r"^iif\(\s*(\w+)\s*(==|!=)\s*(\d+)\s*,\s*true\s*,\s*false\s*\)$",
-            re.IGNORECASE
+            re.IGNORECASE,
         )
         _bare_pattern = re.compile(r"^(\w+)\s*(==|!=)\s*(\d+)$")
 
@@ -553,32 +546,42 @@ def create_dataflow_pipeline(token: str, pipeline_config: dict, columns: list) -
                 if tk.lower() not in columns_lower and tk not in ADF_FUNCTIONS
             ]
             if invalid:
-                print(f"   Filter references unknown columns {invalid} — dropping filter")
+                print(f"   ⚠️  Filter DROPPED — unknown tokens: {invalid}")
+                dropped_count += 1
                 continue
 
             filter_condition = candidate
-            print(f"   Filter promoted from derived column '{col}': {filter_condition}")
+            print(f"   🔍 Filter: {filter_condition}")
 
         else:
+            # ── validate derived column expression
             tokens  = re.findall(r'\b([a-zA-Z_][a-zA-Z0-9_]*)\b', expr)
             invalid = [
                 tk for tk in tokens
                 if tk.lower() not in columns_lower and tk not in ADF_FUNCTIONS
             ]
+
             if invalid:
-                print(f"   Skipping derived column '{col}': unknown references {invalid}")
+                print(f"   ⚠️  Derived column DROPPED: '{col} = {expr}'")
+                print(f"        Unknown tokens : {invalid}")
+                print(f"        Known columns  : {sorted(columns_lower)}")
+                dropped_count += 1
                 continue
 
-            derived_columns.append({
-                "name":       col,
-                "expression": rewrite_column_refs(expr, columns_lower),
-            })
+            final_expr = rewrite_column_refs(expr, columns_lower)
+            derived_columns.append({"name": col, "expression": final_expr})
+            print(f"   ✅ Derived column: {col} = {final_expr}")
 
+    # ── always include processed_time
     if not any(d["name"] == "processed_time" for d in derived_columns):
         derived_columns.append({
             "name":       "processed_time",
             "expression": "currentTimestamp()",
         })
+        print("   ✅ Added default: processed_time = currentTimestamp()")
+
+    if dropped_count > 0:
+        print(f"\n   ❗ {dropped_count} transformation(s) were dropped.")
 
     pipeline_name   = pipeline_config["name"]
     source_dataset  = pipeline_config["source_dataset"]
@@ -596,8 +599,9 @@ def create_dataflow_pipeline(token: str, pipeline_config: dict, columns: list) -
         filter_condition = filter_condition,
     )
 
-    # Delete the pipeline before the dataflow — ADF returns 400 if
-    # you try to delete a dataflow that a pipeline still references.
+    print(f"\n   📜 DataFlow script:\n{script}\n")
+
+    # ── delete old pipeline + dataflow before recreating
     delete_adf_resource(token, "pipelines", pipeline_name)
     time.sleep(5)
     legacy_df_name = f"DF_{pipeline_name}"
@@ -615,31 +619,31 @@ def create_dataflow_pipeline(token: str, pipeline_config: dict, columns: list) -
             "typeProperties": {
                 "sources": [
                     {
-                        "name": "Source",
+                        "name":    "Source",
                         "dataset": {
                             "referenceName": source_dataset,
-                            "type": "DatasetReference"
+                            "type":          "DatasetReference"
                         }
                     }
                 ],
                 "sinks": [
                     {
-                        "name": "Sink",
+                        "name":    "Sink",
                         "dataset": {
                             "referenceName": sink_dataset,
-                            "type": "DatasetReference"
+                            "type":          "DatasetReference"
                         }
                     }
                 ],
                 "transformations": structured_transforms,
-                "script": script
+                "script":          script,
             }
         }
     }
 
     r_df = adf_put(token, "dataflows", df_name, df_body)
     if r_df.status_code not in [200, 201]:
-        print("   Dataflow creation failed")
+        print("   ❌ Dataflow creation failed — aborting pipeline creation")
         return r_df
 
     time.sleep(5)
@@ -710,7 +714,7 @@ def cleanup_old_dataflows(token: str, pipeline_name: str, current_df_name: str):
 
 
 # ============================================================
-# TRIGGER: Run a pipeline immediately
+# TRIGGER
 # ============================================================
 def trigger_pipeline(token: str, pipeline_name: str):
     url = (
@@ -723,10 +727,10 @@ def trigger_pipeline(token: str, pipeline_name: str):
     r = requests.post(url, headers=headers, json={})
     if r.status_code == 200:
         run_id = r.json().get("runId", "unknown")
-        print(f"   '{pipeline_name}' triggered | Run ID: {run_id}")
+        print(f"   ✅ '{pipeline_name}' triggered | Run ID: {run_id}")
         return run_id
     else:
-        print(f"   '{pipeline_name}' trigger failed -> {r.status_code}: {r.text}")
+        print(f"   ❌ '{pipeline_name}' trigger failed -> {r.status_code}: {r.text}")
     return None
 
 
@@ -749,9 +753,14 @@ def _get_with_retry(url: str, headers: dict, max_retries: int = 5) -> requests.R
 
 
 # ============================================================
-# CHECK PIPELINE STATUS
+# CHECK PIPELINE STATUS + extract activity-level error
 # ============================================================
-def check_pipeline_status(token: str, pipeline_name: str, run_id: str, max_wait: int = 600) -> dict:
+def check_pipeline_status(
+    token: str,
+    pipeline_name: str,
+    run_id: str,
+    max_wait: int = 600,
+) -> dict:
     url = (
         f"https://management.azure.com/subscriptions/{AZURE_SUBSCRIPTION_ID}"
         f"/resourceGroups/{AZURE_RESOURCE_GROUP}"
@@ -776,30 +785,20 @@ def check_pipeline_status(token: str, pipeline_name: str, run_id: str, max_wait:
             status = data.get("status", "Unknown")
 
             if status == "Succeeded":
-                print(f"   Pipeline '{pipeline_name}' succeeded")
+                print(f"   ✅ Pipeline '{pipeline_name}' succeeded")
                 return {"status": "Succeeded", "details": data}
 
             elif status == "Failed":
-                print(f"   Pipeline '{pipeline_name}' FAILED")
-                act_url = (
-                    f"https://management.azure.com/subscriptions/{AZURE_SUBSCRIPTION_ID}"
-                    f"/resourceGroups/{AZURE_RESOURCE_GROUP}"
-                    f"/providers/Microsoft.DataFactory/factories/{AZURE_DATA_FACTORY}"
-                    f"/pipelineruns/{run_id}/queryActivityruns?api-version=2018-06-01"
-                )
-                try:
-                    act_r = _get_with_retry(act_url, headers)
-                    if act_r.status_code == 200:
-                        for activity in act_r.json().get("value", []):
-                            if activity.get("status") == "Failed":
-                                error = activity.get("error", {})
-                                print(f"   Activity error: {error.get('message', 'Unknown')}")
-                except Exception:
-                    pass
-                return {"status": "Failed", "details": data}
+                print(f"   ❌ Pipeline '{pipeline_name}' FAILED")
+                error_message = _extract_activity_error(token, run_id, headers)
+                return {
+                    "status": "Failed",
+                    "error":  error_message,
+                    "details": data,
+                }
 
             else:
-                print(f"   Pipeline '{pipeline_name}' -> {status} ({elapsed}s elapsed)")
+                print(f"   ⏳ Pipeline '{pipeline_name}' -> {status} ({elapsed}s elapsed)")
                 time.sleep(10)
                 elapsed += 10
 
@@ -810,12 +809,53 @@ def check_pipeline_status(token: str, pipeline_name: str, run_id: str, max_wait:
                 headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
             except Exception as e:
                 print(f"   Token refresh failed: {e}")
-                return {"status": "Failed", "details": {"error": str(e)}}
-
+                return {"status": "Failed", "error": str(e)}
         else:
             print(f"   Status check HTTP {r.status_code}: {r.text[:200]}")
             time.sleep(10)
             elapsed += 10
 
-    print(f"   Timeout waiting for pipeline '{pipeline_name}'")
+    print(f"   ⏰ Timeout waiting for pipeline '{pipeline_name}'")
     return {"status": "Timeout", "run_id": run_id}
+
+
+def _extract_activity_error(token: str, run_id: str, headers: dict) -> str:
+    """
+    Query activity runs for a failed pipeline and return the first
+    meaningful error message. This is what SelfHealingAgent reads.
+    """
+    act_url = (
+        f"https://management.azure.com/subscriptions/{AZURE_SUBSCRIPTION_ID}"
+        f"/resourceGroups/{AZURE_RESOURCE_GROUP}"
+        f"/providers/Microsoft.DataFactory/factories/{AZURE_DATA_FACTORY}"
+        f"/pipelineruns/{run_id}/queryActivityruns?api-version=2018-06-01"
+    )
+
+    now   = datetime.datetime.utcnow()
+    after = now - datetime.timedelta(hours=24)
+    body  = {
+        "lastUpdatedAfter":  after.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "lastUpdatedBefore": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+
+    try:
+        act_r = requests.post(act_url, headers=headers, json=body, timeout=30)
+        if act_r.status_code == 200:
+            activities = act_r.json().get("value", [])
+            for activity in activities:
+                if activity.get("status") == "Failed":
+                    error = activity.get("error", {})
+                    if "error" in error and isinstance(error["error"], dict):
+                        error = error["error"]
+                    msg = (
+                        error.get("message")
+                        or error.get("Message")
+                        or error.get("failureType")
+                        or str(error)
+                    )
+                    print(f"   Activity error: {msg}")
+                    return msg
+    except Exception as e:
+        print(f"   Could not fetch activity error: {e}")
+
+    return "Unknown pipeline failure — check ADF portal for details"

@@ -1,5 +1,5 @@
 animal_name,hair,feathers,eggs,milk,airborne,aquatic,predator,toothed,backbone,breathes,venomous,fins,legs,tail,domestic,catsize
-aardvark,1,0,0,1,0,0,1,1,1,1,0,0,4,0,0,1
+aardvark,1,0,0,1,0,0,1,1,,1,0,0,4,0,0,1
 antelope,1,0,0,1,0,0,0,1,1,1,0,0,4,1,0,1
 bass,0,0,1,0,0,1,1,1,1,0,0,1,0,1,0,0
 bear,1,0,0,1,0,0,1,1,1,1,0,0,4,0,0,1
