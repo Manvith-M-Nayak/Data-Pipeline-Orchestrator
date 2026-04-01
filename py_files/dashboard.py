@@ -558,10 +558,12 @@ def read_csv_schema(filepath: str, sample_rows: int = 5) -> dict:
     }
 
 
-def fetch_output_from_blob(container_name: str, sink_filename: str):
+def fetch_output_from_blob(container_name: str, sink_filename: str, partition_count: int = 1):
     try:
         from azure.storage.blob import BlobServiceClient
         from config import AZURE_STORAGE_ACCOUNT, AZURE_STORAGE_KEY
+        import io
+        import csv
         conn_str = (
             f"DefaultEndpointsProtocol=https;"
             f"AccountName={AZURE_STORAGE_ACCOUNT};"
@@ -574,6 +576,28 @@ def fetch_output_from_blob(container_name: str, sink_filename: str):
                      if b.size > 0 and not b.name.startswith("*")]
         if not blobs:
             return None, ""
+
+        if partition_count > 1:
+            partition_files = sorted([b for b in blobs if "part-" in b.name and b.name.endswith(".csv")],
+                                      key=lambda b: b.name)
+            if partition_files:
+                merged_data = []
+                header = None
+                for pb in partition_files:
+                    content = container.download_blob(pb.name).readall().decode("utf-8")
+                    reader = csv.reader(io.StringIO(content))
+                    rows = list(reader)
+                    if rows:
+                        if header is None:
+                            header = rows[0]
+                            merged_data.append(header)
+                        merged_data.extend(rows[1:])
+                if merged_data:
+                    output = io.StringIO()
+                    writer = csv.writer(output)
+                    writer.writerows(merged_data)
+                    return output.getvalue().encode("utf-8"), "merged_output.csv"
+
         target = next((b for b in blobs if b.name == sink_filename), None)
         if target is None:
             target = max(blobs, key=lambda b: b.size)
@@ -1731,10 +1755,11 @@ elif st.session_state.stage == "done":
             sink_ds       = next((d for d in config["datasets"] if d.get("role") == "sink"),
                                  {"filename": "output.csv", "container": stage2})
             sink_filename = sink_ds.get("filename", "output.csv")
+            partition_count = config.get("pipelines", [{}])[0].get("partition_count", 1)
 
             if st.session_state.output_csv is None:
                 with st.spinner(f"Fetching from '{stage2}'…"):
-                    data, fname = fetch_output_from_blob(stage2, sink_filename)
+                    data, fname = fetch_output_from_blob(stage2, sink_filename, partition_count)
                     st.session_state.output_csv      = data
                     st.session_state.output_filename = fname or sink_filename
 

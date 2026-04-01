@@ -439,9 +439,8 @@ def rewrite_column_refs(expr: str, columns_lower: set) -> str:
 # so there is exactly ONE place that touches `=` operators.
 # ============================================================
 def _normalize_filter_expr(expr: str, columns_lower: set) -> str:
-    # Normalise bare `=` to `==` safely (no double-substitution risk)
-    expr = _fix_bare_equals(expr)
-
+    # Already normalized: equals(toInteger(col), val) -> keep as is
+    # Already normalized: notEquals(toInteger(col), val) -> keep as is
     # iif(col == 1, true, false)  ->  equals(toInteger(col), 1)
     iif_eq = re.compile(
         r"iif\(\s*(\w+)\s*==\s*(\d+)\s*,\s*true\s*,\s*false\s*\)", re.IGNORECASE
@@ -528,12 +527,24 @@ def build_dataflow_script(
     else:
         middle = "Source derive(" + col_expr + ") ~> DerivedColumns"
 
+    source_block = (
+        "source(output(\n"
+        + schema_str + "\n"
+        + "     ),\n"
+        "     wildcardFileName: '*.csv',\n"
+        "     allowSchemaDrift: true,\n"
+        "     validateSchema: false,\n"
+        "     ignoreNoFilesFound: false,\n"
+        f"     partitionBy('hash', {partition_count})) ~> Source"
+    )
+
     sink_block = (
         "DerivedColumns sink(allowSchemaDrift: true,\n"
         "     validateSchema: false,\n"
         "     skipDuplicateMapInputs: true,\n"
         "     skipDuplicateMapOutputs: true,\n"
-        "     partitionBy('hash', 1)) ~> Sink"
+        f"     partitionBy('hash', {partition_count}),\n"
+        "     fileName: 'output.csv') ~> Sink"
     )
 
     return "\n".join([source_block, middle, sink_block]), use_filter
@@ -546,8 +557,13 @@ def create_dataflow_pipeline(token: str, pipeline_config: dict, columns: list) -
     columns_lower = {c.lower() for c in columns}
 
     derived_columns  = []
-    filter_condition = None
-
+    
+    # Check if filter_condition was provided directly in pipeline_config (from Groq)
+    filter_condition = pipeline_config.get("filter_condition")
+    if filter_condition:
+        filter_condition = filter_condition.strip()
+        print(f"   Using filter_condition from config: {filter_condition}")
+    
     for t in pipeline_config.get("transformations", []):
         if "=" not in t:
             continue
@@ -565,12 +581,17 @@ def create_dataflow_pipeline(token: str, pipeline_config: dict, columns: list) -
             r"^iif\(\s*(\w+)\s*(==|!=)\s*(\d+)\s*,\s*true\s*,\s*false\s*\)$",
             re.IGNORECASE
         )
-        _bare_pattern = re.compile(r"^(\w+)\s*(==|!=)\s*(\d+)$")
+        _bare_pattern = re.compile(r"^(\w+)\s*=\s*(\d+)$")
+        _equals_pattern = re.compile(r"^equals\(toInteger\((\w+)\),\s*(\d+)\)$")
+        _nequal_pattern = re.compile(r"^notEquals\(toInteger\((\w+)\),\s*(\d+)\)$")
 
+        expr_stripped = expr.strip()
         is_filter_intent = (
             col.lower() == "filter"
-            or bool(_iif_pattern.match(expr.strip()))
-            or bool(_bare_pattern.match(expr.strip()))
+            or bool(_iif_pattern.match(expr_stripped))
+            or bool(_bare_pattern.match(expr_stripped))
+            or bool(_equals_pattern.match(expr_stripped))
+            or bool(_nequal_pattern.match(expr_stripped))
         )
 
         if is_filter_intent:

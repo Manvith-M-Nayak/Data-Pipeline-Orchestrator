@@ -278,17 +278,24 @@ Rules:
    These can be adjusted based on the user's prompt or data characteristics.
 4. For "copy" type pipelines: use Copy Activity to move data between containers
 5. For "dataflow" type pipelines: use Data Flow Activity with Derived Column transformations
-6. For transformations, use ONLY valid ADF Data Flow expression syntax:
-   - upper(col), lower(col), trim(col)
-   - toInteger(col), toDouble(col), toString(col)
-   - iifNull(col, 'default')
-   - currentTimestamp()
-   - year(col), month(col), dayOfMonth(col)
-   - concat(col1, ' ', col2)
-   - substring(col, 1, 5)
-   - regexReplace(col, '[^a-zA-Z0-9]', '')
-   - Always include: processed_time = currentTimestamp()
-7. Always include a "reasoning" field explaining your decisions
+   6. For transformations, use ONLY valid ADF Data Flow expression syntax:
+    - upper(col), lower(col), trim(col)
+    - toInteger(col), toDouble(col), toString(col)
+    - iifNull(col, 'default')
+    - currentTimestamp()
+    - year(col), month(col), dayOfMonth(col)
+    - concat(col1, ' ', col2)
+    - substring(col, 1, 5)
+    - regexReplace(col, '[^a-zA-Z0-9]', '')
+    - Always include: processed_time = currentTimestamp()
+ 6b. For FILTERS, use the "filter_condition" field in the pipeline config. 
+    The filter_condition should be a valid ADF expression like:
+    - equals(toInteger(eggs), 1)  -- to filter rows where eggs = 1
+    - notEquals(toInteger(eggs), 0)  -- to filter where eggs is not 0
+    - isNull(legs)  -- to filter rows where legs is null
+ 6c. If the user prompt describes a filter (e.g. "filter animals that lay eggs"), 
+    you MUST set filter_condition in the pipeline config, NOT in transformations.
+ 7. Always include a "reasoning" field explaining your decisions
 8. Include a "recommended_settings" object showing optimal values
 9. Include an "editable_settings" object with all configurable options
 
@@ -317,6 +324,13 @@ The JSON must follow this exact structure:
   }},
   "reasoning": "Brief explanation of decisions made"
 }}
+
+IMPORTANT: If the user prompt contains a filter (like "filter rows where X", "only include where Y", "where eggs = 1"),
+you MUST add a "filter_condition" field to each pipeline that needs filtering.
+Example filter_condition values:
+- "equals(toInteger(eggs), 1)" to filter eggs = 1
+- "notEquals(toInteger(eggs), 0)" to filter eggs != 0
+- "greater(toInteger(legs), 4)" to filter legs > 4
 """
 
     user_message = f"""
