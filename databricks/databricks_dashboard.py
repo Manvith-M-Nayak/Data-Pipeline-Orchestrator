@@ -219,6 +219,8 @@ DEFAULTS = {
     "monitor_logs":       [],
     "live_runs":          [],
     "clusters":           [],
+    "cluster_cache":      {},
+    "run_metrics_cache":  {},
     "inspected_run":      None,
     "ar_counter":         30,
     "output_csv":         None,
@@ -325,15 +327,55 @@ def run_pipeline_thread(csv_path: str, pipeline_config: dict, schema: dict, resu
 # ── Monitor thread ─────────────────────────────────────────────────────────────
 def run_monitor_thread(result_q: queue.Queue, limit: int = 20):
     try:
-        from databricks_api import list_recent_runs, list_all_clusters
+        from databricks_api import (
+            list_recent_runs, list_all_clusters, get_cluster_info,
+            get_cluster_events, parse_run_metrics,
+        )
         result_q.put(("monitor_log", "Fetching Databricks job runs..."))
         runs = list_recent_runs(limit=limit)
         result_q.put(("monitor_log", f"Found {len(runs)} recent run(s)"))
         result_q.put(("live_runs", runs))
+
         result_q.put(("monitor_log", "Fetching cluster list..."))
         clusters = list_all_clusters()
         result_q.put(("monitor_log", f"Found {len(clusters)} cluster(s)"))
         result_q.put(("clusters", clusters))
+
+        # Collect unique cluster IDs from runs + their tasks
+        cluster_ids = set()
+        for r in runs:
+            if r.get("cluster_id"):
+                cluster_ids.add(r["cluster_id"])
+            for t in r.get("tasks", []):
+                if t.get("cluster_id"):
+                    cluster_ids.add(t["cluster_id"])
+
+        if cluster_ids:
+            result_q.put(("monitor_log", f"Fetching compute info for {len(cluster_ids)} cluster(s)..."))
+            cache = {}
+            for cid in cluster_ids:
+                info = get_cluster_info(cid)
+                if info:
+                    cache[cid] = info
+            result_q.put(("cluster_cache", cache))
+            result_q.put(("monitor_log", f"Compute info fetched for {len(cache)} cluster(s)"))
+
+        # Fetch actual runtime metrics from cluster events, scoped to each run's
+        # time window so events from other jobs on the same cluster are excluded.
+        result_q.put(("monitor_log", "Fetching actual runtime events per run..."))
+        run_metrics_cache = {}
+        for r in runs:
+            cid = r.get("cluster_id") or next(
+                (t.get("cluster_id") for t in r.get("tasks", []) if t.get("cluster_id")), ""
+            )
+            if not cid:
+                continue
+            events = get_cluster_events(cid, r.get("start_time_ms"), r.get("end_time_ms"))
+            # Always write to cache (even empty) so the dashboard can distinguish
+            # "never fetched" ({} default) from "fetched but no resource events" (dict with Nones).
+            run_metrics_cache[r["run_id"]] = parse_run_metrics(events)
+        result_q.put(("run_metrics_cache", run_metrics_cache))
+        result_q.put(("monitor_log", f"Runtime metrics fetched for {len(run_metrics_cache)} run(s)"))
     except Exception as e:
         result_q.put(("monitor_log", f"Monitor error: {e}"))
 
@@ -657,6 +699,162 @@ def render_live_runs(runs: list):
                     {_r("Spark Context ID", run.get("spark_context_id"))}
                   </table>
                 </div>""", unsafe_allow_html=True)
+
+            # ── Compute Resources ────────────────────────────────
+            cid = run.get("cluster_id", "")
+            # Ephemeral job clusters don't populate cluster_instance at the run
+            # level — only at the task level. Fall back to first task's cluster_id.
+            if not cid:
+                for t in run.get("tasks", []):
+                    if t.get("cluster_id"):
+                        cid = t["cluster_id"]
+                        break
+
+            cinfo    = st.session_state.get("cluster_cache", {}).get(cid, {})
+            # None = never fetched; dict (possibly all-None values) = fetched
+            rmetrics = st.session_state.get("run_metrics_cache", {}).get(run.get("run_id"))
+
+            st.markdown(
+                "<div style='font-size:0.58rem;text-transform:uppercase;"
+                "letter-spacing:0.14em;color:#e25a1c;font-weight:600;"
+                "margin:0.9rem 0 0.5rem;'>Actual Runtime Resources</div>",
+                unsafe_allow_html=True,
+            )
+
+            if rmetrics is None:
+                # Data not fetched yet
+                st.markdown(
+                    "<div style='font-family:IBM Plex Mono,monospace;font-size:0.7rem;"
+                    "color:#94a3b8;'>Click Refresh to fetch runtime metrics.</div>",
+                    unsafe_allow_html=True,
+                )
+            else:
+                peak_ex  = rmetrics.get("peak_executors")
+                run_size = rmetrics.get("cluster_size_at_run")
+                d_cpu    = rmetrics.get("driver_cpu_pct")
+                e_cpu    = rmetrics.get("executor_avg_cpu_pct")
+                d_mem_u  = rmetrics.get("driver_mem_used_gb")
+                d_mem_t  = rmetrics.get("driver_mem_total_gb")
+                e_mem_u  = rmetrics.get("executor_mem_used_gb")
+                e_mem_t  = rmetrics.get("executor_mem_total_gb")
+                has_data = any(v is not None for v in [peak_ex, run_size, d_cpu, e_cpu, d_mem_u, e_mem_u])
+
+                if has_data:
+                    rm1, rm2, rm3, rm4 = st.columns(4)
+                    with rm1:
+                        st.metric("Peak Executors",
+                                  peak_ex if peak_ex is not None else "—",
+                                  help="Highest executor/worker count observed during the run")
+                    with rm2:
+                        st.metric("Workers at Run",
+                                  run_size if run_size is not None else "—",
+                                  help="num_workers reported in the RUNNING cluster event")
+                    with rm3:
+                        st.metric("Driver CPU",
+                                  f"{d_cpu:.1f}%" if d_cpu is not None else "—",
+                                  help="Driver CPU user% from AUTOSCALING_STATS_REPORT")
+                    with rm4:
+                        st.metric("Executor CPU (avg)",
+                                  f"{e_cpu:.1f}%" if e_cpu is not None else "—",
+                                  help="Mean executor CPU user%")
+
+                    rm5, rm6, rm7, rm8 = st.columns(4)
+                    with rm5:
+                        label = (f"{d_mem_u} / {d_mem_t} GB"
+                                 if d_mem_u is not None and d_mem_t is not None
+                                 else (f"{d_mem_u} GB" if d_mem_u is not None else "—"))
+                        st.metric("Driver Mem Used/Total", label)
+                    with rm6:
+                        label = (f"{e_mem_u} / {e_mem_t} GB"
+                                 if e_mem_u is not None and e_mem_t is not None
+                                 else (f"{e_mem_u} GB" if e_mem_u is not None else "—"))
+                        st.metric("Executor Mem Used/Total", label)
+                    with rm7:
+                        shuffle = cinfo.get("spark_conf", {}).get("spark.sql.shuffle.partitions", "—") if cinfo else "—"
+                        st.metric("Shuffle Partitions", shuffle)
+                    with rm8:
+                        st.metric("Exec Duration", _fmt_duration(run.get("exec_duration_s")))
+
+                    event_log = rmetrics.get("event_log", [])
+                    if event_log:
+                        st.markdown(
+                            f"<div style='font-family:IBM Plex Mono,monospace;font-size:0.67rem;"
+                            f"color:#64748b;margin-top:0.4rem;'>Events: "
+                            f"{' → '.join(event_log)}</div>",
+                            unsafe_allow_html=True,
+                        )
+                else:
+                    # Fetched but no resource stats — show why if the cluster errored
+                    state_msg = cinfo.get("state_message", "") if cinfo else ""
+                    cluster_state = cinfo.get("state", "") if cinfo else ""
+                    if state_msg:
+                        color = "#dc2626" if cluster_state in ("ERROR", "TERMINATED") else "#d97706"
+                        st.markdown(
+                            f"<div style='font-family:IBM Plex Mono,monospace;font-size:0.7rem;"
+                            f"color:{color};line-height:1.6;padding:0.4rem 0.7rem;"
+                            f"background:#fef2f2;border-left:3px solid {color};"
+                            f"border-radius:0 5px 5px 0;margin-bottom:0.4rem;'>"
+                            f"<b>{cluster_state}</b> — {state_msg}</div>",
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        st.markdown(
+                            "<div style='font-family:IBM Plex Mono,monospace;font-size:0.7rem;"
+                            "color:#94a3b8;'>No resource events found for this run "
+                            "(CPU/memory stats require autoscaling to be enabled).</div>",
+                            unsafe_allow_html=True,
+                        )
+                    event_log = rmetrics.get("event_log", [])
+                    if event_log:
+                        st.markdown(
+                            f"<div style='font-family:IBM Plex Mono,monospace;font-size:0.67rem;"
+                            f"color:#64748b;margin-top:0.3rem;'>Events: "
+                            f"{' → '.join(event_log)}</div>",
+                            unsafe_allow_html=True,
+                        )
+
+            # ── Configured resources (for reference) ─────────────
+            if cinfo:
+                autoscale   = cinfo.get("autoscale", {})
+                workers_str = (
+                    f"{autoscale.get('min_workers','?')}–{autoscale.get('max_workers','?')} (autoscale)"
+                    if autoscale else str(cinfo.get("num_workers", 0))
+                )
+                mem_gb = cinfo.get("cluster_memory_gb", 0)
+                cores  = cinfo.get("cluster_cores", 0)
+
+                st.markdown(
+                    "<div style='font-size:0.58rem;text-transform:uppercase;"
+                    "letter-spacing:0.14em;color:#e25a1c;font-weight:600;"
+                    "margin:0.9rem 0 0.4rem;'>Configured Cluster Spec</div>",
+                    unsafe_allow_html=True,
+                )
+                compute_rows = "".join([
+                    f"<tr><td style='color:#64748b;font-weight:500;font-size:0.7rem;"
+                    f"white-space:nowrap;padding:0.28rem 0.8rem 0.28rem 0;'>{k}</td>"
+                    f"<td style='font-family:IBM Plex Mono,monospace;font-size:0.7rem;"
+                    f"word-break:break-all;'>{v or '—'}</td></tr>"
+                    for k, v in [
+                        ("Cluster Name",       cinfo.get("cluster_name", "")),
+                        ("Cluster ID",         cinfo.get("cluster_id", "")),
+                        ("State",              cinfo.get("state", "")),
+                        ("Node Type",          cinfo.get("node_type_id", "")),
+                        ("Driver Node Type",   cinfo.get("driver_node_type_id", "")),
+                        ("Configured Workers", workers_str),
+                        ("vCPUs (capacity)",   cores if cores else "—"),
+                        ("Memory (capacity)",  f"{mem_gb} GB" if mem_gb else "—"),
+                        ("Spark Version",      cinfo.get("spark_version", "")),
+                        ("Cluster Source",     cinfo.get("cluster_source", "")),
+                        ("Creator",            cinfo.get("creator_user_name", "")),
+                        ("Spark Context ID",   run.get("spark_context_id", "")),
+                        ("State Message",      cinfo.get("state_message", "")),
+                    ]
+                ])
+                st.markdown(
+                    f"<table style='width:100%;border-collapse:collapse;'>"
+                    f"<tbody>{compute_rows}</tbody></table>",
+                    unsafe_allow_html=True,
+                )
 
             # ── Tasks ───────────────────────────────────────────
             tasks = run.get("tasks", [])
@@ -1261,6 +1459,10 @@ def stage_running():
                     st.session_state.live_runs = payload
                 elif msg_type == "clusters":
                     st.session_state.clusters = payload
+                elif msg_type == "cluster_cache":
+                    st.session_state.cluster_cache.update(payload)
+                elif msg_type == "run_metrics_cache":
+                    st.session_state.run_metrics_cache.update(payload)
                 elif msg_type == "monitor_log":
                     st.session_state.monitor_logs.append(payload)
 
@@ -1399,6 +1601,10 @@ def stage_monitor():
                     st.session_state.live_runs = payload
                 elif msg_type == "clusters":
                     st.session_state.clusters = payload
+                elif msg_type == "cluster_cache":
+                    st.session_state.cluster_cache.update(payload)
+                elif msg_type == "run_metrics_cache":
+                    st.session_state.run_metrics_cache.update(payload)
                 elif msg_type == "monitor_log":
                     st.session_state.monitor_logs.append(payload)
 

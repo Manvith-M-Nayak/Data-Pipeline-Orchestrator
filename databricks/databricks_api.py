@@ -1117,6 +1117,117 @@ def get_cluster_info(cluster_id: str) -> dict:
 
 
 # ============================================================
+# MONITORING: CLUSTER EVENTS (actual runtime resource usage)
+# ============================================================
+def get_cluster_events(cluster_id: str, start_time_ms: int = None, end_time_ms: int = None) -> list:
+    """
+    Return cluster lifecycle events for the given cluster, optionally scoped to a
+    run's time window.  AUTOSCALING_STATS_REPORT events carry actual CPU/memory
+    utilisation; RUNNING / NODES_ACQUIRED events carry actual worker counts.
+    """
+    if not cluster_id:
+        return []
+    body: dict = {"cluster_id": cluster_id, "limit": 50}
+    if start_time_ms:
+        body["start_time"] = start_time_ms
+    if end_time_ms:
+        body["end_time"] = end_time_ms
+    r = requests.post(_url("/api/2.0/clusters/events"), headers=_headers(), json=body, timeout=30)
+    if r.status_code != 200:
+        return []
+    return r.json().get("events", [])
+
+
+def parse_run_metrics(events: list) -> dict:
+    """
+    Derive actual resource-usage metrics from a list of cluster events.
+
+    Returns a dict with:
+      peak_executors          — highest observed executor/worker count
+      cluster_size_at_run     — num_workers from the RUNNING event
+      driver_cpu_pct          — driver CPU % (AUTOSCALING_STATS_REPORT)
+      executor_avg_cpu_pct    — mean executor CPU % across all executors
+      driver_mem_used_gb      — driver heap used (GB)
+      driver_mem_total_gb     — driver heap capacity (GB)
+      executor_mem_used_gb    — total executor heap used (GB)
+      executor_mem_total_gb   — total executor heap capacity (GB)
+      event_log               — list of significant lifecycle event strings
+    """
+    metrics: dict = {
+        "peak_executors":       None,
+        "cluster_size_at_run":  None,
+        "driver_cpu_pct":       None,
+        "executor_avg_cpu_pct": None,
+        "driver_mem_used_gb":   None,
+        "driver_mem_total_gb":  None,
+        "executor_mem_used_gb": None,
+        "executor_mem_total_gb": None,
+        "event_log":            [],
+    }
+
+    for event in events:
+        etype   = event.get("type", "")
+        details = event.get("details", {})
+
+        if etype == "AUTOSCALING_STATS_REPORT":
+            stats     = details.get("autoscaling_stats", {})
+            driver    = stats.get("driver_stats", {})
+            executors = stats.get("executors_stats", [])
+
+            if driver:
+                metrics["driver_cpu_pct"] = driver.get("cpu_user_percent")
+                used  = driver.get("used_memory_mb")
+                total = driver.get("total_memory_mb")
+                if used:
+                    metrics["driver_mem_used_gb"]  = round(used  / 1024, 1)
+                if total:
+                    metrics["driver_mem_total_gb"] = round(total / 1024, 1)
+
+            if executors:
+                cpu_vals  = [e.get("cpu_user_percent") for e in executors if e.get("cpu_user_percent") is not None]
+                mem_used  = [e.get("used_memory_mb",  0) for e in executors]
+                mem_total = [e.get("total_memory_mb", 0) for e in executors]
+                if cpu_vals:
+                    metrics["executor_avg_cpu_pct"] = round(sum(cpu_vals) / len(cpu_vals), 1)
+                if any(mem_used):
+                    metrics["executor_mem_used_gb"]  = round(sum(mem_used)  / 1024, 1)
+                if any(mem_total):
+                    metrics["executor_mem_total_gb"] = round(sum(mem_total) / 1024, 1)
+                prev = metrics["peak_executors"] or 0
+                metrics["peak_executors"] = max(prev, len(executors))
+
+        elif etype == "RUNNING":
+            size = details.get("cluster_size", {})
+            nw   = size.get("num_workers")
+            if nw is not None:
+                metrics["cluster_size_at_run"] = nw
+                prev = metrics["peak_executors"] or 0
+                metrics["peak_executors"] = max(prev, nw)
+            metrics["event_log"].append("RUNNING")
+
+        elif etype == "NODES_ACQUIRED":
+            count = (
+                details.get("instance_count")
+                or details.get("count")
+                or details.get("cluster_size", {}).get("num_workers")
+            )
+            label = f"NODES_ACQUIRED: {count} node(s)" if count else "NODES_ACQUIRED"
+            metrics["event_log"].append(label)
+            if count:
+                prev = metrics["peak_executors"] or 0
+                metrics["peak_executors"] = max(prev, int(count))
+
+        elif etype == "NODES_LOST":
+            count = details.get("instance_count") or details.get("count")
+            metrics["event_log"].append(f"NODES_LOST: {count} node(s)" if count else "NODES_LOST")
+
+        elif etype in ("CLUSTER_STARTED", "DRIVER_HEALTHY", "TERMINATING", "TERMINATED"):
+            metrics["event_log"].append(etype)
+
+    return metrics
+
+
+# ============================================================
 # MONITORING: LIST ALL CLUSTERS
 # ============================================================
 def list_all_clusters() -> list:
