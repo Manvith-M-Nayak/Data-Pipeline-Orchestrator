@@ -23,7 +23,6 @@ DEFAULT_PIPELINES = [
         "type": "copy",
         "source_dataset": "DS_Incoming",
         "sink_dataset": "DS_Bronze",
-        "parallel_copies": 2,
         "diu": 2,
         "transformations": [],
         "partition_count": 2,
@@ -35,7 +34,6 @@ DEFAULT_PIPELINES = [
         "type": "dataflow",
         "source_dataset": "DS_Bronze",
         "sink_dataset": "DS_Silver",
-        "parallel_copies": 2,
         "diu": 2,
         "transformations": ["processed_time = currentTimestamp()"],
         "partition_count": 4,
@@ -50,10 +48,9 @@ DEFAULT_EXECUTION_ORDER = [
 ]
 
 DEFAULT_EDITABLE_SETTINGS = {
-    "compute_type": ["General", "MemoryOptimized"],
-    "core_count": [4, 8, 16, 32],
+    "compute_type": ["General"],
+    "core_count": [2, 4, 8, 16, 32, 64],
     "partition_count": [2, 4, 8, 16, 32, 64],
-    "parallel_copies": [1, 2, 4, 8, 16],
     "diu": [1, 2, 4, 8, 16, 32]
 }
 
@@ -63,28 +60,24 @@ RECOMMENDED_SETTINGS = {
         "compute_type": "General",
         "core_count": 4,
         "partition_count": 2,
-        "parallel_copies": 2,
         "diu": 2
     },
     "medium": {
         "compute_type": "General",
         "core_count": 8,
         "partition_count": 4,
-        "parallel_copies": 4,
         "diu": 4
     },
     "large": {
-        "compute_type": "MemoryOptimized",
+        "compute_type": "General",
         "core_count": 16,
         "partition_count": 8,
-        "parallel_copies": 8,
         "diu": 8
     },
     "xlarge": {
-        "compute_type": "MemoryOptimized",
+        "compute_type": "General",
         "core_count": 32,
         "partition_count": 16,
-        "parallel_copies": 16,
         "diu": 16
     }
 }
@@ -152,7 +145,6 @@ def build_default_config(schema: dict, user_prompt: str, num_containers: int = 3
             "type": "copy" if i == 0 else "dataflow",
             "source_dataset": f"DS_{container_list[i].title()}",
             "sink_dataset": f"DS_{container_list[i+1].title()}",
-            "parallel_copies": rec.get("parallel_copies", 2),
             "diu": rec.get("diu", 2),
             "transformations": ["processed_time = currentTimestamp()"] if i > 0 else [],
             "partition_count": rec.get("partition_count", 4),
@@ -199,7 +191,7 @@ def decide_pipeline_config(
         num_containers: Number of containers/stages (default: 3, min: 2, max: 5)
         custom_settings: Override recommended settings with custom values
         custom_settings can include:
-            - compute_type, core_count, partition_count, parallel_copies, diu
+            - compute_type, core_count, partition_count, diu
         container_names: Custom container names (list of strings)
     """
     
@@ -245,7 +237,6 @@ def decide_pipeline_config(
             "type": "copy" if i == 0 else "dataflow",
             "source_dataset": f"DS_{container_list[i].title()}",
             "sink_dataset": f"DS_{container_list[i+1].title()}",
-            "parallel_copies": rec.get("parallel_copies", 2),
             "diu": rec.get("diu", 2),
             "transformations": ["processed_time = currentTimestamp()"] if i > 0 else [],
             "partition_count": rec.get("partition_count", 4),
@@ -273,7 +264,6 @@ Rules:
    - compute_type: {rec.get('compute_type', 'General')}
    - core_count: {rec.get('core_count', 4)}
    - partition_count: {rec.get('partition_count', 4)}
-   - parallel_copies: {rec.get('parallel_copies', 2)}
    - diu: {rec.get('diu', 2)}
    These can be adjusted based on the user's prompt or data characteristics.
 4. For "copy" type pipelines: use Copy Activity to move data between containers
@@ -312,14 +302,12 @@ The JSON must follow this exact structure:
     "compute_type": "{rec.get('compute_type', 'General')}",
     "core_count": {rec.get('core_count', 4)},
     "partition_count": {rec.get('partition_count', 4)},
-    "parallel_copies": {rec.get('parallel_copies', 2)},
     "diu": {rec.get('diu', 2)}
   }},
   "editable_settings": {{
-    "compute_type": ["General", "MemoryOptimized"],
-    "core_count": [4, 8, 16, 32],
+    "compute_type": ["General"],
+    "core_count": [2, 4, 8, 16, 32, 64],
     "partition_count": [2, 4, 8, 16, 32, 64],
-    "parallel_copies": [1, 2, 4, 8, 16],
     "diu": [1, 2, 4, 8, 16, 32]
   }},
   "reasoning": "Brief explanation of decisions made"
@@ -399,9 +387,8 @@ Return the complete ADF pipeline configuration JSON:
             if "editable_settings" not in config:
                 config["editable_settings"] = {
                     "compute_type": ["General", "MemoryOptimized"],
-                    "core_count": [4, 8, 16, 32],
+                    "core_count": [2, 4, 8, 16, 32, 64],
                     "partition_count": [2, 4, 8, 16, 32, 64],
-                    "parallel_copies": [1, 2, 4, 8, 16],
                     "diu": [1, 2, 4, 8, 16, 32]
                 }
             

@@ -355,7 +355,6 @@ def create_copy_pipeline(token: str, pipeline_config: dict) -> requests.Response
                             "copyBehavior": "MergeFiles"
                         },
                         "enableStaging":        False,
-                        "parallelCopies":       pipeline_config.get("parallel_copies", 4),
                         "dataIntegrationUnits": pipeline_config.get("diu", 4)
                     },
                     "inputs":  [{"referenceName": pipeline_config["source_dataset"], "type": "DatasetReference"}],

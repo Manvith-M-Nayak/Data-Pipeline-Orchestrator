@@ -645,7 +645,7 @@ def run_pipeline_thread(csv_path: str, pipeline_config: dict,
                 publish_factory, trigger_pipeline, check_pipeline_status,
             )
 
-            result_q.put(("log", "--- Step 1: Creating Blob Containers ---"))
+            result_q.put(("log", "Creating Blob Containers"))
             for cname in pipeline_config["containers"].values():
                 create_blob_container(cname)
             raw_container = pipeline_config["containers"].get("stage0") or pipeline_config["containers"].get("raw") or list(pipeline_config["containers"].values())[0]
@@ -656,7 +656,7 @@ def run_pipeline_thread(csv_path: str, pipeline_config: dict,
                     purge_container(cname)
             result_q.put(("progress", 20))
 
-            result_q.put(("log", "--- Step 2: Uploading CSV ---"))
+            result_q.put(("log", "Uploading CSV"))
             raw_container = pipeline_config["containers"].get("stage0") or pipeline_config["containers"].get("raw") or list(pipeline_config["containers"].values())[0]
             upload_csv(csv_path, raw_container)
             if not check_blob_has_rows(raw_container):
@@ -664,7 +664,7 @@ def run_pipeline_thread(csv_path: str, pipeline_config: dict,
                 return
             result_q.put(("progress", 35))
 
-            result_q.put(("log", "--- Step 3: Setting up ADF resources ---"))
+            result_q.put(("log", "Setting up ADF resources"))
             token = get_access_token()
             create_linked_service(token)
             for ds in pipeline_config["datasets"]:
@@ -674,7 +674,7 @@ def run_pipeline_thread(csv_path: str, pipeline_config: dict,
                     return
             result_q.put(("progress", 50))
 
-            result_q.put(("log", "--- Step 4: Creating Pipelines ---"))
+            result_q.put(("log", "Creating Pipelines"))
             for p in pipeline_config["pipelines"]:
                 if p["type"] == "copy":
                     r = create_copy_pipeline(token, p)
@@ -688,11 +688,11 @@ def run_pipeline_thread(csv_path: str, pipeline_config: dict,
                     return
             result_q.put(("progress", 65))
 
-            result_q.put(("log", "--- Step 5: Publishing factory ---"))
+            result_q.put(("log", "Publishing factory"))
             publish_factory(token)
             result_q.put(("progress", 72))
 
-            result_q.put(("log", "--- Step 6: Triggering Pipelines ---"))
+            result_q.put(("log", "Triggering Pipelines"))
             copy_names = [p["name"] for p in pipeline_config["pipelines"] if p["type"] == "copy"]
             total      = len(pipeline_config["execution_order"])
 
@@ -868,7 +868,6 @@ def render_plan(config: dict, schema: dict, used_fallback: bool = False, hide_co
             <tr><td>Compute Type</td><td>{rec.get('compute_type', 'N/A')}</td></tr>
             <tr><td>Core Count</td><td>{rec.get('core_count', 'N/A')}</td></tr>
             <tr><td>Partition Count</td><td>{rec.get('partition_count', 'N/A')}</td></tr>
-            <tr><td>Parallel Copies</td><td>{rec.get('parallel_copies', 'N/A')}</td></tr>
             <tr><td>DIU</td><td>{rec.get('diu', 'N/A')}</td></tr>
           </tbody>
         </table>""", unsafe_allow_html=True)
@@ -1412,8 +1411,6 @@ elif st.session_state.stage == "plan":
         st.session_state.edit_core_count = rec.get("core_count", 4)
     if "edit_partition_count" not in st.session_state:
         st.session_state.edit_partition_count = rec.get("partition_count", 4)
-    if "edit_parallel_copies" not in st.session_state:
-        st.session_state.edit_parallel_copies = rec.get("parallel_copies", 2)
     if "edit_diu" not in st.session_state:
         st.session_state.edit_diu = rec.get("diu", 2)
     
@@ -1429,36 +1426,11 @@ elif st.session_state.stage == "plan":
     
     st.markdown('<div style="color:#ffffff;font-weight:500;font-size:0.9rem;margin-top:1rem;">Compute Settings</div>', unsafe_allow_html=True)
     
-    compute_options = ["Cost Optimized", "Performance Optimized"]
-    current_compute_idx = compute_options.index(st.session_state.edit_compute_type) if st.session_state.edit_compute_type in compute_options else 0
-    st.markdown('<div style="color:#ffffff;font-size:0.85rem;margin-bottom:0.3rem;">Compute Type</div>', unsafe_allow_html=True)
-    new_compute = st.selectbox(
-        "compute_type",
-        compute_options,
-        index=current_compute_idx,
-        label_visibility="collapsed",
-        help="Cost Optimized = lower cost | Performance Optimized = faster processing"
-    )
-    st.session_state.edit_compute_type = new_compute
-    
-    if new_compute == "Cost Optimized":
-        core_options = [4, 8, 16]
-        partition_options = [2, 4, 8]
-        parallel_options = [1, 2, 4]
-        diu_options = [1, 2, 4]
-    else:
-        core_options = [8, 16, 32]
-        partition_options = [8, 16, 32]
-        parallel_options = [4, 8, 16]
-        diu_options = [4, 8, 16]
+    core_options = [2, 4, 8, 16, 32, 64]
+    partition_options = [2, 4, 8, 16, 32, 64]
+    diu_options = [1, 2, 4, 8, 16, 32]
     
     if st.session_state.edit_core_count not in core_options:
-        st.session_state.edit_core_count = core_options[1]
-    if st.session_state.edit_partition_count not in partition_options:
-        st.session_state.edit_partition_count = partition_options[1]
-    if st.session_state.edit_parallel_copies not in parallel_options:
-        st.session_state.edit_parallel_copies = parallel_options[2]
-    if st.session_state.edit_diu not in diu_options:
         st.session_state.edit_diu = diu_options[2]
     
     col1, col2 = st.columns(2)
@@ -1474,16 +1446,16 @@ elif st.session_state.stage == "plan":
         )
         st.session_state.edit_core_count = new_cores
         
-        st.markdown('<div style="color:#ffffff;font-size:0.85rem;margin-bottom:0.3rem;margin-top:0.5rem;">Parallel Copies</div>', unsafe_allow_html=True)
-        current_parallel_idx = parallel_options.index(st.session_state.edit_parallel_copies)
-        new_parallel = st.selectbox(
-            "parallel_copies",
-            parallel_options,
-            index=current_parallel_idx,
+        st.markdown('<div style="color:#ffffff;font-size:0.85rem;margin-bottom:0.3rem;margin-top:0.5rem;">Compute Type</div>', unsafe_allow_html=True)
+        compute_options = ["General"]
+        new_compute = st.selectbox(
+            "compute_type",
+            compute_options,
+            index=0,
             label_visibility="collapsed",
-            help="Number of parallel copy operations"
+            key="compute_type_select"
         )
-        st.session_state.edit_parallel_copies = new_parallel
+        st.session_state.edit_compute_type = new_compute
     
     with col2:
         st.markdown('<div style="color:#ffffff;font-size:0.85rem;margin-bottom:0.3rem;">Partition Count</div>', unsafe_allow_html=True)
@@ -1537,7 +1509,6 @@ elif st.session_state.stage == "plan":
             "compute_type": new_compute,
             "core_count": new_cores,
             "partition_count": new_partitions,
-            "parallel_copies": new_parallel,
             "diu": new_diu
         }
         
@@ -1554,7 +1525,6 @@ elif st.session_state.stage == "plan":
                 st.session_state.edit_compute_type = new_compute
                 st.session_state.edit_core_count = new_cores
                 st.session_state.edit_partition_count = new_partitions
-                st.session_state.edit_parallel_copies = new_parallel
                 st.session_state.edit_diu = new_diu
                 st.session_state.edit_num_stages = new_num_stages
                 st.session_state.edit_container_names = ", ".join(list(new_config.get("containers", {}).values()))
@@ -1570,14 +1540,14 @@ elif st.session_state.stage == "plan":
     with col_back:
         if st.button("← Back", use_container_width=True):
             for key in ["edit_compute_type", "edit_core_count", "edit_partition_count", 
-                        "edit_parallel_copies", "edit_diu", "edit_num_stages", 
+                        "edit_diu", "edit_num_stages", 
                         "edit_container_names"]:
                 st.session_state.pop(key, None)
             st.session_state.stage = "input"
             st.rerun()
     with col_deploy:
         if st.session_state.stage != "running":
-            if st.button("⚡ Deploy to ADF", use_container_width=True):
+            if st.button("Deploy to ADF", use_container_width=True):
                 st.session_state.stage              = "running"
                 st.session_state.logs               = []
                 st.session_state.monitor_logs_current = []

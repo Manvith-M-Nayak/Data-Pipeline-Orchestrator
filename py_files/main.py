@@ -103,7 +103,7 @@ def preview_config(pipeline_config: dict, show_editable: bool = True, use_fallba
                 f"| partitions: {p.get('partition_count')}"
             )
         elif p["type"] == "copy":
-            print(f"    parallel_copies: {p.get('parallel_copies')} | DIU: {p.get('diu')}")
+            print(f"    DIU: {p.get('diu')}")
 
     print(f"\nExecution order: {' -> '.join(pipeline_config['execution_order'])}")
     
@@ -134,34 +134,32 @@ def edit_pipeline_config(pipeline_config: dict) -> dict:
         print(f"  {key}: {val}")
     
     print("\nAvailable settings to edit:")
-    print("  1. compute_type (General/MemoryOptimized)")
+    print("  1. compute_type (General)")
     print("  2. core_count")
     print("  3. partition_count")
-    print("  4. parallel_copies")
-    print("  5. diu")
-    print("  6. Add custom transformations")
-    print("  7. Done - proceed with current config")
+    print("  4. diu")
+    print("  5. Add custom transformations")
+    print("  6. Done - proceed with current config")
     
     while True:
-        choice = input("\nEnter choice (1-7): ").strip()
+        choice = input("\nEnter choice (1-6): ").strip()
         
-        if choice == "7":
+        if choice == "6":
             break
         
         elif choice == "1":
             print(f"Current: {pipeline_config['pipelines'][0].get('compute_type', 'General')}")
-            new_val = input("Enter compute_type (General/MemoryOptimized): ").strip()
-            if new_val in ["General", "MemoryOptimized"]:
-                for p in pipeline_config["pipelines"]:
-                    if p["type"] == "dataflow":
-                        p["compute_type"] = new_val
-                print(f"  Updated compute_type to {new_val}")
+            new_val = "General"
+            for p in pipeline_config["pipelines"]:
+                if p["type"] == "dataflow":
+                    p["compute_type"] = new_val
+            print(f"  Updated compute_type to {new_val}")
         
         elif choice == "2":
             print(f"Current core_count: {pipeline_config['pipelines'][0].get('core_count', 4)}")
             try:
-                new_val = int(input("Enter core_count (4/8/16/32): ").strip())
-                if new_val in [4, 8, 16, 32]:
+                new_val = int(input("Enter core_count: ").strip())
+                if new_val in [2, 4, 8, 16, 32, 64]:
                     for p in pipeline_config["pipelines"]:
                         if p["type"] == "dataflow":
                             p["core_count"] = new_val
@@ -182,18 +180,6 @@ def edit_pipeline_config(pipeline_config: dict) -> dict:
                 print("  Invalid number")
         
         elif choice == "4":
-            print(f"Current parallel_copies: {pipeline_config['pipelines'][0].get('parallel_copies', 2)}")
-            try:
-                new_val = int(input("Enter parallel_copies: ").strip())
-                if new_val > 0:
-                    for p in pipeline_config["pipelines"]:
-                        if p["type"] == "copy":
-                            p["parallel_copies"] = new_val
-                    print(f"  Updated parallel_copies to {new_val}")
-            except ValueError:
-                print("  Invalid number")
-        
-        elif choice == "5":
             print(f"Current DIU: {pipeline_config['pipelines'][0].get('diu', 2)}")
             try:
                 new_val = int(input("Enter DIU: ").strip())
@@ -205,7 +191,7 @@ def edit_pipeline_config(pipeline_config: dict) -> dict:
             except ValueError:
                 print("  Invalid number")
         
-        elif choice == "6":
+        elif choice == "5":
             print("\nCurrent transformations:")
             for i, p in enumerate(pipeline_config["pipelines"]):
                 if p["type"] == "dataflow":
@@ -276,7 +262,7 @@ def main():
     custom_settings = None
     if customize == "yes" or customize == "y":
         custom_settings = {}
-        for key in ["compute_type", "core_count", "partition_count", "parallel_copies", "diu"]:
+        for key in ["compute_type", "core_count", "partition_count", "diu"]:
             val = input(f"  {key} (recommended: {rec_settings.get(key)}): ").strip()
             if val:
                 if key == "compute_type":

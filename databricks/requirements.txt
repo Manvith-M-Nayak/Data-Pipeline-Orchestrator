@@ -1,0 +1,14 @@
+# Databricks Pipeline Orchestrator dependencies
+# Install with: pip install -r requirements.txt
+
+# Web UI
+streamlit>=1.35.0
+
+# HTTP client (Databricks REST API calls)
+requests>=2.31.0
+
+# Groq AI
+groq>=0.4.0
+
+# Utilities (already in stdlib, listed for clarity)
+# base64, json, os, threading, queue — stdlib
