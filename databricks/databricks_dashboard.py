@@ -218,6 +218,9 @@ DEFAULTS = {
     "logs":               [],
     "monitor_logs":       [],
     "live_runs":          [],
+    "clusters":           [],
+    "inspected_run":      None,
+    "ar_counter":         30,
     "output_csv":         None,
     "output_filename":    "output.csv",
     "run_error":          None,
@@ -322,11 +325,15 @@ def run_pipeline_thread(csv_path: str, pipeline_config: dict, schema: dict, resu
 # ── Monitor thread ─────────────────────────────────────────────────────────────
 def run_monitor_thread(result_q: queue.Queue, limit: int = 20):
     try:
-        from databricks_api import list_recent_runs
+        from databricks_api import list_recent_runs, list_all_clusters
         result_q.put(("monitor_log", "Fetching Databricks job runs..."))
         runs = list_recent_runs(limit=limit)
         result_q.put(("monitor_log", f"Found {len(runs)} recent run(s)"))
         result_q.put(("live_runs", runs))
+        result_q.put(("monitor_log", "Fetching cluster list..."))
+        clusters = list_all_clusters()
+        result_q.put(("monitor_log", f"Found {len(clusters)} cluster(s)"))
+        result_q.put(("clusters", clusters))
     except Exception as e:
         result_q.put(("monitor_log", f"Monitor error: {e}"))
 
@@ -497,22 +504,21 @@ def render_live_runs(runs: list):
         )
         return
 
-    # Summary counts
-    total = len(runs)
+    # Summary cards ─────────────────────────────────────────────
+    total     = len(runs)
     succeeded = sum(1 for r in runs if r["status"] == "Succeeded")
-    failed = sum(1 for r in runs if r["status"] == "Failed")
-    running = sum(1 for r in runs if r["status"] == "InProgress")
-
-    ok_cls = "mon-card-ok" if failed == 0 else "mon-card-err"
-    rate = int(100 * succeeded / total) if total else 0
-    rate_cls = "mon-card-ok" if rate >= 80 else "mon-card-warn"
+    failed    = sum(1 for r in runs if r["status"] == "Failed")
+    running   = sum(1 for r in runs if r["status"] == "InProgress")
+    rate      = int(100 * succeeded / total) if total else 0
+    ok_cls    = "mon-card-ok" if failed == 0 else "mon-card-err"
+    rate_cls  = "mon-card-ok" if rate >= 80 else "mon-card-warn"
 
     st.markdown(f"""
     <div class="mon-grid">
       <div class="mon-card mon-card-blue">
         <div class="mon-card-label">Total Runs</div>
         <div class="mon-card-value">{total}</div>
-        <div class="mon-card-sub">recent history</div>
+        <div class="mon-card-sub">fetched</div>
       </div>
       <div class="mon-card {ok_cls}">
         <div class="mon-card-label">Succeeded</div>
@@ -531,24 +537,490 @@ def render_live_runs(runs: list):
       </div>
     </div>""", unsafe_allow_html=True)
 
-    for run in runs:
-        err_html = ""
-        if run.get("message") and run["status"] == "Failed":
-            msg = str(run["message"])[:200]
-            err_html = f'<div class="run-row-err">{msg}</div>'
+    st.markdown("<br>", unsafe_allow_html=True)
 
+    # Per-run expanders ──────────────────────────────────────────
+    for run in runs:
+        icon  = {"Succeeded": "✓", "Failed": "✗", "InProgress": "⟳"}.get(run["status"], "·")
+        label = (
+            f"{icon}  #{run['run_id']}  ·  {run.get('run_name','') or run.get('pipeline','—')}"
+            f"  ·  {run['status']}  ·  {run.get('duration','N/A')}"
+            f"  ·  {run.get('started','')[:16] or '—'}"
+        )
+
+        with st.expander(label):
+
+            def _r(k, v):
+                val = str(v) if v not in (None, "", 0, False) else "—"
+                return (
+                    f"<tr>"
+                    f"<td style='color:#64748b;font-weight:500;white-space:nowrap;"
+                    f"padding:0.28rem 0.8rem 0.28rem 0;font-size:0.7rem;'>{k}</td>"
+                    f"<td style='font-family:IBM Plex Mono,monospace;font-size:0.7rem;"
+                    f"word-break:break-all;'>{val}</td>"
+                    f"</tr>"
+                )
+
+            def _section(title):
+                return (
+                    f"<div style='font-size:0.58rem;text-transform:uppercase;"
+                    f"letter-spacing:0.14em;color:#e25a1c;font-weight:600;"
+                    f"margin-bottom:0.4rem;margin-top:0.8rem;'>{title}</div>"
+                )
+
+            col_a, col_b = st.columns(2)
+
+            # ── Left column: Identity + Status ─────────────────
+            with col_a:
+                url     = run.get("run_page_url", "")
+                url_td  = (
+                    f'<a href="{url}" target="_blank" style="color:#ea580c;">'
+                    f'{url[:55]}{"…" if len(url)>55 else ""}</a>'
+                    if url else "—"
+                )
+                st.markdown(f"""
+                <div style="font-family:'IBM Plex Sans',sans-serif;">
+                  {_section("Identity")}
+                  <table style="width:100%;border-collapse:collapse;">
+                    {_r("Run ID",        run.get("run_id"))}
+                    {_r("Job ID",        run.get("job_id"))}
+                    {_r("Run Name",      run.get("run_name"))}
+                    {_r("# in Job",      run.get("number_in_job"))}
+                    {_r("Attempt #",     run.get("attempt_number"))}
+                    {_r("Run Type",      run.get("run_type"))}
+                    {_r("Format",        run.get("format"))}
+                    {_r("Trigger",       run.get("trigger"))}
+                    {_r("Creator",       run.get("creator_user_name"))}
+                    <tr>
+                      <td style='color:#64748b;font-weight:500;white-space:nowrap;
+                                 padding:0.28rem 0.8rem 0.28rem 0;font-size:0.7rem;'>Run Page</td>
+                      <td style='font-size:0.7rem;'>{url_td}</td>
+                    </tr>
+                  </table>
+
+                  {_section("Status")}
+                  <table style="width:100%;border-collapse:collapse;">
+                    <tr>
+                      <td style='color:#64748b;font-weight:500;white-space:nowrap;
+                                 padding:0.28rem 0.8rem 0.28rem 0;font-size:0.7rem;'>Status</td>
+                      <td>{_status_pill(run["status"])}</td>
+                    </tr>
+                    {_r("Lifecycle State",  run.get("life_cycle_state"))}
+                    {_r("Result State",     run.get("result_state"))}
+                    {_r("State Message",    run.get("state_message"))}
+                    {_r("User Cancelled",   run.get("user_cancelled"))}
+                  </table>
+                </div>""", unsafe_allow_html=True)
+
+            # ── Right column: Timing + Cluster ──────────────────
+            with col_b:
+                setup_s   = run.get("setup_duration_s", 0) or 0
+                exec_s    = run.get("exec_duration_s", 0) or 0
+                cleanup_s = run.get("cleanup_duration_s", 0) or 0
+                seg_total = (setup_s + exec_s + cleanup_s) or 1
+
+                def _bar(label, val, color):
+                    pct = max(1, int(100 * val / seg_total)) if val else 0
+                    return (
+                        f"<tr>"
+                        f"<td style='color:#64748b;font-size:0.7rem;white-space:nowrap;"
+                        f"padding:0.28rem 0.6rem 0.28rem 0;font-weight:500;'>{label}</td>"
+                        f"<td style='width:100%;'>"
+                        f"<div style='display:flex;align-items:center;gap:0.35rem;'>"
+                        f"<div style='flex:1;background:#e2e8f0;border-radius:3px;"
+                        f"height:11px;min-width:40px;overflow:hidden;'>"
+                        f"<div style='width:{pct}%;background:{color};height:100%;border-radius:3px;'>"
+                        f"</div></div>"
+                        f"<span style='font-family:IBM Plex Mono,monospace;font-size:0.68rem;"
+                        f"white-space:nowrap;'>{val}s</span>"
+                        f"</div></td></tr>"
+                    )
+
+                st.markdown(f"""
+                <div style="font-family:'IBM Plex Sans',sans-serif;">
+                  {_section("Timing")}
+                  <table style="width:100%;border-collapse:collapse;">
+                    {_r("Started",        run.get("started"))}
+                    {_r("Ended",          run.get("ended"))}
+                    {_r("Total Duration", run.get("duration"))}
+                    {_r("Run Duration",   _fmt_duration(run.get("run_duration_s")))}
+                  </table>
+                  <table style="width:100%;border-collapse:collapse;margin-top:0.5rem;">
+                    {_bar("Setup",     setup_s,   "#3b82f6")}
+                    {_bar("Execution", exec_s,    "#e25a1c")}
+                    {_bar("Cleanup",   cleanup_s, "#16a34a")}
+                  </table>
+
+                  {_section("Cluster")}
+                  <table style="width:100%;border-collapse:collapse;">
+                    {_r("Cluster ID",       run.get("cluster_id"))}
+                    {_r("Spark Context ID", run.get("spark_context_id"))}
+                  </table>
+                </div>""", unsafe_allow_html=True)
+
+            # ── Tasks ───────────────────────────────────────────
+            tasks = run.get("tasks", [])
+            if tasks:
+                task_rows = "".join(
+                    f"<tr>"
+                    f"<td>{t.get('task_key','')}</td>"
+                    f"<td>{_status_pill(t.get('result') or t.get('life_cycle',''))}</td>"
+                    f"<td style='font-family:IBM Plex Mono,monospace;font-size:0.66rem;'>"
+                    f"{t.get('start_time','')}</td>"
+                    f"<td style='font-family:IBM Plex Mono,monospace;font-size:0.66rem;'>"
+                    f"{t.get('end_time','')}</td>"
+                    f"<td style='font-family:IBM Plex Mono,monospace;'>{t.get('duration','')}</td>"
+                    f"<td style='font-family:IBM Plex Mono,monospace;'>{t.get('setup_s',0)}s</td>"
+                    f"<td style='font-family:IBM Plex Mono,monospace;'>{t.get('exec_s',0)}s</td>"
+                    f"<td style='font-family:IBM Plex Mono,monospace;'>{t.get('cleanup_s',0)}s</td>"
+                    f"<td style='font-family:IBM Plex Mono,monospace;font-size:0.64rem;'>"
+                    f"{t.get('cluster_id','')}</td>"
+                    f"<td style='font-family:IBM Plex Mono,monospace;'>{t.get('run_id','')}</td>"
+                    f"<td style='font-family:IBM Plex Mono,monospace;'>{t.get('attempt',0)}</td>"
+                    f"</tr>"
+                    for t in tasks
+                )
+                st.markdown(
+                    f"<div style='font-size:0.58rem;text-transform:uppercase;"
+                    f"letter-spacing:0.14em;color:#e25a1c;font-weight:600;"
+                    f"margin:0.9rem 0 0.45rem;'>Tasks ({len(tasks)})</div>"
+                    f"<div style='overflow-x:auto;'>"
+                    f"<table class='plan-table' style='font-size:0.67rem;'>"
+                    f"<thead><tr>"
+                    f"<th>Task Key</th><th>Status</th><th>Start</th><th>End</th>"
+                    f"<th>Duration</th><th>Setup</th><th>Exec</th><th>Cleanup</th>"
+                    f"<th>Cluster ID</th><th>Run ID</th><th>Attempt</th>"
+                    f"</tr></thead>"
+                    f"<tbody>{task_rows}</tbody>"
+                    f"</table></div>",
+                    unsafe_allow_html=True,
+                )
+
+
+# ── Monitor helpers ────────────────────────────────────────────────────────────
+def _cluster_state_pill(state: str) -> str:
+    cls_map = {
+        "RUNNING":     "inprogress",
+        "TERMINATED":  "unknown",
+        "TERMINATING": "queued",
+        "ERROR":       "failed",
+        "PENDING":     "queued",
+        "RESTARTING":  "queued",
+    }
+    cls = cls_map.get(state, "unknown")
+    return f"<span class='pill pill-{cls}'>{state}</span>"
+
+
+def render_monitor_overview(runs: list, clusters: list):
+    total = len(runs)
+    succeeded = sum(1 for r in runs if r["status"] == "Succeeded")
+    failed    = sum(1 for r in runs if r["status"] == "Failed")
+    running   = sum(1 for r in runs if r["status"] == "InProgress")
+    rate      = int(100 * succeeded / total) if total else 0
+    durations = [r["duration_s"] for r in runs if r.get("duration_s") is not None]
+    avg_dur   = sum(durations) / len(durations) if durations else None
+    fastest   = min(durations) if durations else None
+    slowest   = max(durations) if durations else None
+
+    st.markdown('<div class="card-label" style="margin-bottom:0.8rem;">Run Summary</div>', unsafe_allow_html=True)
+    c1, c2, c3, c4, c5 = st.columns(5)
+    with c1: st.metric("Total Runs",    total)
+    with c2: st.metric("Succeeded",     succeeded)
+    with c3: st.metric("Failed",        failed)
+    with c4: st.metric("In Progress",   running)
+    with c5: st.metric("Success Rate",  f"{rate}%")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    c6, c7 = st.columns(2)
+    with c6:
+        st.metric("Avg Duration", _fmt_duration(avg_dur))
+    with c7:
+        if fastest is not None:
+            st.metric("Fastest / Slowest",
+                      f"{_fmt_duration(fastest)} / {_fmt_duration(slowest)}")
+
+    if clusters:
+        st.markdown('<hr class="sec-divider">', unsafe_allow_html=True)
+        st.markdown('<div class="card-label" style="margin-bottom:0.8rem;">Cluster Health</div>',
+                    unsafe_allow_html=True)
+        active = sum(1 for c in clusters if c["state"] == "RUNNING")
+        cluster_rows = "".join(
+            f"<tr>"
+            f"<td style='font-weight:500;'>{c.get('cluster_name','') or c['cluster_id'][:14]+'...'}</td>"
+            f"<td>{_cluster_state_pill(c.get('state',''))}</td>"
+            f"<td style='font-family:IBM Plex Mono,monospace;font-size:0.68rem;'>{c.get('node_type_id','N/A')}</td>"
+            f"<td style='font-family:IBM Plex Mono,monospace;'>{c.get('cluster_cores',0)}</td>"
+            f"<td style='font-family:IBM Plex Mono,monospace;'>{c.get('cluster_memory_gb',0)} GB</td>"
+            f"<td style='font-family:IBM Plex Mono,monospace;'>{c.get('num_workers',0)}</td>"
+            f"</tr>"
+            for c in clusters
+        )
         st.markdown(f"""
-        <div class="run-row">
-            <div class="run-row-header">
-                <span class="run-row-name">{run['pipeline']}</span>
-                {_status_pill(run['status'])}
-                <span class="run-row-meta">run: {str(run.get('run_id',''))}</span>
-                <span class="run-row-meta">job: {str(run.get('job_id',''))}</span>
-                <span class="run-row-meta">⏱ {run.get('duration','N/A')}</span>
-                <span class="run-row-meta">started: {str(run.get('started',''))[:19]}</span>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:0.68rem;color:#64748b;margin-bottom:0.6rem;">
+          {active}/{len(clusters)} cluster(s) active
+        </div>
+        <table class="plan-table">
+          <thead><tr>
+            <th>Name</th><th>State</th><th>Node Type</th>
+            <th>Cores</th><th>Memory</th><th>Workers</th>
+          </tr></thead>
+          <tbody>{cluster_rows}</tbody>
+        </table>""", unsafe_allow_html=True)
+
+
+def render_cluster_tab(clusters: list):
+    if not clusters:
+        st.markdown(
+            '<div style="color:#94a3b8;font-family:IBM Plex Mono,monospace;'
+            'font-size:0.75rem;padding:1rem;">No cluster data — click Refresh.</div>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    # State summary cards
+    states: dict = {}
+    for c in clusters:
+        s = c.get("state", "UNKNOWN")
+        states[s] = states.get(s, 0) + 1
+
+    state_colors = {
+        "RUNNING":     "#16a34a",
+        "TERMINATED":  "#94a3b8",
+        "TERMINATING": "#d97706",
+        "ERROR":       "#dc2626",
+        "PENDING":     "#3b82f6",
+        "RESTARTING":  "#d97706",
+    }
+    cols = st.columns(max(len(states), 1))
+    for i, (state, count) in enumerate(states.items()):
+        col_hex = state_colors.get(state, "#64748b")
+        with cols[i]:
+            st.markdown(f"""
+            <div class="mon-card" style="border-color:{col_hex}55;">
+              <div class="mon-card-label">{state}</div>
+              <div class="mon-card-value" style="color:{col_hex};">{count}</div>
+            </div>""", unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    cluster_rows = "".join(
+        f"<tr>"
+        f"<td style='font-weight:500;'>{c.get('cluster_name','') or c['cluster_id'][:16]+'...'}</td>"
+        f"<td>{_cluster_state_pill(c.get('state',''))}</td>"
+        f"<td style='font-family:IBM Plex Mono,monospace;font-size:0.68rem;'>{c.get('node_type_id','N/A')}</td>"
+        f"<td style='font-family:IBM Plex Mono,monospace;'>{c.get('cluster_cores',0)}</td>"
+        f"<td style='font-family:IBM Plex Mono,monospace;'>{c.get('cluster_memory_gb',0)} GB</td>"
+        f"<td style='font-family:IBM Plex Mono,monospace;'>{c.get('num_workers',0)}</td>"
+        f"<td style='font-family:IBM Plex Mono,monospace;font-size:0.66rem;'>{c.get('spark_version','')}</td>"
+        f"<td style='font-family:IBM Plex Mono,monospace;font-size:0.66rem;'>{c.get('creator_user_name','')}</td>"
+        f"</tr>"
+        for c in clusters
+    )
+    st.markdown(f"""
+    <table class="plan-table">
+      <thead><tr>
+        <th>Name</th><th>State</th><th>Node Type</th>
+        <th>Cores</th><th>Memory</th><th>Workers</th>
+        <th>Spark</th><th>Owner</th>
+      </tr></thead>
+      <tbody>{cluster_rows}</tbody>
+    </table>""", unsafe_allow_html=True)
+
+
+def _render_run_detail(data: dict):
+    """Timing bars + cluster resource card + task table for an inspected run."""
+    det = data.get("details", {})
+    clu = data.get("cluster", {})
+    if not det:
+        st.warning("No detail data.")
+        return
+
+    setup_s   = det.get("setup_duration_s", 0)
+    exec_s    = det.get("execution_duration_s", 0)
+    cleanup_s = det.get("cleanup_duration_s", 0)
+    total_s   = (setup_s + exec_s + cleanup_s) or 1
+
+    def _bar(label, value_s, color):
+        pct = max(1, int(100 * value_s / total_s)) if value_s else 0
+        return (
+            f'<div style="display:flex;gap:0.6rem;align-items:center;margin-bottom:0.7rem;">'
+            f'<span style="font-family:IBM Plex Mono,monospace;font-size:0.7rem;'
+            f'color:#64748b;width:88px;flex-shrink:0;">{label}</span>'
+            f'<div style="flex:1;background:#e2e8f0;border-radius:4px;height:16px;overflow:hidden;">'
+            f'<div style="width:{pct}%;background:{color};height:100%;border-radius:4px;"></div></div>'
+            f'<span style="font-family:IBM Plex Mono,monospace;font-size:0.7rem;'
+            f'color:#1e293b;width:56px;text-align:right;flex-shrink:0;">{value_s}s</span>'
+            f'</div>'
+        )
+
+    bars = (
+        _bar("Setup",     setup_s,   "#3b82f6") +
+        _bar("Execution", exec_s,    "#e25a1c") +
+        _bar("Cleanup",   cleanup_s, "#16a34a")
+    )
+    st.markdown(f"""
+    <div class="card" style="margin-top:1rem;">
+      <div class="card-label">Timing Breakdown — Run {det.get('run_id')}</div>
+      {bars}
+      <div style="font-family:IBM Plex Mono,monospace;font-size:0.68rem;color:#64748b;margin-top:0.4rem;">
+        Job: {det.get('job_id','-')} &nbsp;·&nbsp;
+        Trigger: {det.get('trigger','-') or 'manual'} &nbsp;·&nbsp;
+        Creator: {det.get('creator_user_name','-')}
+      </div>
+    </div>""", unsafe_allow_html=True)
+
+    if clu:
+        autoscale = clu.get("autoscale", {})
+        workers_str = (
+            f"{autoscale['min_workers']}–{autoscale['max_workers']} (auto)"
+            if autoscale else str(clu.get("num_workers", 0))
+        )
+        state_color = {
+            "RUNNING": "#16a34a", "TERMINATED": "#94a3b8", "ERROR": "#dc2626",
+        }.get(clu.get("state", ""), "#64748b")
+        shuffle = clu.get("spark_conf", {}).get("spark.sql.shuffle.partitions", "-")
+        st.markdown(f"""
+        <div class="card">
+          <div class="card-label">Cluster Resources — {clu.get('cluster_name','N/A')}</div>
+          <div class="mon-grid">
+            <div class="mon-card">
+              <div class="mon-card-label">State</div>
+              <div class="mon-card-value" style="font-size:0.9rem;color:{state_color};">{clu.get('state','N/A')}</div>
             </div>
-            {err_html}
+            <div class="mon-card">
+              <div class="mon-card-label">Node Type</div>
+              <div class="mon-card-value" style="font-size:0.8rem;">{clu.get('node_type_id','N/A')}</div>
+            </div>
+            <div class="mon-card">
+              <div class="mon-card-label">Cores / Memory</div>
+              <div class="mon-card-value" style="font-size:0.9rem;">{clu.get('cluster_cores',0)} cores / {clu.get('cluster_memory_gb',0)} GB</div>
+            </div>
+            <div class="mon-card">
+              <div class="mon-card-label">Workers</div>
+              <div class="mon-card-value" style="font-size:0.9rem;">{workers_str}</div>
+            </div>
+          </div>
+          <div style="font-family:IBM Plex Mono,monospace;font-size:0.68rem;color:#64748b;margin-top:0.4rem;">
+            Spark: {clu.get('spark_version','-')} &nbsp;·&nbsp;
+            Cluster ID: {clu.get('cluster_id','-')} &nbsp;·&nbsp;
+            Shuffle partitions: {shuffle}
+          </div>
         </div>""", unsafe_allow_html=True)
+
+    tasks = det.get("tasks", [])
+    if tasks:
+        task_rows = "".join(
+            f"<tr>"
+            f"<td>{t['task_key']}</td>"
+            f"<td>{_status_pill(t['status'])}</td>"
+            f"<td style='font-family:IBM Plex Mono,monospace;'>{t['duration']}</td>"
+            f"<td style='font-family:IBM Plex Mono,monospace;'>{t.get('run_id','')}</td>"
+            f"<td style='font-family:IBM Plex Mono,monospace;'>{t.get('attempt',0)}</td>"
+            f"</tr>"
+            for t in tasks
+        )
+        st.markdown(f"""
+        <div class="card-label" style="margin-top:1rem;">Tasks</div>
+        <table class="plan-table">
+          <thead><tr><th>Task Key</th><th>Status</th><th>Duration</th><th>Run ID</th><th>Attempt</th></tr></thead>
+          <tbody>{task_rows}</tbody>
+        </table>""", unsafe_allow_html=True)
+
+
+def render_job_runs_tab(runs: list):
+    if not runs:
+        st.markdown(
+            '<div style="color:#94a3b8;font-family:IBM Plex Mono,monospace;'
+            'font-size:0.75rem;padding:1rem;">No run data — click Refresh.</div>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    render_live_runs(runs)
+
+    st.markdown('<hr class="sec-divider">', unsafe_allow_html=True)
+    st.markdown('<div class="card-label">Inspect Run</div>', unsafe_allow_html=True)
+
+    run_options = {
+        str(r["run_id"]): f"Run {r['run_id']} — {r['pipeline']} ({r['status']})"
+        for r in runs
+    }
+    col_sel, col_btn = st.columns([3, 1])
+    with col_sel:
+        selected = st.selectbox(
+            "Select run",
+            options=list(run_options.keys()),
+            format_func=lambda x: run_options.get(x, x),
+            label_visibility="collapsed",
+        )
+    with col_btn:
+        if st.button("Load Details", use_container_width=True):
+            from databricks_api import get_run_details, get_cluster_info
+            with st.spinner("Fetching..."):
+                det = get_run_details(int(selected))
+                clu = get_cluster_info(det.get("cluster_id", "")) if det.get("cluster_id") else {}
+                st.session_state.inspected_run = {"details": det, "cluster": clu}
+
+    if st.session_state.inspected_run:
+        _render_run_detail(st.session_state.inspected_run)
+
+
+def render_analytics_tab(runs: list):
+    if len(runs) < 2:
+        st.markdown(
+            '<div style="color:#94a3b8;font-family:IBM Plex Mono,monospace;'
+            'font-size:0.75rem;padding:1rem;">Need 2+ runs for analytics.</div>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    # Duration bar chart
+    st.markdown('<div class="card-label">Run Duration (seconds)</div>', unsafe_allow_html=True)
+    dur_data = {
+        f"#{r['run_id']}": round(r["duration_s"], 1)
+        for r in runs
+        if r.get("duration_s") is not None
+    }
+    if dur_data:
+        st.bar_chart(dur_data)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # Status distribution
+    st.markdown('<div class="card-label">Status Distribution</div>', unsafe_allow_html=True)
+    status_counts: dict = {}
+    for r in runs:
+        status_counts[r["status"]] = status_counts.get(r["status"], 0) + 1
+    if status_counts:
+        st.bar_chart(status_counts)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # Top 5 slowest
+    st.markdown('<div class="card-label">Slowest Runs</div>', unsafe_allow_html=True)
+    sorted_runs = sorted(
+        [r for r in runs if r.get("duration_s") is not None],
+        key=lambda x: x["duration_s"],
+        reverse=True,
+    )[:5]
+    if sorted_runs:
+        rows = "".join(
+            f"<tr>"
+            f"<td>{r['pipeline']}</td>"
+            f"<td>#{r['run_id']}</td>"
+            f"<td>{_status_pill(r['status'])}</td>"
+            f"<td style='font-family:IBM Plex Mono,monospace;'>{r['duration']}</td>"
+            f"<td style='font-family:IBM Plex Mono,monospace;font-size:0.67rem;'>{r['started'][:16]}</td>"
+            f"</tr>"
+            for r in sorted_runs
+        )
+        st.markdown(f"""
+        <table class="plan-table">
+          <thead><tr>
+            <th>Pipeline</th><th>Run ID</th><th>Status</th><th>Duration</th><th>Started</th>
+          </tr></thead>
+          <tbody>{rows}</tbody>
+        </table>""", unsafe_allow_html=True)
 
 
 # ── Stage: INPUT ───────────────────────────────────────────────────────────────
@@ -763,8 +1235,43 @@ def stage_running():
         st.rerun()
 
     st.progress(min(st.session_state.progress / 100, 1.0))
-    st.markdown('<div class="card-label">Pipeline Log</div>', unsafe_allow_html=True)
-    render_logs()
+
+    tab_log, tab_jobs = st.tabs(["Pipeline Log", "Live Jobs"])
+
+    with tab_log:
+        render_logs()
+
+    with tab_jobs:
+        col_check, col_lim = st.columns([2, 1])
+        with col_check:
+            check_jobs = st.button("↻ Check Databricks Jobs", use_container_width=True,
+                                   key="running_check_jobs")
+        with col_lim:
+            jobs_limit = st.number_input("Max runs", min_value=1, value=20,
+                                         label_visibility="collapsed", key="running_jobs_limit")
+
+        if check_jobs:
+            mq = queue.Queue()
+            mt = threading.Thread(target=run_monitor_thread, args=(mq, jobs_limit), daemon=True)
+            mt.start()
+            mt.join(timeout=20)
+            while not mq.empty():
+                msg_type, payload = mq.get_nowait()
+                if msg_type == "live_runs":
+                    st.session_state.live_runs = payload
+                elif msg_type == "clusters":
+                    st.session_state.clusters = payload
+                elif msg_type == "monitor_log":
+                    st.session_state.monitor_logs.append(payload)
+
+        if st.session_state.live_runs:
+            render_live_runs(st.session_state.live_runs)
+        else:
+            st.markdown(
+                '<div style="font-family:IBM Plex Mono,monospace;font-size:0.74rem;'
+                'color:#94a3b8;padding:0.8rem 0;">Click ↻ Check Databricks Jobs to load live run status.</div>',
+                unsafe_allow_html=True,
+            )
 
     if st.session_state.pipeline_thread.is_alive():
         time.sleep(2)
@@ -860,24 +1367,28 @@ def stage_monitor():
 
     col_title, col_back = st.columns([4, 1])
     with col_title:
-        st.markdown('<div class="card-label">Databricks Job Monitor</div>', unsafe_allow_html=True)
+        st.markdown('<div class="card-label">Databricks Pipeline Monitor</div>', unsafe_allow_html=True)
     with col_back:
-        if st.button("Back to Pipeline", use_container_width=True):
+        if st.button("← Back", use_container_width=True):
             st.session_state.stage = "input" if st.session_state.monitor_only else "done"
             st.session_state.monitor_only = False
             st.rerun()
 
-    # Tabs: Live runs | Log
-    tab_runs, tab_log = st.tabs(["Job Runs", "Monitor Log"])
+    # Control row ──────────────────────────────────────────────
+    ctrl1, ctrl2, ctrl3 = st.columns([2, 1, 1])
+    with ctrl1:
+        refresh = st.button("↻ Refresh", use_container_width=True)
+    with ctrl2:
+        limit = st.number_input("Max runs", min_value=1, value=20,
+                                label_visibility="collapsed")
+    with ctrl3:
+        auto_refresh = st.toggle("Auto-refresh 30s", value=False, key="mon_auto_refresh")
 
-    with tab_runs:
-        col_refresh, col_limit = st.columns([2, 1])
-        with col_refresh:
-            refresh = st.button("Refresh", use_container_width=True)
-        with col_limit:
-            limit = st.number_input("Max runs", min_value=5, max_value=100, value=20)
-
-        if refresh or not st.session_state.live_runs:
+    # Fetch data ───────────────────────────────────────────────
+    if refresh or not st.session_state.live_runs:
+        st.session_state.ar_counter = 30
+        st.session_state.inspected_run = None
+        with st.spinner("Fetching data from Databricks..."):
             mq = queue.Queue()
             t = threading.Thread(target=run_monitor_thread, args=(mq, limit), daemon=True)
             t.start()
@@ -886,13 +1397,49 @@ def stage_monitor():
                 msg_type, payload = mq.get_nowait()
                 if msg_type == "live_runs":
                     st.session_state.live_runs = payload
+                elif msg_type == "clusters":
+                    st.session_state.clusters = payload
                 elif msg_type == "monitor_log":
                     st.session_state.monitor_logs.append(payload)
 
-        render_live_runs(st.session_state.live_runs)
+    runs     = st.session_state.live_runs
+    clusters = st.session_state.clusters
+
+    # Tabs ─────────────────────────────────────────────────────
+    tab_overview, tab_runs_t, tab_cluster, tab_analytics, tab_log = st.tabs([
+        "Overview", "Job Runs", "Cluster Info", "Analytics", "Monitor Log"
+    ])
+
+    with tab_overview:
+        render_monitor_overview(runs, clusters)
+
+    with tab_runs_t:
+        render_job_runs_tab(runs)
+
+    with tab_cluster:
+        render_cluster_tab(clusters)
+
+    with tab_analytics:
+        render_analytics_tab(runs)
 
     with tab_log:
         render_monitor_section()
+
+    # Auto-refresh countdown ───────────────────────────────────
+    if auto_refresh:
+        if st.session_state.ar_counter <= 0:
+            st.session_state.ar_counter = 30
+            st.session_state.live_runs  = []
+            st.session_state.clusters   = []
+            st.rerun()
+        else:
+            remaining = st.session_state.ar_counter
+            st.caption(
+                f"Auto-refreshing in {remaining}s  ·  toggle off to stop"
+            )
+            st.session_state.ar_counter -= 1
+            time.sleep(1)
+            st.rerun()
 
 
 # ── Router ─────────────────────────────────────────────────────────────────────

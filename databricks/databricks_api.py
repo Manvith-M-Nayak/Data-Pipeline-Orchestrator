@@ -731,60 +731,144 @@ def check_run_status(run_id: int, max_wait: int = 1800) -> dict:
 
 
 # ============================================================
-# MONITORING: LIST RECENT JOB RUNS
+# MONITORING: LIST RECENT JOB RUNS  (paginated, all fields)
 # ============================================================
+def _ms_to_ts(ms: int) -> str:
+    """Convert Unix-ms timestamp to human-readable string."""
+    if not ms:
+        return ""
+    return datetime.datetime.fromtimestamp(ms / 1000).strftime("%Y-%m-%d %H:%M:%S")
+
+
 def list_recent_runs(limit: int = 20) -> list:
     """
-    Return recent pipeline runs from the Databricks Jobs API.
-    Filters to jobs created by this tool (name starts with 'DB_Pipeline_').
+    Return up to `limit` recent runs from the Databricks Jobs API.
+    Uses pagination (max 25 per page) and expand_tasks to capture every field.
     """
-    r = requests.get(
-        _url("/api/2.1/jobs/runs/list"),
-        headers=_headers(),
-        params={"limit": limit * 3, "active_only": "false"},
-        timeout=30,
-    )
-    if r.status_code != 200:
-        print(f"   list_recent_runs failed: {r.status_code}: {r.text[:200]}")
-        return []
+    formatted  = []
+    page_token = None
 
-    runs = r.json().get("runs", [])
+    while len(formatted) < limit:
+        fetch_size = min(25, limit - len(formatted))   # API hard-cap is 25 per page
+        params = {
+            "limit":        fetch_size,
+            "active_only":  "false",
+            "expand_tasks": "true",
+        }
+        if page_token:
+            params["page_token"] = page_token
 
-    # Filter to our pipeline jobs and format
-    formatted = []
-    for run in runs:
-        job_name = run.get("run_name", "") or run.get("job_id", "")
-        life = run.get("state", {}).get("life_cycle_state", "Unknown")
-        result = run.get("state", {}).get("result_state", "")
-        msg = run.get("state", {}).get("state_message", "")
+        try:
+            r = requests.get(
+                _url("/api/2.1/jobs/runs/list"),
+                headers=_headers(),
+                params=params,
+                timeout=30,
+            )
+        except Exception as e:
+            print(f"   list_recent_runs error: {e}")
+            break
 
-        # Map to unified status
-        if life in ("TERMINATED", "SKIPPED", "INTERNAL_ERROR"):
-            status = "Succeeded" if result == "SUCCESS" else "Failed"
-        elif life in ("RUNNING", "PENDING"):
-            status = "InProgress"
-        else:
-            status = life.title()
+        if r.status_code != 200:
+            print(f"   list_recent_runs failed: {r.status_code}: {r.text[:200]}")
+            break
 
-        start_ms = run.get("start_time", 0)
-        end_ms = run.get("end_time", 0)
-        duration_s = (end_ms - start_ms) / 1000 if end_ms and start_ms else None
+        data = r.json()
+        runs = data.get("runs", [])
+        if not runs:
+            break
 
-        started_str = ""
-        if start_ms:
-            started_str = datetime.datetime.fromtimestamp(start_ms / 1000).strftime("%Y-%m-%d %H:%M:%S")
+        for run in runs:
+            if len(formatted) >= limit:
+                break
 
-        formatted.append({
-            "pipeline": str(job_name),
-            "run_id": run.get("run_id"),
-            "job_id": run.get("job_id"),
-            "status": status,
-            "duration": _fmt_duration(duration_s),
-            "started": started_str,
-            "message": msg,
-        })
+            state     = run.get("state", {})
+            life      = state.get("life_cycle_state", "Unknown")
+            result    = state.get("result_state", "")
+            msg       = state.get("state_message", "")
+            cancelled = state.get("user_cancelled_or_timedout", False)
 
-        if len(formatted) >= limit:
+            if life in ("TERMINATED", "SKIPPED", "INTERNAL_ERROR"):
+                status = "Succeeded" if result == "SUCCESS" else "Failed"
+            elif life in ("RUNNING", "PENDING", "TERMINATING"):
+                status = "InProgress"
+            else:
+                status = life.title()
+
+            start_ms   = run.get("start_time", 0)
+            end_ms     = run.get("end_time", 0)
+            setup_ms   = run.get("setup_duration", 0)
+            exec_ms    = run.get("execution_duration", 0)
+            cleanup_ms = run.get("cleanup_duration", 0)
+            run_dur_ms = run.get("run_duration", 0)
+            duration_s = (end_ms - start_ms) / 1000 if end_ms and start_ms else None
+
+            # Tasks (populated when expand_tasks=true)
+            tasks = []
+            for t in run.get("tasks", []):
+                ts = t.get("start_time", 0)
+                te = t.get("end_time", 0)
+                t_state = t.get("state", {})
+                tasks.append({
+                    "task_key":   t.get("task_key", ""),
+                    "life_cycle": t_state.get("life_cycle_state", ""),
+                    "result":     t_state.get("result_state", ""),
+                    "status_msg": t_state.get("state_message", ""),
+                    "run_id":     t.get("run_id"),
+                    "attempt":    t.get("attempt_number", 0),
+                    "start_time": _ms_to_ts(ts),
+                    "end_time":   _ms_to_ts(te),
+                    "duration":   _fmt_duration((te - ts) / 1000 if te and ts else None),
+                    "setup_s":    round(t.get("setup_duration", 0) / 1000, 1),
+                    "exec_s":     round(t.get("execution_duration", 0) / 1000, 1),
+                    "cleanup_s":  round(t.get("cleanup_duration", 0) / 1000, 1),
+                    "cluster_id": t.get("cluster_instance", {}).get("cluster_id", ""),
+                    "spark_ctx":  t.get("cluster_instance", {}).get("spark_context_id", ""),
+                })
+
+            formatted.append({
+                # ── Identity
+                "pipeline":          str(run.get("run_name", "") or run.get("job_id", "")),
+                "run_id":            run.get("run_id"),
+                "job_id":            run.get("job_id"),
+                "run_name":          run.get("run_name", ""),
+                "number_in_job":     run.get("number_in_job", 0),
+                "attempt_number":    run.get("attempt_number", 0),
+                "run_type":          run.get("run_type", ""),
+                "format":            run.get("format", ""),
+                "trigger":           run.get("trigger", ""),
+                "creator_user_name": run.get("creator_user_name", ""),
+                "run_page_url":      run.get("run_page_url", ""),
+                # ── Status
+                "status":            status,
+                "life_cycle_state":  life,
+                "result_state":      result,
+                "state_message":     msg,
+                "user_cancelled":    cancelled,
+                # ── Timing
+                "started":           _ms_to_ts(start_ms),
+                "ended":             _ms_to_ts(end_ms),
+                "start_time_ms":     start_ms,
+                "end_time_ms":       end_ms,
+                "duration":          _fmt_duration(duration_s),
+                "duration_s":        duration_s,
+                "setup_duration_s":  round(setup_ms / 1000, 1) if setup_ms else 0,
+                "exec_duration_s":   round(exec_ms / 1000, 1) if exec_ms else 0,
+                "cleanup_duration_s": round(cleanup_ms / 1000, 1) if cleanup_ms else 0,
+                "run_duration_s":    round(run_dur_ms / 1000, 1) if run_dur_ms else None,
+                # ── Cluster
+                "cluster_id":        run.get("cluster_instance", {}).get("cluster_id", ""),
+                "spark_context_id":  run.get("cluster_instance", {}).get("spark_context_id", ""),
+                # ── Tasks
+                "tasks":             tasks,
+                # ── Legacy compat
+                "message":           msg,
+            })
+
+        if not data.get("has_more", False):
+            break
+        page_token = data.get("next_page_token", "")
+        if not page_token:
             break
 
     return formatted
@@ -933,3 +1017,134 @@ def execute_pipeline(
                 workspace_delete(nb_path)
             except Exception:
                 pass
+
+
+# ============================================================
+# MONITORING: GET DETAILED RUN INFO (timing + cluster + tasks)
+# ============================================================
+def get_run_details(run_id: int) -> dict:
+    """
+    Fetch full details for a run: timing breakdown, cluster instance,
+    task list. Used by the monitor inspect panel.
+    """
+    r = requests.get(
+        _url("/api/2.1/jobs/runs/get"),
+        headers=_headers(),
+        params={"run_id": run_id},
+        timeout=30,
+    )
+    if r.status_code != 200:
+        return {}
+    data = r.json()
+
+    start_ms = data.get("start_time", 0)
+    end_ms = data.get("end_time", 0)
+    setup_ms = data.get("setup_duration", 0)
+    exec_ms = data.get("execution_duration", 0)
+    cleanup_ms = data.get("cleanup_duration", 0)
+
+    cluster_id = data.get("cluster_instance", {}).get("cluster_id", "")
+
+    tasks = []
+    for t in data.get("tasks", []):
+        ts = t.get("start_time", 0)
+        te = t.get("end_time", 0)
+        tasks.append({
+            "task_key": t.get("task_key", ""),
+            "status": t.get("state", {}).get("result_state", "")
+                      or t.get("state", {}).get("life_cycle_state", ""),
+            "duration": _fmt_duration((te - ts) / 1000 if te and ts else None),
+            "run_id": t.get("run_id"),
+            "attempt": t.get("attempt_number", 0),
+        })
+
+    return {
+        "run_id": run_id,
+        "job_id": data.get("job_id"),
+        "run_name": data.get("run_name", ""),
+        "start_time_ms": start_ms,
+        "end_time_ms": end_ms,
+        "setup_duration_s": round(setup_ms / 1000, 1) if setup_ms else 0,
+        "execution_duration_s": round(exec_ms / 1000, 1) if exec_ms else 0,
+        "cleanup_duration_s": round(cleanup_ms / 1000, 1) if cleanup_ms else 0,
+        "cluster_id": cluster_id,
+        "tasks": tasks,
+        "state": data.get("state", {}),
+        "creator_user_name": data.get("creator_user_name", ""),
+        "run_page_url": data.get("run_page_url", ""),
+        "trigger": data.get("trigger", ""),
+    }
+
+
+# ============================================================
+# MONITORING: GET CLUSTER INFO (compute resources)
+# ============================================================
+def get_cluster_info(cluster_id: str) -> dict:
+    """
+    Fetch state, memory, cores, node type for a specific cluster.
+    """
+    if not cluster_id:
+        return {}
+    r = requests.get(
+        _url("/api/2.0/clusters/get"),
+        headers=_headers(),
+        params={"cluster_id": cluster_id},
+        timeout=30,
+    )
+    if r.status_code != 200:
+        return {}
+    d = r.json()
+    mem_mb = d.get("cluster_memory_mb", 0)
+    return {
+        "cluster_id": cluster_id,
+        "cluster_name": d.get("cluster_name", ""),
+        "state": d.get("state", ""),
+        "state_message": d.get("state_message", ""),
+        "spark_version": d.get("spark_version", ""),
+        "node_type_id": d.get("node_type_id", ""),
+        "driver_node_type_id": d.get("driver_node_type_id", ""),
+        "num_workers": d.get("num_workers", 0),
+        "cluster_cores": d.get("cluster_cores", 0),
+        "cluster_memory_mb": mem_mb,
+        "cluster_memory_gb": round(mem_mb / 1024, 1) if mem_mb else 0,
+        "autoscale": d.get("autoscale", {}),
+        "spark_conf": d.get("spark_conf", {}),
+        "creator_user_name": d.get("creator_user_name", ""),
+        "cluster_source": d.get("cluster_source", ""),
+        "last_activity_time": d.get("last_activity_time", 0),
+        "num_executors": len(d.get("executors", [])),
+    }
+
+
+# ============================================================
+# MONITORING: LIST ALL CLUSTERS
+# ============================================================
+def list_all_clusters() -> list:
+    """
+    Return all clusters in the workspace with state + resource info.
+    """
+    r = requests.get(
+        _url("/api/2.0/clusters/list"),
+        headers=_headers(),
+        timeout=30,
+    )
+    if r.status_code != 200:
+        return []
+    out = []
+    for c in r.json().get("clusters", []):
+        mem_mb = c.get("cluster_memory_mb", 0)
+        out.append({
+            "cluster_id": c.get("cluster_id", ""),
+            "cluster_name": c.get("cluster_name", ""),
+            "state": c.get("state", ""),
+            "spark_version": c.get("spark_version", ""),
+            "node_type_id": c.get("node_type_id", ""),
+            "num_workers": c.get("num_workers", 0),
+            "cluster_cores": c.get("cluster_cores", 0),
+            "cluster_memory_mb": mem_mb,
+            "cluster_memory_gb": round(mem_mb / 1024, 1) if mem_mb else 0,
+            "creator_user_name": c.get("creator_user_name", ""),
+            "cluster_source": c.get("cluster_source", ""),
+            "last_activity_time": c.get("last_activity_time", 0),
+        })
+    return out
