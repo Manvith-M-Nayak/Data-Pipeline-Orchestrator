@@ -13,4 +13,6 @@ planner.xml
 
 llama/datasets
 
+*.json
+
 CLAUDE.md

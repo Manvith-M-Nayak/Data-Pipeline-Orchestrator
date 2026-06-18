@@ -24,13 +24,15 @@ from config import GROQ_API_KEY
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
+MAX_CONTAINERS = 10
+
 
 CONTAINER_NAMING_CONVENTIONS = [
-    ["raw", "bronze", "silver"],
-    ["incoming", "bronze", "silver"],
-    ["raw", "stage", "curated"],
-    ["landing", "processing", "output"],
-    ["input", "intermediate", "final"],
+    ["raw", "bronze", "silver", "gold", "platinum", "diamond", "curated", "serving", "archive", "export"],
+    ["incoming", "bronze", "silver", "gold", "platinum", "diamond", "curated", "serving", "archive", "export"],
+    ["raw", "stage", "curated", "refined", "enriched", "aggregated", "modeled", "serving", "archive", "export"],
+    ["landing", "processing", "output", "refined", "enriched", "aggregated", "modeled", "serving", "archive", "export"],
+    ["input", "intermediate", "final", "refined", "enriched", "aggregated", "modeled", "serving", "archive", "export"],
 ]
 
 
@@ -130,7 +132,7 @@ def build_default_config(
     if custom_settings:
         rec.update(custom_settings)
 
-    num_containers = max(2, min(5, num_containers))
+    num_containers = max(2, min(MAX_CONTAINERS, num_containers))
     clist = _resolve_container_names(num_containers, container_names)
 
     containers = {f"stage{i}": clist[i] for i in range(num_containers)}
@@ -174,7 +176,7 @@ def decide_pipeline_config(
 
     if num_containers is None:
         num_containers = 3
-    num_containers = max(2, min(5, num_containers))
+    num_containers = max(2, min(MAX_CONTAINERS, num_containers))
     clist = _resolve_container_names(num_containers, container_names)
 
     containers_json = json.dumps({f"stage{i}": clist[i] for i in range(num_containers)})
@@ -218,6 +220,25 @@ For row filters, set "filter_condition" on the notebook stage. Examples:
   - notEquals(toInteger(status), 0)
   - greater(toInteger(amount), 100)
   - isNull(email)
+
+=== AGGREGATION SYNTAX (optional, notebook stages only) ===
+To group + aggregate, add an "aggregation" object to a notebook stage:
+  "aggregation": {{
+    "group_by": ["workspace"],
+    "aggregations": [
+      {{"op": "avg", "column": "duration", "alias": "avg_duration"}},
+      {{"op": "count", "column": "*", "alias": "run_count"}}
+    ]
+  }}
+Rules for aggregation:
+  - op is one of: avg, sum, min, max, count.
+  - avg/sum require a NUMERIC column (integer/double). min/max work on any column.
+  - count may use "*" for a row count, or a column name.
+  - group_by columns AND aggregated columns MUST exist in the CSV columns above.
+  - After aggregation the ONLY surviving columns are the group_by columns plus the
+    aliases — downstream stages may reference only those (and processed_time).
+  - Aggregation runs AFTER transformations and filter within the same stage.
+  - Omit "aggregation" entirely (or set null) for stages that do not group.
 
 === RULES ===
 1. First stage (stage0 → stage1) MUST be type "copy". No transformations.
@@ -318,7 +339,7 @@ Design the complete unified ADF+Databricks pipeline configuration JSON:
                 n for n in config.get("execution_order", []) if n not in extras
             ]
 
-        config = _structural_validate(config)
+        config = _structural_validate(config, schema)
 
         _print_plan_summary(config)
         return config, False
@@ -344,8 +365,52 @@ Design the complete unified ADF+Databricks pipeline configuration JSON:
     ), True
 
 
-def _structural_validate(config: dict) -> dict:
-    """Enforce first-stage=copy, later-stages=notebook, and processed_time presence."""
+_AGG_OPS = {"avg", "sum", "min", "max", "count"}
+_NUMERIC_TYPES = {"integer", "double", "long", "float"}
+
+
+def _validate_aggregation(agg: dict, schema: dict, stage_name: str):
+    """Return a cleaned aggregation block, or None if it is unusable."""
+    if not isinstance(agg, dict):
+        return None
+    columns = set(schema.get("columns", []))
+    types   = schema.get("inferred_types", {})
+
+    group_by = [g for g in (agg.get("group_by") or []) if g in columns]
+    dropped_groups = [g for g in (agg.get("group_by") or []) if g not in columns]
+    if dropped_groups:
+        print(f"   [{stage_name}] dropping group_by cols not in schema: {dropped_groups}")
+
+    clean_aggs = []
+    for a in (agg.get("aggregations") or []):
+        if not isinstance(a, dict):
+            continue
+        op    = str(a.get("op", "")).strip().lower()
+        column = str(a.get("column", "")).strip()
+        alias  = str(a.get("alias", "")).strip()
+        if op not in _AGG_OPS or not alias:
+            print(f"   [{stage_name}] dropping bad aggregation: {a}")
+            continue
+        if op == "count" and column == "*":
+            clean_aggs.append({"op": op, "column": "*", "alias": alias})
+            continue
+        if column not in columns:
+            print(f"   [{stage_name}] dropping aggregation on missing col '{column}'")
+            continue
+        if op in ("avg", "sum") and types.get(column) not in _NUMERIC_TYPES:
+            print(f"   [{stage_name}] dropping {op} on non-numeric col '{column}' ({types.get(column)})")
+            continue
+        clean_aggs.append({"op": op, "column": column, "alias": alias})
+
+    if not group_by or not clean_aggs:
+        return None
+    return {"group_by": group_by, "aggregations": clean_aggs}
+
+
+def _structural_validate(config: dict, schema: dict = None) -> dict:
+    """Enforce first-stage=copy, later-stages=notebook, processed_time presence,
+    and validate any aggregation blocks against the schema."""
+    schema = schema or {}
     stages = config.get("stages", [])
     for i, s in enumerate(stages):
         if i == 0 and s.get("type") != "copy":
@@ -353,6 +418,7 @@ def _structural_validate(config: dict) -> dict:
             s["type"] = "copy"
             s.pop("transformations", None)
             s.pop("filter_condition", None)
+            s.pop("aggregation", None)
             s.setdefault("diu", 2)
         elif i > 0 and s.get("type") == "copy":
             print(f"   Stage '{s['name']}' coerced to 'notebook' (only stage0 may be copy)")
@@ -366,6 +432,13 @@ def _structural_validate(config: dict) -> dict:
             s.setdefault("filter_condition", None)
             s.setdefault("num_workers", 0)
             s.setdefault("shuffle_partitions", 8)
+
+            if s.get("aggregation"):
+                agg = _validate_aggregation(s["aggregation"], schema, s["name"])
+                if agg:
+                    s["aggregation"] = agg
+                else:
+                    s.pop("aggregation", None)
 
     config["stages"] = stages
     config["execution_order"] = [s["name"] for s in stages]

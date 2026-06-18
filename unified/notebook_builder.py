@@ -145,6 +145,45 @@ def _parse_transform(entry: str) -> tuple:
 
 
 # ────────────────────────────────────────────────────────────────────────────
+# Aggregation codegen
+# ────────────────────────────────────────────────────────────────────────────
+_AGG_FUNCS = {"avg", "sum", "min", "max", "count", "mean"}
+
+
+def _build_agg_expr(agg: dict) -> str:
+    """One {'op','column','alias'} → PySpark agg expression string."""
+    op    = str(agg.get("op", "")).strip().lower()
+    column = str(agg.get("column", "")).strip()
+    alias  = str(agg.get("alias", "")).strip()
+    if op not in _AGG_FUNCS:
+        return ""
+    if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', alias):
+        return ""
+    if op == "count" and column in ("*", ""):
+        inner = "lit(1)"
+    elif re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', column):
+        inner = f'col("{column}")'
+    else:
+        return ""
+    return f'{op}({inner}).alias("{alias}")'
+
+
+def _build_agg_block(aggregation: dict) -> tuple:
+    """
+    Convert an aggregation block into (group_by_args, agg_exprs).
+    Returns ([], []) if the block is malformed / empty.
+    """
+    if not aggregation:
+        return [], []
+    group_by = [g for g in (aggregation.get("group_by") or [])
+                if re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', str(g).strip())]
+    exprs = [e for e in (_build_agg_expr(a) for a in (aggregation.get("aggregations") or [])) if e]
+    if not group_by or not exprs:
+        return [], []
+    return group_by, exprs
+
+
+# ────────────────────────────────────────────────────────────────────────────
 # Notebook source generator
 # ────────────────────────────────────────────────────────────────────────────
 NOTEBOOK_HEADER = "# Databricks notebook source\n"
@@ -168,7 +207,11 @@ def build_notebook_source(stage: dict, storage_account: str) -> str:
     sink_container   = stage["sink_container"]
     transforms       = stage.get("transformations", []) or []
     filter_condition = stage.get("filter_condition")
+    aggregation      = stage.get("aggregation")
     shuffle_parts    = int(stage.get("shuffle_partitions", 8))
+
+    agg_group_by, agg_exprs = _build_agg_block(aggregation)
+    has_agg = bool(agg_group_by and agg_exprs)
 
     pyspark_transforms = []
     for raw in transforms:
@@ -177,6 +220,10 @@ def build_notebook_source(stage: dict, storage_account: str) -> str:
             pyspark_transforms.append(("_skipped", f"# skipped malformed transform: {raw!r}"))
             continue
         col_name, rhs = parsed
+        # When aggregating, a row-level processed_time is dropped by groupBy;
+        # it is re-added after the aggregation instead.
+        if has_agg and col_name == "processed_time":
+            continue
         rhs_pyspark = _convert_expr(rhs)
         pyspark_transforms.append((col_name, rhs_pyspark))
 
@@ -256,6 +303,20 @@ def build_notebook_source(stage: dict, storage_account: str) -> str:
     else:
         cell_filter = "# no filter configured for this stage\n"
 
+    # ── Cell 5b: aggregation (groupBy) ────────────────────────────────────
+    if has_agg:
+        group_args = ", ".join(f'"{g}"' for g in agg_group_by)
+        agg_args   = ",\n    ".join(agg_exprs)
+        cell_agg = (
+            f"df = df.groupBy({group_args}).agg(\n"
+            f"    {agg_args},\n"
+            ")\n"
+            'df = df.withColumn("processed_time", current_timestamp())\n'
+            'print(f"[{stage_name}] after aggregation: {df.count()} groups")\n'
+        )
+    else:
+        cell_agg = "# no aggregation configured for this stage\n"
+
     # ── Cell 6: write + exit ──────────────────────────────────────────────
     cell_write = (
         "sink_path = (\n"
@@ -279,5 +340,5 @@ def build_notebook_source(stage: dict, storage_account: str) -> str:
         "}))\n"
     )
 
-    cells = [cell_imports, cell_spark, cell_read, cell_transforms, cell_filter, cell_write]
+    cells = [cell_imports, cell_spark, cell_read, cell_transforms, cell_filter, cell_agg, cell_write]
     return NOTEBOOK_HEADER + CELL_SEP.join(cells)

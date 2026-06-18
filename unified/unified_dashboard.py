@@ -427,14 +427,22 @@ def render_plan(config: dict, schema: dict, used_fallback: bool = False):
         for s in nb_stages:
             transforms = s.get("transformations", [])
             filter_cond = s.get("filter_condition")
+            agg = s.get("aggregation")
             t_rows = "".join(f"<tr><td style='color:#475569'>{t}</td></tr>" for t in transforms)
             f_row  = f"<tr><td style='color:#d97706'>filter: {filter_cond}</td></tr>" if filter_cond else ""
+            a_rows = ""
+            if agg:
+                gb = ", ".join(agg.get("group_by", []))
+                a_rows += f"<tr><td style='color:#7c3aed'>groupBy: {gb}</td></tr>"
+                for a in agg.get("aggregations", []):
+                    a_rows += (f"<tr><td style='color:#7c3aed'>"
+                               f"{a.get('alias')} = {a.get('op')}({a.get('column')})</td></tr>")
             st.markdown(f"""
             <div style="font-family:'IBM Plex Mono',monospace;font-size:0.62rem;font-weight:600;
                         letter-spacing:0.18em;text-transform:uppercase;color:#0ea5e9;margin-bottom:0.4rem;">
                 {s['name']} — Transformations</div>
             <table class="plan-table" style="margin-bottom:0.8rem;">
-              <tbody>{t_rows}{f_row}</tbody>
+              <tbody>{t_rows}{f_row}{a_rows}</tbody>
             </table>""", unsafe_allow_html=True)
 
     # Recommended settings
