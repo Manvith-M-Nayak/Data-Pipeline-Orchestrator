@@ -1,18 +1,20 @@
 import React, { useState } from "react";
 import { BrowserRouter, Routes, Route, NavLink } from "react-router-dom";
-import { Home, Brain, Zap, Activity, RefreshCw } from "lucide-react";
+import { Home, Brain, Zap, Activity, GitBranch, RefreshCw } from "lucide-react";
 import { monitor } from "./api.js";
 import { AppProvider } from "./AppContext.jsx";
 import HomePage    from "./pages/HomePage.jsx";
 import PlannerTab  from "./pages/PlannerTab.jsx";
 import ExecutorTab from "./pages/ExecutorTab.jsx";
 import MonitorTab  from "./pages/MonitorTab.jsx";
+import ManagerTab  from "./pages/ManagerTab.jsx";
 
 const TABS = [
-  { to: "/",         label: "Home",           icon: Home,     exact: true  },
-  { to: "/planner",  label: "Planner Agent",  icon: Brain,    exact: false },
-  { to: "/executor", label: "Executor Agent", icon: Zap,      exact: false },
-  { to: "/monitor",  label: "Monitor Agent",  icon: Activity, exact: false },
+  { to: "/",         label: "Home",              icon: Home,       exact: true  },
+  { to: "/planner",  label: "Planner Agent",     icon: Brain,      exact: false },
+  { to: "/manager",  label: "Central Manager",   icon: GitBranch,  exact: false },
+  { to: "/executor", label: "Executor Agent",    icon: Zap,        exact: false },
+  { to: "/monitor",  label: "Monitor Agent",     icon: Activity,   exact: false },
 ];
 
 const S = {
@@ -90,6 +92,7 @@ export default function App() {
           <Routes>
             <Route path="/"         element={<HomePage />} />
             <Route path="/planner"  element={<PlannerTab />} />
+            <Route path="/manager"  element={<ManagerTab />} />
             <Route path="/executor" element={<ExecutorTab />} />
             <Route path="/monitor"  element={<MonitorTab />} />
           </Routes>

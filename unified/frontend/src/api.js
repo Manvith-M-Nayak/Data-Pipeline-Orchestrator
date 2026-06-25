@@ -39,6 +39,20 @@ export const executor = {
   downloadUrl: (container) => `${BASE}/executor/download/${encodeURIComponent(container)}`,
 };
 
+// ── Central Manager ──────────────────────────────────────────────────────────
+export const manager = {
+  run: (csvFile, pipelineConfig, schemaObj) => {
+    const fd = new FormData();
+    fd.append("csv_file", csvFile);
+    fd.append("pipeline_config", JSON.stringify(pipelineConfig));
+    fd.append("schema", JSON.stringify(schemaObj));
+    return req("/manager/run", { method: "POST", body: fd });
+  },
+  status:   (runId)  => req(`/manager/status/${runId}`),
+  listRuns: ()       => req("/manager/runs"),
+  feedback: ()       => req("/manager/feedback"),
+};
+
 // ── Monitor ──────────────────────────────────────────────────────────────────
 export const monitor = {
   getLiveRuns:      ()           => req("/monitor/pipelines/live"),

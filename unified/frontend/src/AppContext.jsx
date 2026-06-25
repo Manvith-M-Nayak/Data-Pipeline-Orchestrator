@@ -23,6 +23,10 @@ export function AppProvider({ children }) {
   const [executorJobState,setExecutorJobStateRaw]= useState(() => lsGet("exec_job_state"));
   const [executorStep,    setExecutorStepRaw]    = useState(() => lsGet("exec_step", -1));
 
+  // ── Central Manager state (persisted to localStorage)
+  const [managerRunId,   setManagerRunIdRaw]   = useState(() => lsGet("mgr_run_id"));
+  const [managerState,   setManagerStateRaw]   = useState(() => lsGet("mgr_state"));
+
   // ── Monitor sub-tab (session only)
   const [monitorTab, setMonitorTab] = useState("live");
 
@@ -34,6 +38,8 @@ export function AppProvider({ children }) {
   const setExecutorJobId  = (v) => { setExecutorJobIdRaw(v);    lsSet("exec_job_id", v); };
   const setExecutorJobState=(v) => { setExecutorJobStateRaw(v); lsSet("exec_job_state", v); };
   const setExecutorStep   = (v) => { setExecutorStepRaw(v);     lsSet("exec_step", v); };
+  const setManagerRunId   = (v) => { setManagerRunIdRaw(v);     lsSet("mgr_run_id", v); };
+  const setManagerState   = (v) => { setManagerStateRaw(v);     lsSet("mgr_state", v); };
 
   return (
     <AppContext.Provider value={{
@@ -44,6 +50,8 @@ export function AppProvider({ children }) {
       executorJobId, setExecutorJobId,
       executorJobState, setExecutorJobState,
       executorStep, setExecutorStep,
+      managerRunId, setManagerRunId,
+      managerState, setManagerState,
       monitorTab, setMonitorTab,
     }}>
       {children}
