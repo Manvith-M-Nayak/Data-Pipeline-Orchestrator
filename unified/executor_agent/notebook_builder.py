@@ -243,9 +243,12 @@ def build_notebook_source(stage: dict, storage_account: str) -> str:
         "    sum, avg, mean, min, max, count,\n"
         ")\n"
         "import json\n"
+        "import io\n"
+        "import pandas as pd\n"
+        "from azure.storage.blob import BlobServiceClient\n"
         "\n"
         'dbutils.widgets.text("storage_key", "", "Azure Storage Account Key")\n'
-        'dbutils.widgets.text("run_id", "", "ADF Run ID")\n'
+        'dbutils.widgets.text("run_id", "", "Run ID")\n'
         'dbutils.widgets.text("stage_name", "", "Stage Name")\n'
         "\n"
         'storage_key = dbutils.widgets.get("storage_key")\n'
@@ -258,28 +261,30 @@ def build_notebook_source(stage: dict, storage_account: str) -> str:
         f'SHUFFLE_PARTITIONS = {shuffle_parts}\n'
     )
 
-    # ── Cell 2: Spark + storage auth ──────────────────────────────────────
+    # ── Cell 2: SDK client + Spark config ─────────────────────────────────
+    # Uses Azure Blob SDK instead of wasbs:// connector — works in serverless.
     cell_spark = (
-        "spark.conf.set(\n"
-        "    f\"fs.azure.account.key.{STORAGE_ACCOUNT}.blob.core.windows.net\",\n"
-        "    storage_key,\n"
+        "_blob_svc = BlobServiceClient(\n"
+        "    account_url=f\"https://{STORAGE_ACCOUNT}.blob.core.windows.net\",\n"
+        "    credential=storage_key,\n"
         ")\n"
         "spark.conf.set(\"spark.sql.shuffle.partitions\", str(SHUFFLE_PARTITIONS))\n"
         "print(f\"[{stage_name}] run_id={run_id} source={SOURCE_CONTAINER} sink={SINK_CONTAINER}\")\n"
     )
 
-    # ── Cell 3: read source blob ──────────────────────────────────────────
+    # ── Cell 3: read source blobs via SDK → Spark DataFrame ───────────────
     cell_read = (
-        "source_path = (\n"
-        "    f\"wasbs://{SOURCE_CONTAINER}@{STORAGE_ACCOUNT}.blob.core.windows.net/\"\n"
-        ")\n"
-        "df = (\n"
-        "    spark.read\n"
-        "         .option(\"header\", True)\n"
-        "         .option(\"inferSchema\", True)\n"
-        "         .csv(source_path)\n"
-        ")\n"
-        "print(f\"[{stage_name}] read {df.count()} rows, {len(df.columns)} columns from {SOURCE_CONTAINER}\")\n"
+        "_src_container = _blob_svc.get_container_client(SOURCE_CONTAINER)\n"
+        "_csv_frames = []\n"
+        "for _blob in _src_container.list_blobs():\n"
+        "    if _blob.name.lower().endswith(\".csv\"):\n"
+        "        _data = _src_container.download_blob(_blob.name).readall()\n"
+        "        _csv_frames.append(pd.read_csv(io.BytesIO(_data)))\n"
+        "if not _csv_frames:\n"
+        "    raise RuntimeError(f\"No CSV files found in container '{SOURCE_CONTAINER}'\")\n"
+        "_pdf = pd.concat(_csv_frames, ignore_index=True)\n"
+        "df = spark.createDataFrame(_pdf)\n"
+        "print(f\"[{stage_name}] read {df.count()} rows, {len(df.columns)} cols from {SOURCE_CONTAINER}\")\n"
     )
 
     # ── Cell 4: transformations ───────────────────────────────────────────
@@ -317,20 +322,20 @@ def build_notebook_source(stage: dict, storage_account: str) -> str:
     else:
         cell_agg = "# no aggregation configured for this stage\n"
 
-    # ── Cell 6: write + exit ──────────────────────────────────────────────
+    # ── Cell 6: write via SDK + exit ─────────────────────────────────────
+    # toPandas() → CSV bytes → upload. Avoids wasbs:// writer in serverless.
     cell_write = (
-        "sink_path = (\n"
-        "    f\"wasbs://{SINK_CONTAINER}@{STORAGE_ACCOUNT}.blob.core.windows.net/output\"\n"
-        ")\n"
-        "(\n"
-        "    df.coalesce(1)\n"
-        "      .write\n"
-        "      .mode(\"overwrite\")\n"
-        "      .option(\"header\", True)\n"
-        "      .csv(sink_path)\n"
-        ")\n"
         "written = df.count()\n"
-        "print(f\"[{stage_name}] wrote {written} rows to {SINK_CONTAINER}\")\n"
+        "_output_bytes = df.toPandas().to_csv(index=False).encode(\"utf-8\")\n"
+        "_sink_container = _blob_svc.get_container_client(SINK_CONTAINER)\n"
+        "try:\n"
+        "    _sink_container.create_container()\n"
+        "except Exception:\n"
+        "    pass  # container may already exist\n"
+        "_sink_container.upload_blob(\n"
+        "    \"output/part-0000.csv\", _output_bytes, overwrite=True\n"
+        ")\n"
+        "print(f\"[{stage_name}] wrote {written} rows to {SINK_CONTAINER}/output/part-0000.csv\")\n"
         "dbutils.notebook.exit(json.dumps({\n"
         "    \"status\":      \"succeeded\",\n"
         "    \"stage\":       stage_name,\n"
@@ -340,5 +345,9 @@ def build_notebook_source(stage: dict, storage_account: str) -> str:
         "}))\n"
     )
 
-    cells = [cell_imports, cell_spark, cell_read, cell_transforms, cell_filter, cell_agg, cell_write]
+    # pip install in the notebook ensures azure-storage-blob is available
+    # even if the serverless runtime doesn't pre-install it.
+    cell_pip = "%pip install azure-storage-blob --quiet\n"
+
+    cells = [cell_pip, cell_imports, cell_spark, cell_read, cell_transforms, cell_filter, cell_agg, cell_write]
     return NOTEBOOK_HEADER + CELL_SEP.join(cells)

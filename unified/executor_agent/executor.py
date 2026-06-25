@@ -177,32 +177,39 @@ def upload_notebook(workspace_path: str, source: str):
 
 
 # ────────────────────────────────────────────────────────────────────────────
-# Databricks Jobs API 2.1 — ephemeral serverless jobs
-# No cluster spec in the payload → Databricks uses serverless compute
-# automatically in serverless-only workspaces.
+# Databricks Jobs API 2.1
 # ────────────────────────────────────────────────────────────────────────────
+try:
+    from config import DATABRICKS_CLUSTER_ID as _DBX_CLUSTER_ID
+except ImportError:
+    _DBX_CLUSTER_ID = ""
+
+
 def dbx_create_job(job_name: str, notebook_path: str, parameters: dict) -> int:
-    """Create ephemeral job. Returns job_id."""
-    body = {
-        "name": job_name,
-        "tasks": [
-            {
-                "task_key": "main",
-                "notebook_task": {
-                    "notebook_path":   notebook_path,
-                    "base_parameters": parameters,
-                    "source":          "WORKSPACE",
-                },
-                # No job_cluster_key / existing_cluster_id / instance_pool_id
-                # → Databricks selects serverless compute automatically.
-            }
-        ],
+    """Create ephemeral job. Returns job_id.
+
+    Cluster priority:
+      1. DATABRICKS_CLUSTER_ID set in config → existing interactive cluster
+      2. Otherwise → no cluster spec (serverless in serverless-only workspaces)
+    """
+    task: dict = {
+        "task_key": "main",
+        "notebook_task": {
+            "notebook_path":   notebook_path,
+            "base_parameters": parameters,
+            "source":          "WORKSPACE",
+        },
     }
+    if _DBX_CLUSTER_ID:
+        task["existing_cluster_id"] = _DBX_CLUSTER_ID
+    # else: no cluster key → Databricks uses serverless automatically
+
+    body = {"name": job_name, "tasks": [task]}
     r = requests.post(_dbx_url("/api/2.1/jobs/create"), headers=_dbx_headers(), json=body, timeout=30)
     if r.status_code != 200:
-        raise RuntimeError(f"Jobs create failed: {r.status_code} {r.text[:300]}")
+        raise RuntimeError(f"Jobs create failed ({r.status_code}): {r.text[:500]}")
     job_id = r.json()["job_id"]
-    print(f"   DBX job created: job_id={job_id}  name={job_name}")
+    print(f"   DBX job created: job_id={job_id}  cluster={'existing:'+_DBX_CLUSTER_ID if _DBX_CLUSTER_ID else 'serverless'}")
     return job_id
 
 
@@ -215,35 +222,110 @@ def dbx_run_job(job_id: int) -> int:
         timeout=30,
     )
     if r.status_code != 200:
-        raise RuntimeError(f"Jobs run-now failed: {r.status_code} {r.text[:300]}")
+        raise RuntimeError(f"Jobs run-now failed ({r.status_code}): {r.text[:500]}")
     run_id = r.json()["run_id"]
     print(f"   DBX run triggered: run_id={run_id}")
     return run_id
 
 
+def _dbx_fetch_error(run_body: dict) -> str:
+    """Extract actual notebook error from a failed run via jobs/runs/get-output."""
+    errors = []
+    for task in run_body.get("tasks", []):
+        task_run_id = task.get("run_id")
+        if not task_run_id:
+            continue
+        r = requests.get(
+            _dbx_url(f"/api/2.1/jobs/runs/get-output?run_id={task_run_id}"),
+            headers=_dbx_headers(),
+            timeout=20,
+        )
+        if r.status_code == 200:
+            out = r.json()
+            err   = out.get("error", "")
+            trace = out.get("error_trace", "")
+            if err:
+                errors.append(err)
+            if trace:
+                errors.append(trace[:600])
+    return "\n".join(errors) if errors else ""
+
+
 def dbx_poll_run(run_id: int, poll_interval: int = 10, timeout: int = 1800) -> dict:
-    """Poll runs/get until TERMINATED. Returns {result_state, state_message, run_page_url}."""
-    url = _dbx_url(f"/api/2.1/runs/get?run_id={run_id}")
+    """Poll jobs/runs/get until TERMINATED. Returns {result_state, state_message, error, run_page_url}."""
+    url = _dbx_url(f"/api/2.1/jobs/runs/get?run_id={run_id}")
     start = time.time()
+    final_body: dict = {}
+    consecutive_errors = 0
     while time.time() - start < timeout:
-        r = requests.get(url, headers=_dbx_headers(), timeout=30)
-        if r.status_code != 200:
-            print(f"   Poll failed: {r.status_code} {r.text[:200]}")
+        try:
+            r = requests.get(url, headers=_dbx_headers(), timeout=30)
+        except requests.RequestException as e:
+            consecutive_errors += 1
+            print(f"   Poll network error #{consecutive_errors}: {e}")
+            if consecutive_errors >= 5:
+                return {
+                    "result_state":  "POLL_ERROR",
+                    "state_message": f"Network error polling run {run_id}: {e}",
+                    "error":         str(e),
+                    "run_page_url":  "",
+                    "run_id":        run_id,
+                }
             time.sleep(poll_interval)
             continue
+
+        if r.status_code != 200:
+            consecutive_errors += 1
+            print(f"   Poll HTTP {r.status_code} error #{consecutive_errors}: {r.text[:200]}")
+            if consecutive_errors >= 5:
+                return {
+                    "result_state":  "POLL_ERROR",
+                    "state_message": f"HTTP {r.status_code} polling run {run_id}: {r.text[:300]}",
+                    "error":         f"HTTP {r.status_code}: {r.text[:400]}",
+                    "run_page_url":  "",
+                    "run_id":        run_id,
+                }
+            time.sleep(poll_interval)
+            continue
+
+        consecutive_errors = 0
         body        = r.json()
         state       = body.get("state", {})
         life_cycle  = state.get("life_cycle_state", "")
         result_state = state.get("result_state", "")
         print(f"   run {run_id} life_cycle={life_cycle} result={result_state}")
         if life_cycle in ("TERMINATED", "SKIPPED", "INTERNAL_ERROR"):
-            return {
-                "result_state":  result_state,
-                "state_message": state.get("state_message", ""),
-                "run_page_url":  body.get("run_page_url", ""),
-            }
+            final_body = body
+            break
         time.sleep(poll_interval)
-    return {"result_state": "TIMEOUT", "state_message": "Timed out waiting for run", "run_page_url": ""}
+
+    if not final_body:
+        return {"result_state": "TIMEOUT", "state_message": "Timed out waiting for run to complete", "error": "", "run_page_url": "", "run_id": run_id}
+
+    state = final_body.get("state", {})
+    result_state = state.get("result_state", "TIMEOUT")
+    state_message = state.get("state_message", "")
+
+    # For failures, fetch the actual notebook error (traceback) from task output
+    error_detail = ""
+    if result_state not in ("SUCCESS",):
+        error_detail = _dbx_fetch_error(final_body)
+
+    combined_msg = state_message
+    if error_detail:
+        combined_msg = f"{state_message}\n\n{error_detail}".strip()
+
+    print(f"   run {run_id} finished: {result_state}")
+    if error_detail:
+        print(f"   error detail:\n{error_detail[:400]}")
+
+    return {
+        "result_state":  result_state,
+        "state_message": combined_msg,
+        "error":         error_detail,
+        "run_page_url":  final_body.get("run_page_url", ""),
+        "run_id":        run_id,
+    }
 
 
 def dbx_delete_job(job_id: int):
@@ -438,10 +520,10 @@ def check_pipeline_status(token: str, run_id: str, poll_interval: int = 10, time
 # End-to-end driver
 # ────────────────────────────────────────────────────────────────────────────
 def execute_pipeline(csv_path: str, pipeline_config: dict, schema: dict, progress=None) -> dict:
-    def _step(msg: str):
+    def _step(msg: str, dbx_run_id: int = None):
         print(f"\n--- {msg} ---")
         if progress:
-            progress(msg)
+            progress(msg, dbx_run_id)
 
     run_tag = str(int(time.time()))
 
@@ -521,7 +603,8 @@ def execute_pipeline(csv_path: str, pipeline_config: dict, schema: dict, progres
             job_id   = dbx_create_job(job_name, nb_path, parameters)
             try:
                 dbx_run_id = dbx_run_job(job_id)
-                _step(f"Monitoring Databricks run {dbx_run_id} (stage: {stage['name']})")
+                # Expose the live Databricks run_id so the monitor can track it
+                _step(f"Monitoring Databricks run {dbx_run_id} (stage: {stage['name']})", dbx_run_id=dbx_run_id)
                 poll = dbx_poll_run(dbx_run_id)
             finally:
                 dbx_delete_job(job_id)

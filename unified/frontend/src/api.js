@@ -34,8 +34,9 @@ export const executor = {
     fd.append("schema", JSON.stringify(schemaObj));
     return req("/executor/run", { method: "POST", body: fd });
   },
-  status:   (jobId) => req(`/executor/status/${jobId}`),
-  listJobs: ()      => req("/executor/jobs"),
+  status:      (jobId)     => req(`/executor/status/${jobId}`),
+  listJobs:    ()          => req("/executor/jobs"),
+  downloadUrl: (container) => `${BASE}/executor/download/${encodeURIComponent(container)}`,
 };
 
 // ── Monitor ──────────────────────────────────────────────────────────────────

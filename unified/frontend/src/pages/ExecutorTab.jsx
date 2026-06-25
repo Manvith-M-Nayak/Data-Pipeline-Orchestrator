@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { executor, connectWS } from "../api.js";
+import { executor, monitor, connectWS } from "../api.js";
 import { useAppContext } from "../AppContext.jsx";
 import {
   Zap, Upload, CheckCircle, XCircle, RotateCcw, Brain, AlertTriangle, Activity, Clock, Download,
@@ -126,28 +126,44 @@ export default function ExecutorTab() {
     setError("Session expired — server was restarted. Click Run Pipeline to start again.");
   }
 
-  // Resume polling if job was running when user switched tabs
-  useEffect(() => {
-    if (!jobId || jobState?.status !== "running") return;
-    setRunning(true);
+  // Extracted poll tick — takes explicit jobId to avoid stale closure
+  const _startPolling = useCallback((jid) => {
+    clearInterval(pollRef.current);
     pollRef.current = setInterval(async () => {
       try {
-        const s = await executor.status(jobId);
+        const s = await executor.status(jid);
         setJobState(s);
+        if (s.step) {
+          const idx = EXEC_STEPS.findIndex((label) =>
+            s.step.toLowerCase().includes(label.split(" ")[0].toLowerCase())
+          );
+          if (idx >= 0) setExecStep(idx);
+        }
         if (s.status !== "running") {
           clearInterval(pollRef.current);
           setRunning(false);
           setExecStep(EXEC_STEPS.length - 1);
+          // Backend _notify_monitor handles DB sync; this is best-effort UI refresh
           monitor.sync(2).catch(() => {});
         }
       } catch (e) {
-        if (e.message && (e.message.startsWith("410") || e.message.startsWith("404"))) {
+        const msg = e?.message || "";
+        if (msg.startsWith("410") || msg.startsWith("404")) {
           _handleStaleJob();
         }
+        // Any other error (network blip): interval keeps running, next tick will retry
       }
     }, 3000);
+  }, []); // eslint-disable-line
+
+  // On mount: resume polling if context has a running job (user switched tabs mid-run)
+  useEffect(() => {
+    if (jobId && jobState?.status === "running") {
+      setRunning(true);
+      _startPolling(jobId);
+    }
     return () => clearInterval(pollRef.current);
-  }, []); // only on mount
+  }, []); // eslint-disable-line
 
   // Monitor WS
   const onWs = useCallback((data) => {
@@ -169,41 +185,16 @@ export default function ExecutorTab() {
 
     try {
       const res = await executor.run(csvFile, savedPlan.config, savedSchema || {});
-      setJobId(res.job_id);
+      const jid = res.job_id;
+      setJobId(jid);
       setJobState({ status: "running", step: "Starting…" });
+      // Start polling immediately with explicit job ID — no effect/closure dependency
+      _startPolling(jid);
     } catch (e) {
       setRunning(false);
       setError("Failed to start: " + e.message);
     }
   }
-
-  useEffect(() => {
-    if (!jobId || jobState?.status !== "running") return;
-    pollRef.current = setInterval(async () => {
-      try {
-        const s = await executor.status(jobId);
-        setJobState(s);
-        if (s.step) {
-          const idx = EXEC_STEPS.findIndex((label) =>
-            s.step.toLowerCase().includes(label.split(" ")[0].toLowerCase())
-          );
-          if (idx >= 0) setExecStep(idx);
-        }
-        if (s.status !== "running") {
-          clearInterval(pollRef.current);
-          setRunning(false);
-          setExecStep(EXEC_STEPS.length - 1);
-          // Pull this run into the monitor DB immediately
-          monitor.sync(2).catch(() => {});
-        }
-      } catch (e) {
-        if (e.message && (e.message.startsWith("410") || e.message.startsWith("404"))) {
-          _handleStaleJob();
-        }
-      }
-    }, 3000);
-    return () => clearInterval(pollRef.current);
-  }, [jobId]); // eslint-disable-line
 
   function reset() {
     // Keep csvFile — user likely wants to run the same file again
@@ -358,7 +349,7 @@ export default function ExecutorTab() {
                     </div>
                     {jobState.status === "completed" && (jobState.result?.sink_container) && (
                       <a
-                        href={`http://localhost:8000/api/executor/download/${encodeURIComponent(jobState.result.sink_container)}`}
+                        href={executor.downloadUrl(jobState.result.sink_container)}
                         download
                         style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 14px",
                           background: "#0ea5e9", color: "#fff", borderRadius: 8, fontSize: 12,

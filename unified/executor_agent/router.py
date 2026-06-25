@@ -38,8 +38,10 @@ async def run_pipeline(
     job_id = str(uuid.uuid4())
     _jobs[job_id] = {"status": "running", "step": "Starting…", "result": None, "error": None}
 
-    def _progress(step_name: str):
+    def _progress(step_name: str, dbx_run_id: int = None):
         _jobs[job_id]["step"] = step_name
+        if dbx_run_id is not None:
+            _jobs[job_id]["dbx_run_id"] = dbx_run_id
 
     async def _run():
         start = time.time()
@@ -68,40 +70,48 @@ async def run_pipeline(
 
 
 async def _notify_monitor(result: dict, elapsed_ms: int):
-    """After executor finishes: sync ADF runs into monitor + inject Databricks-only runs."""
+    """After executor finishes: sync ADF runs + inject Databricks run records directly."""
     try:
         from monitor_agent.deps import get_db, get_monitor
-        monitor = get_monitor()
-        db      = get_db()
+        monitor_svc = get_monitor()
+        db          = get_db()
 
-        # Always sync recent ADF runs so copy-pipeline runs appear in monitor
-        if monitor:
-            await monitor.sync_historical(2)
+        # Always sync recent ADF runs (copy pipeline runs appear here)
+        if monitor_svc:
+            await monitor_svc.sync_historical(2)
 
-        # For Databricks-only runs (no ADF), inject a synthetic record so it
-        # appears in Run Logs and Predictions
-        if db and isinstance(result, dict) and result.get("status") == "ok":
-            run_id = result.get("run_id", "")
-            if run_id.startswith("dbx-"):
-                now = datetime.datetime.now(datetime.timezone.utc)
-                start_dt = now - datetime.timedelta(milliseconds=elapsed_ms)
-                stages = result.get("stages", [])
-                await db.upsert_run({
-                    "runId":        run_id,
-                    "pipelineName": "Databricks_Notebook_Pipeline",
-                    "status":       "Succeeded",
-                    "runStart":     start_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                    "runEnd":       now.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                    "durationMs":   elapsed_ms,
-                    "message":      f"Stages: {', '.join(stages)}",
-                })
-                # Trigger AI analysis for this synthetic run
-                if monitor:
-                    fake_run = {
-                        "runId": run_id, "pipelineName": "Databricks_Notebook_Pipeline",
-                        "status": "Succeeded", "durationMs": elapsed_ms, "message": "",
-                    }
-                    asyncio.create_task(monitor._handle_completed_run(fake_run))
+        if not isinstance(result, dict):
+            return
+
+        run_id  = result.get("run_id", "")
+        stages  = result.get("stages", [])
+        status  = result.get("status", "failed")
+        now     = datetime.datetime.now(datetime.timezone.utc)
+        start_dt = now - datetime.timedelta(milliseconds=elapsed_ms)
+
+        # Databricks-only runs have no ADF run_id — inject synthetic DB record
+        if db and run_id.startswith("dbx-"):
+            adf_status = "Succeeded" if status == "ok" else "Failed"
+            message    = result.get("message", f"Stages: {', '.join(stages)}")
+            run_record = {
+                "runId":        run_id,
+                "pipelineName": "Databricks_Notebook_Pipeline",
+                "status":       adf_status,
+                "runStart":     start_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "runEnd":       now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "durationMs":   elapsed_ms,
+                "message":      message,
+            }
+            await db.upsert_run(run_record)
+
+            # Trigger AI analysis directly — skip _handle_completed_run
+            # which would try to call the ADF API with a dbx- run_id
+            if monitor_svc:
+                activities = []
+                stats = await db.get_historical_stats("Databricks_Notebook_Pipeline")
+                asyncio.create_task(
+                    monitor_svc._analyze(run_id, "Databricks_Notebook_Pipeline", run_record, activities, stats)
+                )
     except Exception as e:
         print(f"[monitor notify] non-fatal: {e}")
 
