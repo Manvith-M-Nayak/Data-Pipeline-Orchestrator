@@ -1,59 +1,59 @@
 import React, { useState } from "react";
 import { BrowserRouter, Routes, Route, NavLink } from "react-router-dom";
-import {
-  Activity, Brain, Play, FileText, AlertTriangle, TrendingUp, RefreshCw,
-} from "lucide-react";
+import { Home, Brain, Zap, Activity, RefreshCw } from "lucide-react";
 import { monitor } from "./api.js";
-import LiveDashboard   from "./pages/LiveDashboard.jsx";
-import PlannerPage     from "./pages/PlannerPage.jsx";
-import ExecutorPage    from "./pages/ExecutorPage.jsx";
-import LogsPage        from "./pages/LogsPage.jsx";
-import AnomaliesPage   from "./pages/AnomaliesPage.jsx";
-import PredictionsPage from "./pages/PredictionsPage.jsx";
+import { AppProvider } from "./AppContext.jsx";
+import HomePage    from "./pages/HomePage.jsx";
+import PlannerTab  from "./pages/PlannerTab.jsx";
+import ExecutorTab from "./pages/ExecutorTab.jsx";
+import MonitorTab  from "./pages/MonitorTab.jsx";
 
-const NAV = [
-  { to: "/",            label: "Live",        icon: Activity,      group: "Monitor" },
-  { to: "/logs",        label: "Logs",        icon: FileText,      group: "Monitor" },
-  { to: "/anomalies",   label: "Anomalies",   icon: AlertTriangle, group: "Monitor" },
-  { to: "/predictions", label: "Predictions", icon: TrendingUp,    group: "Monitor" },
-  { to: "/planner",     label: "Planner",     icon: Brain,         group: "Pipeline" },
-  { to: "/executor",    label: "Executor",    icon: Play,          group: "Pipeline" },
+const TABS = [
+  { to: "/",         label: "Home",           icon: Home,     exact: true  },
+  { to: "/planner",  label: "Planner Agent",  icon: Brain,    exact: false },
+  { to: "/executor", label: "Executor Agent", icon: Zap,      exact: false },
+  { to: "/monitor",  label: "Monitor Agent",  icon: Activity, exact: false },
 ];
 
 const S = {
-  shell:   { display: "flex", minHeight: "100vh" },
-  sidebar: {
-    width: 210, background: "#1e293b", display: "flex", flexDirection: "column",
-    padding: "24px 0", borderRight: "1px solid #334155", flexShrink: 0,
+  shell:   { display: "flex", flexDirection: "column", minHeight: "100vh", background: "#0f172a" },
+  header:  {
+    display: "flex", alignItems: "center", gap: 0,
+    background: "#1e293b", borderBottom: "1px solid #334155",
+    padding: "0 24px", height: 52, flexShrink: 0,
   },
-  logo: { padding: "0 20px 20px", fontSize: 14, fontWeight: 700, color: "#38bdf8", letterSpacing: 0.5 },
-  logoSub: { fontSize: 11, color: "#475569", fontWeight: 400, marginTop: 2 },
-  groupLabel: {
-    padding: "14px 20px 6px", fontSize: 10, fontWeight: 700,
-    color: "#334155", textTransform: "uppercase", letterSpacing: 1,
+  logo: {
+    fontSize: 14, fontWeight: 700, color: "#f1f5f9",
+    marginRight: 32, whiteSpace: "nowrap", letterSpacing: 0.3,
   },
-  main:    { flex: 1, overflow: "auto", padding: 28 },
+  logoSub: { fontSize: 11, color: "#475569", fontWeight: 400 },
+  tabs:    { display: "flex", alignItems: "stretch", gap: 2, flex: 1 },
+  tab:     (active) => ({
+    display: "flex", alignItems: "center", gap: 7, padding: "0 16px",
+    fontSize: 13, fontWeight: active ? 700 : 400,
+    color: active ? "#38bdf8" : "#64748b",
+    background: "transparent", border: "none", cursor: "pointer",
+    borderBottom: active ? "2px solid #38bdf8" : "2px solid transparent",
+    textDecoration: "none", transition: "color 0.15s, border-color 0.15s",
+    height: "100%",
+  }),
   syncBtn: {
-    margin: "auto 12px 12px", padding: "8px 12px", background: "#0ea5e9",
-    color: "#fff", border: "none", borderRadius: 8, cursor: "pointer",
-    fontSize: 12, display: "flex", alignItems: "center", gap: 6,
+    marginLeft: "auto", padding: "6px 12px", background: "transparent",
+    color: "#475569", border: "1px solid #334155", borderRadius: 8,
+    cursor: "pointer", fontSize: 12, display: "flex", alignItems: "center", gap: 5,
+    flexShrink: 0,
   },
+  main: { flex: 1, padding: 32, overflowY: "auto" },
 };
 
-function NavItem({ to, label, Icon }) {
+function TabLink({ to, label, Icon, exact }) {
   return (
     <NavLink
       to={to}
-      end={to === "/"}
-      style={({ isActive }) => ({
-        display: "flex", alignItems: "center", gap: 10,
-        padding: "9px 20px", borderRadius: 8, margin: "0 8px",
-        color: isActive ? "#38bdf8" : "#94a3b8",
-        background: isActive ? "#0f172a" : "transparent",
-        fontSize: 13, fontWeight: 500,
-      })}
+      end={exact}
+      style={({ isActive }) => S.tab(isActive)}
     >
-      <Icon size={15} />
+      <Icon size={14} />
       {label}
     </NavLink>
   );
@@ -67,40 +67,35 @@ export default function App() {
     try { await monitor.sync(48); } finally { setSyncing(false); }
   }
 
-  const groups = [...new Set(NAV.map((n) => n.group))];
-
   return (
     <BrowserRouter>
+    <AppProvider>
       <div style={S.shell}>
-        <aside style={S.sidebar}>
+        <header style={S.header}>
           <div style={S.logo}>
-            Unified Agent
-            <div style={S.logoSub}>Planner · Executor · Monitor</div>
+            Pipeline Orchestrator
+            <div style={S.logoSub}>AI-powered · Azure ADF + Databricks</div>
           </div>
-          {groups.map((g) => (
-            <div key={g}>
-              <div style={S.groupLabel}>{g}</div>
-              {NAV.filter((n) => n.group === g).map(({ to, label, icon: Icon }) => (
-                <NavItem key={to} to={to} label={label} Icon={Icon} />
-              ))}
-            </div>
-          ))}
+          <nav style={S.tabs}>
+            {TABS.map(({ to, label, icon: Icon, exact }) => (
+              <TabLink key={to} to={to} label={label} Icon={Icon} exact={exact} />
+            ))}
+          </nav>
           <button style={S.syncBtn} onClick={handleSync} disabled={syncing}>
-            <RefreshCw size={13} />
-            {syncing ? "Syncing…" : "Sync History (48h)"}
+            <RefreshCw size={12} />
+            {syncing ? "Syncing…" : "Sync (48h)"}
           </button>
-        </aside>
+        </header>
         <main style={S.main}>
           <Routes>
-            <Route path="/"            element={<LiveDashboard />} />
-            <Route path="/logs"        element={<LogsPage />} />
-            <Route path="/anomalies"   element={<AnomaliesPage />} />
-            <Route path="/predictions" element={<PredictionsPage />} />
-            <Route path="/planner"     element={<PlannerPage />} />
-            <Route path="/executor"    element={<ExecutorPage />} />
+            <Route path="/"         element={<HomePage />} />
+            <Route path="/planner"  element={<PlannerTab />} />
+            <Route path="/executor" element={<ExecutorTab />} />
+            <Route path="/monitor"  element={<MonitorTab />} />
           </Routes>
         </main>
       </div>
+    </AppProvider>
     </BrowserRouter>
   );
 }

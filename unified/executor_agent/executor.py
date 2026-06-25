@@ -2,20 +2,16 @@
 Unified executor: drives the end-to-end pipeline.
 
 Flow:
-    1. Read schema, plan produced by groq_planner
+    1. Azure auth
     2. Create / purge blob containers, upload source CSV
-    3. For every notebook stage, generate PySpark notebook and upload to workspace
-    4. Create ADF linked services:
-         - LS_Blob_Storage       (Azure Blob)
-         - LS_Databricks         (Azure Databricks, new job cluster OR existing cluster)
-    5. Create ADF datasets for every container
-    6. Create ONE ADF pipeline containing all activities chained via dependsOn:
-         - Copy Activity            for type="copy" stage
-         - DatabricksNotebook Act.  for type="notebook" stages
-       Pass storage_key + run_id + stage_name as notebook baseParameters
-    7. Publish factory (wait for propagation)
-    8. Trigger the pipeline, poll run status
-    9. Return structured result
+    3. For every notebook stage, generate PySpark notebook and upload to
+       Databricks workspace via Workspace API
+    4. If the plan has Copy stages → create ADF resources (blob linked
+       service + datasets + copy-only pipeline) and run them via ADF
+    5. For every notebook stage → use Databricks Jobs API 2.1 to create
+       an ephemeral job with NO cluster spec (= serverless compute in
+       serverless-only workspaces), run it, poll, then delete the job
+    6. Return structured result
 """
 
 import os
@@ -28,17 +24,15 @@ from config import (
     AZURE_SUBSCRIPTION_ID, AZURE_RESOURCE_GROUP, AZURE_DATA_FACTORY,
     AZURE_STORAGE_ACCOUNT, AZURE_STORAGE_KEY,
     DATABRICKS_HOST, DATABRICKS_TOKEN,
-    DATABRICKS_CLUSTER_ID, DATABRICKS_SPARK_VERSION, DATABRICKS_NODE_TYPE,
     DATABRICKS_NOTEBOOK_BASE,
 )
 
 from .notebook_builder import build_notebook_source
 
 
-ADF_API_VERSION = "2018-06-01"
-UNIFIED_PIPELINE_NAME = "Unified_Orchestrator_Pipeline"
-LS_BLOB_NAME = "LS_Blob_Storage"
-LS_DBX_NAME  = "LS_Databricks"
+ADF_API_VERSION       = "2018-06-01"
+COPY_PIPELINE_NAME    = "Orchestrator_Copy_Pipeline"
+LS_BLOB_NAME          = "LS_Blob_Storage"
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -113,7 +107,6 @@ def upload_csv(filepath: str, container_name: str) -> str:
     filename = os.path.basename(filepath)
     if filename.startswith("*") or not filename.lower().endswith(".csv"):
         raise ValueError(f"Invalid CSV filename '{filename}'")
-
     container = _blob_service_client().get_container_client(container_name)
     with open(filepath, "rb") as f:
         container.upload_blob(name=filename, data=f, overwrite=True)
@@ -158,7 +151,7 @@ def ensure_workspace_dir(path: str):
         json={"path": path},
         timeout=30,
     )
-    if r.status_code not in (200,):
+    if r.status_code != 200:
         raise RuntimeError(f"Workspace mkdirs '{path}' failed: {r.status_code} {r.text[:200]}")
     print(f"   Workspace dir ready: {path}")
 
@@ -184,7 +177,91 @@ def upload_notebook(workspace_path: str, source: str):
 
 
 # ────────────────────────────────────────────────────────────────────────────
-# ADF REST helpers
+# Databricks Jobs API 2.1 — ephemeral serverless jobs
+# No cluster spec in the payload → Databricks uses serverless compute
+# automatically in serverless-only workspaces.
+# ────────────────────────────────────────────────────────────────────────────
+def dbx_create_job(job_name: str, notebook_path: str, parameters: dict) -> int:
+    """Create ephemeral job. Returns job_id."""
+    body = {
+        "name": job_name,
+        "tasks": [
+            {
+                "task_key": "main",
+                "notebook_task": {
+                    "notebook_path":   notebook_path,
+                    "base_parameters": parameters,
+                    "source":          "WORKSPACE",
+                },
+                # No job_cluster_key / existing_cluster_id / instance_pool_id
+                # → Databricks selects serverless compute automatically.
+            }
+        ],
+    }
+    r = requests.post(_dbx_url("/api/2.1/jobs/create"), headers=_dbx_headers(), json=body, timeout=30)
+    if r.status_code != 200:
+        raise RuntimeError(f"Jobs create failed: {r.status_code} {r.text[:300]}")
+    job_id = r.json()["job_id"]
+    print(f"   DBX job created: job_id={job_id}  name={job_name}")
+    return job_id
+
+
+def dbx_run_job(job_id: int) -> int:
+    """Trigger run-now. Returns run_id."""
+    r = requests.post(
+        _dbx_url("/api/2.1/jobs/run-now"),
+        headers=_dbx_headers(),
+        json={"job_id": job_id},
+        timeout=30,
+    )
+    if r.status_code != 200:
+        raise RuntimeError(f"Jobs run-now failed: {r.status_code} {r.text[:300]}")
+    run_id = r.json()["run_id"]
+    print(f"   DBX run triggered: run_id={run_id}")
+    return run_id
+
+
+def dbx_poll_run(run_id: int, poll_interval: int = 10, timeout: int = 1800) -> dict:
+    """Poll runs/get until TERMINATED. Returns {result_state, state_message, run_page_url}."""
+    url = _dbx_url(f"/api/2.1/runs/get?run_id={run_id}")
+    start = time.time()
+    while time.time() - start < timeout:
+        r = requests.get(url, headers=_dbx_headers(), timeout=30)
+        if r.status_code != 200:
+            print(f"   Poll failed: {r.status_code} {r.text[:200]}")
+            time.sleep(poll_interval)
+            continue
+        body        = r.json()
+        state       = body.get("state", {})
+        life_cycle  = state.get("life_cycle_state", "")
+        result_state = state.get("result_state", "")
+        print(f"   run {run_id} life_cycle={life_cycle} result={result_state}")
+        if life_cycle in ("TERMINATED", "SKIPPED", "INTERNAL_ERROR"):
+            return {
+                "result_state":  result_state,
+                "state_message": state.get("state_message", ""),
+                "run_page_url":  body.get("run_page_url", ""),
+            }
+        time.sleep(poll_interval)
+    return {"result_state": "TIMEOUT", "state_message": "Timed out waiting for run", "run_page_url": ""}
+
+
+def dbx_delete_job(job_id: int):
+    """Delete ephemeral job after run completes."""
+    r = requests.post(
+        _dbx_url("/api/2.1/jobs/delete"),
+        headers=_dbx_headers(),
+        json={"job_id": job_id},
+        timeout=30,
+    )
+    if r.status_code == 200:
+        print(f"   DBX job {job_id} deleted")
+    else:
+        print(f"   DBX job delete {job_id} -> {r.status_code} (non-fatal)")
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# ADF REST helpers (used only for Copy activities)
 # ────────────────────────────────────────────────────────────────────────────
 def _adf_url(resource_type: str, name: str) -> str:
     return (
@@ -204,7 +281,7 @@ def adf_delete(token: str, resource_type: str, name: str):
     if r.status_code in (200, 204):
         print(f"   Deleted stale {resource_type}/{name}")
     elif r.status_code == 404:
-        pass  # already gone
+        pass
     else:
         print(f"   Delete {resource_type}/{name} -> {r.status_code}")
 
@@ -223,9 +300,6 @@ def adf_put(token: str, resource_type: str, name: str, body: dict) -> requests.R
     return r
 
 
-# ────────────────────────────────────────────────────────────────────────────
-# Linked services
-# ────────────────────────────────────────────────────────────────────────────
 def create_blob_linked_service(token: str) -> requests.Response:
     body = {
         "properties": {
@@ -243,57 +317,12 @@ def create_blob_linked_service(token: str) -> requests.Response:
     return adf_put(token, "linkedservices", LS_BLOB_NAME, body)
 
 
-def create_databricks_linked_service(token: str, recommended: dict) -> requests.Response:
-    type_props = {
-        "domain":     DATABRICKS_HOST.rstrip("/"),
-        "accessToken": {
-            "type":  "SecureString",
-            "value": DATABRICKS_TOKEN,
-        },
-    }
-    if DATABRICKS_CLUSTER_ID:
-        type_props["existingClusterId"] = DATABRICKS_CLUSTER_ID
-    else:
-        num_workers = recommended.get("num_workers", 0)
-        type_props["newClusterVersion"]  = DATABRICKS_SPARK_VERSION
-        type_props["newClusterNodeType"] = DATABRICKS_NODE_TYPE
-
-        if num_workers == 0:
-            # Single-node cluster — driver only, no workers.
-            # ADF requires explicit single-node tags or it rejects 0-worker clusters.
-            type_props["newClusterNumOfWorker"] = "1"
-            type_props["newClusterSparkConf"] = {
-                "spark.master":                         "local[*, 4]",
-                "spark.databricks.cluster.profile":     "singleNode",
-            }
-            type_props["newClusterCustomTags"] = {
-                "ResourceClass": "SingleNode",
-            }
-        else:
-            type_props["newClusterNumOfWorker"] = str(num_workers)
-
-    body = {
-        "properties": {
-            "type": "AzureDatabricks",
-            "typeProperties": type_props,
-        }
-    }
-    return adf_put(token, "linkedservices", LS_DBX_NAME, body)
-
-
-# ────────────────────────────────────────────────────────────────────────────
-# Datasets
-# ────────────────────────────────────────────────────────────────────────────
 def create_dataset(token: str, ds_config: dict) -> requests.Response:
     role     = ds_config.get("role", "source")
-    filename = ""
-    if role == "sink":
-        filename = "output.csv"
-
+    filename = "output.csv" if role == "sink" else ""
     location = {"type": "AzureBlobStorageLocation", "container": ds_config["container"]}
     if filename:
         location["fileName"] = filename
-
     body = {
         "properties": {
             "type": "DelimitedText",
@@ -313,9 +342,6 @@ def create_dataset(token: str, ds_config: dict) -> requests.Response:
     return adf_put(token, "datasets", ds_config["name"], body)
 
 
-# ────────────────────────────────────────────────────────────────────────────
-# Unified pipeline builder — ONE pipeline, N chained activities
-# ────────────────────────────────────────────────────────────────────────────
 def _copy_activity(stage: dict, prev_activity_name: str = None) -> dict:
     act = {
         "name": stage["name"],
@@ -351,69 +377,17 @@ def _copy_activity(stage: dict, prev_activity_name: str = None) -> dict:
         "outputs": [{"referenceName": stage["sink_dataset"],   "type": "DatasetReference"}],
     }
     if prev_activity_name:
-        act["dependsOn"] = [{
-            "activity":             prev_activity_name,
-            "dependencyConditions": ["Succeeded"],
-        }]
+        act["dependsOn"] = [{"activity": prev_activity_name, "dependencyConditions": ["Succeeded"]}]
     return act
 
 
-def _notebook_activity(stage: dict, notebook_path: str, prev_activity_name: str) -> dict:
-    act = {
-        "name": stage["name"],
-        "type": "DatabricksNotebook",
-        "linkedServiceName": {
-            "referenceName": LS_DBX_NAME,
-            "type":          "LinkedServiceReference",
-        },
-        "typeProperties": {
-            "notebookPath":   notebook_path,
-            "baseParameters": {
-                "storage_key": AZURE_STORAGE_KEY,
-                "run_id":      {"value": "@pipeline().RunId", "type": "Expression"},
-                "stage_name":  stage["name"],
-            },
-        },
-        "policy": {
-            "timeout":            "0.02:00:00",
-            "retry":              1,
-            "retryIntervalInSeconds": 30,
-            "secureOutput":       True,
-            "secureInput":        False,
-        },
-    }
-    if prev_activity_name:
-        act["dependsOn"] = [{
-            "activity":             prev_activity_name,
-            "dependencyConditions": ["Succeeded"],
-        }]
-    return act
-
-
-def create_unified_pipeline(token: str, pipeline_config: dict, notebook_paths: dict) -> requests.Response:
-    activities = []
-    prev = None
-    for stage in pipeline_config["stages"]:
-        if stage["type"] == "copy":
-            activities.append(_copy_activity(stage, prev))
-        elif stage["type"] == "notebook":
-            nb_path = notebook_paths[stage["name"]]
-            activities.append(_notebook_activity(stage, nb_path, prev))
-        else:
-            raise RuntimeError(f"Unknown stage type '{stage['type']}' in '{stage['name']}'")
+def create_copy_pipeline(token: str, copy_stages: list) -> requests.Response:
+    activities, prev = [], None
+    for stage in copy_stages:
+        activities.append(_copy_activity(stage, prev))
         prev = stage["name"]
-
     body = {"properties": {"activities": activities}}
-    return adf_put(token, "pipelines", UNIFIED_PIPELINE_NAME, body)
-
-
-# ────────────────────────────────────────────────────────────────────────────
-# Trigger + poll
-# ────────────────────────────────────────────────────────────────────────────
-def publish_factory():
-    print("   No Git integration — resources live immediately via REST")
-    print("   Waiting 15s for ADF propagation...")
-    time.sleep(15)
+    return adf_put(token, "pipelines", COPY_PIPELINE_NAME, body)
 
 
 def trigger_pipeline(token: str, pipeline_name: str) -> str:
@@ -446,18 +420,14 @@ def check_pipeline_status(token: str, run_id: str, poll_interval: int = 10, time
     )
     start = time.time()
     while time.time() - start < timeout:
-        r = requests.get(
-            url,
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=30,
-        )
+        r = requests.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=30)
         if r.status_code != 200:
             print(f"   Status check failed: {r.status_code} {r.text[:200]}")
             time.sleep(poll_interval)
             continue
-        body = r.json()
+        body   = r.json()
         status = body.get("status")
-        print(f"   run {run_id[:8]}... status={status}")
+        print(f"   ADF run {run_id[:8]}... status={status}")
         if status in ("Succeeded", "Failed", "Cancelled"):
             return {"status": status, "run": body}
         time.sleep(poll_interval)
@@ -467,74 +437,118 @@ def check_pipeline_status(token: str, run_id: str, poll_interval: int = 10, time
 # ────────────────────────────────────────────────────────────────────────────
 # End-to-end driver
 # ────────────────────────────────────────────────────────────────────────────
-def execute_pipeline(csv_path: str, pipeline_config: dict, schema: dict) -> dict:
-    print("\n--- Step A: Azure authentication ---")
+def execute_pipeline(csv_path: str, pipeline_config: dict, schema: dict, progress=None) -> dict:
+    def _step(msg: str):
+        print(f"\n--- {msg} ---")
+        if progress:
+            progress(msg)
+
+    run_tag = str(int(time.time()))
+
+    _step("Authenticating with Azure")
     token = get_azure_token()
 
-    print("\n--- Step B: Creating blob containers ---")
+    _step("Creating storage containers")
     for name in pipeline_config["containers_to_create"]:
         create_blob_container(token, name)
-
-    print("\n--- Step C: Purging all containers ---")
     for name in pipeline_config["containers_to_create"]:
         purge_container(name)
 
     raw_container = pipeline_config["containers_to_create"][0]
-    print(f"\n--- Step D: Uploading CSV to '{raw_container}' ---")
+    _step(f"Uploading CSV to '{raw_container}'")
     upload_csv(csv_path, raw_container)
     if not check_blob_has_rows(raw_container):
         return {"status": "failed", "message": f"Upload verification failed on '{raw_container}'"}
 
-    print("\n--- Step E: Uploading notebooks to Databricks workspace ---")
-    ensure_workspace_dir(DATABRICKS_NOTEBOOK_BASE)
-    notebook_paths = {}
-    for stage in pipeline_config["stages"]:
-        if stage["type"] != "notebook":
-            continue
-        source = build_notebook_source(stage, AZURE_STORAGE_ACCOUNT)
-        wpath = f"{DATABRICKS_NOTEBOOK_BASE.rstrip('/')}/{stage['name']}"
-        upload_notebook(wpath, source)
-        notebook_paths[stage["name"]] = wpath
+    stages          = pipeline_config.get("stages", [])
+    copy_stages     = [s for s in stages if s["type"] == "copy"]
+    notebook_stages = [s for s in stages if s["type"] == "notebook"]
 
-    print("\n--- Step F: Creating ADF linked services ---")
-    adf_delete(token, "linkedservices", LS_DBX_NAME)
-    create_blob_linked_service(token)
-    create_databricks_linked_service(token, pipeline_config.get("recommended_settings", {}))
+    notebook_paths: dict = {}
+    if notebook_stages:
+        _step(f"Uploading {len(notebook_stages)} notebook(s) to Databricks workspace")
+        ensure_workspace_dir(DATABRICKS_NOTEBOOK_BASE)
+        for stage in notebook_stages:
+            source = build_notebook_source(stage, AZURE_STORAGE_ACCOUNT)
+            wpath  = f"{DATABRICKS_NOTEBOOK_BASE.rstrip('/')}/{stage['name']}"
+            upload_notebook(wpath, source)
+            notebook_paths[stage["name"]] = wpath
 
-    print("\n--- Step G: Creating ADF datasets ---")
-    for ds in pipeline_config["datasets"]:
-        r = create_dataset(token, ds)
+    # ── ADF path (Copy activities only) ──────────────────────────────────────
+    adf_run_id = None
+    if copy_stages:
+        _step("Creating ADF blob linked service and datasets")
+        create_blob_linked_service(token)
+        copy_dataset_names = {stage.get("source_dataset") for stage in copy_stages} | \
+                             {stage.get("sink_dataset")   for stage in copy_stages}
+        for ds in pipeline_config.get("datasets", []):
+            if ds["name"] in copy_dataset_names:
+                r = create_dataset(token, ds)
+                if r.status_code not in (200, 201):
+                    return {"status": "failed", "message": f"Dataset '{ds['name']}' creation failed"}
+
+        _step("Creating and triggering ADF copy pipeline")
+        r = create_copy_pipeline(token, copy_stages)
         if r.status_code not in (200, 201):
-            return {"status": "failed", "message": f"Dataset '{ds['name']}' creation failed"}
+            return {"status": "failed", "message": "Copy pipeline creation failed"}
 
-    print("\n--- Step H: Creating unified ADF pipeline ---")
-    r = create_unified_pipeline(token, pipeline_config, notebook_paths)
-    if r.status_code not in (200, 201):
-        return {"status": "failed", "message": "Pipeline creation failed"}
+        time.sleep(10)
+        adf_run_id = trigger_pipeline(token, COPY_PIPELINE_NAME)
+        if not adf_run_id:
+            return {"status": "failed", "message": "Copy pipeline trigger failed"}
 
-    print("\n--- Step I: Publishing factory ---")
-    publish_factory()
+        _step("Waiting for ADF copy pipeline to complete")
+        result = check_pipeline_status(token, adf_run_id)
+        if result["status"] != "Succeeded":
+            return {
+                "status":  "failed",
+                "run_id":  adf_run_id,
+                "message": f"Copy pipeline finished with status={result['status']}",
+                "result":  result["run"],
+            }
 
-    print("\n--- Step J: Triggering pipeline ---")
-    run_id = trigger_pipeline(token, UNIFIED_PIPELINE_NAME)
-    if not run_id:
-        return {"status": "failed", "message": "Pipeline trigger failed"}
+    # ── Databricks Jobs API path (notebook stages, serverless) ───────────────
+    if notebook_stages:
+        for stage in notebook_stages:
+            _step(f"Running notebook stage '{stage['name']}' via Databricks Jobs API")
+            nb_path    = notebook_paths[stage["name"]]
+            parameters = {
+                "storage_key": AZURE_STORAGE_KEY,
+                "run_id":      f"{run_tag}-{stage['name']}",
+                "stage_name":  stage["name"],
+            }
+            job_name = f"orchestrator-{stage['name']}-{run_tag}"
+            job_id   = dbx_create_job(job_name, nb_path, parameters)
+            try:
+                dbx_run_id = dbx_run_job(job_id)
+                _step(f"Monitoring Databricks run {dbx_run_id} (stage: {stage['name']})")
+                poll = dbx_poll_run(dbx_run_id)
+            finally:
+                dbx_delete_job(job_id)
 
-    print("\n--- Step K: Monitoring run ---")
-    result = check_pipeline_status(token, run_id)
+            if poll["result_state"] != "SUCCESS":
+                return {
+                    "status":  "failed",
+                    "run_id":  adf_run_id or f"dbx-{run_tag}",
+                    "message": (
+                        f"Stage '{stage['name']}' failed "
+                        f"(result_state={poll['result_state']}): "
+                        f"{poll['state_message']}"
+                    ),
+                    "result":  poll,
+                }
 
-    if result["status"] == "Succeeded":
-        print("\n   Pipeline run succeeded.")
-        return {
-            "status":  "ok",
-            "run_id":  run_id,
-            "result":  result["run"],
-            "stages":  [s["name"] for s in pipeline_config["stages"]],
-        }
+    # Last container in the plan is the final sink
+    containers = pipeline_config.get("containers_to_create", [])
+    sink_container = containers[-1] if containers else None
 
     return {
-        "status":  "failed",
-        "run_id":  run_id,
-        "message": f"Pipeline finished with status={result['status']}",
-        "result":  result["run"],
+        "status":         "ok",
+        "run_id":         adf_run_id or f"dbx-{run_tag}",
+        "stages":         [s["name"] for s in stages],
+        "sink_container": sink_container,
+        "result": {
+            "copy_stages":     len(copy_stages),
+            "notebook_stages": len(notebook_stages),
+        },
     }

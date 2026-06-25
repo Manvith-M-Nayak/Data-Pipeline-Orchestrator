@@ -38,12 +38,22 @@ async def run_pipeline(
         raise HTTPException(status_code=422, detail=f"Invalid JSON: {e}")
 
     job_id = str(uuid.uuid4())
-    _jobs[job_id] = {"status": "running", "result": None, "error": None}
+    _jobs[job_id] = {"status": "running", "step": "Starting…", "result": None, "error": None}
+
+    def _progress(step_name: str):
+        _jobs[job_id]["step"] = step_name
 
     async def _run():
         try:
-            result = await run_in_threadpool(execute_pipeline, tmp.name, config_dict, schema_dict)
-            _jobs[job_id].update({"status": "completed", "result": result})
+            result = await run_in_threadpool(execute_pipeline, tmp.name, config_dict, schema_dict, _progress)
+            if isinstance(result, dict) and result.get("status") in ("failed", "error"):
+                _jobs[job_id].update({
+                    "status": "failed",
+                    "error":  result.get("message", "Pipeline failed"),
+                    "result": result,
+                })
+            else:
+                _jobs[job_id].update({"status": "completed", "step": "Complete", "result": result})
         except Exception as exc:
             _jobs[job_id].update({"status": "failed", "error": str(exc)})
         finally:

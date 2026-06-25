@@ -28,8 +28,30 @@ export default function PredictionsPage() {
   const [result,  setResult]  = useState(null);
   const [loading, setLoading] = useState(false);
 
+  const [syncing, setSyncing] = useState(false);
+
+  async function syncAndReload() {
+    setSyncing(true);
+    try {
+      await monitor.sync(48);
+      const n = await monitor.getNames();
+      setNames(n);
+      if (n.length) setChosen(n[0]);
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   useEffect(() => {
-    monitor.getNames().then((n) => { setNames(n); if (n.length) setChosen(n[0]); });
+    monitor.getNames().then((n) => {
+      setNames(n);
+      if (n.length) {
+        setChosen(n[0]);
+      } else {
+        // DB empty — auto-sync ADF history so predictions have data
+        syncAndReload();
+      }
+    });
   }, []);
 
   async function load() {
@@ -56,7 +78,26 @@ export default function PredictionsPage() {
         <button style={S.btn} onClick={load} disabled={loading}>{loading ? "…" : "Predict"}</button>
       </div>
 
-      {!result && !loading && (
+      {names.length === 0 && (
+        <div style={S.empty}>
+          <TrendingUp size={40} style={{ marginBottom: 12, color: "#334155" }} />
+          {syncing ? (
+            <p style={{ color: "#38bdf8" }}>Syncing ADF history…</p>
+          ) : (
+            <>
+              <p>No pipelines found yet.</p>
+              <p style={{ fontSize: 12, color: "#64748b", marginTop: 8 }}>
+                Run a pipeline first, or{" "}
+                <button onClick={syncAndReload} style={{ background: "none", border: "none", color: "#38bdf8", cursor: "pointer", fontSize: 12, textDecoration: "underline" }}>
+                  sync history now
+                </button>.
+              </p>
+            </>
+          )}
+        </div>
+      )}
+
+      {names.length > 0 && !result && !loading && (
         <div style={S.empty}><TrendingUp size={40} style={{ marginBottom: 12, color: "#334155" }} /><p>Select a pipeline and click Predict.</p></div>
       )}
 

@@ -9,11 +9,13 @@ so that monitor_agent services (which use os.getenv) pick them up seamlessly.
 """
 
 import asyncio
+import csv
+import io
 import json
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 
 # ── Bridge config.py → environment before any service reads os.getenv ──────
@@ -86,6 +88,103 @@ app.include_router(mon_anomalies.router,    prefix="/api/monitor/anomalies",    
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "agents": ["planner", "executor", "monitor"]}
+
+
+# ── Schema detection ────────────────────────────────────────────────────────
+def _is_int(v: str) -> bool:
+    try:
+        int(v)
+        return True
+    except ValueError:
+        return False
+
+
+def _is_float(v: str) -> bool:
+    try:
+        float(v)
+        return True
+    except ValueError:
+        return False
+
+
+def _infer_type(values: list) -> str:
+    non_empty = [v.strip() for v in values if v.strip()]
+    if not non_empty:
+        return "string"
+    n = len(non_empty)
+    if sum(_is_int(v) for v in non_empty) / n > 0.8:
+        return "integer"
+    if sum(_is_float(v) for v in non_empty) / n > 0.8:
+        return "double"
+    return "string"
+
+
+@app.post("/api/schema/detect", tags=["schema"])
+async def detect_schema(csv_file: UploadFile = File(...)):
+    contents = await csv_file.read()
+    text     = contents.decode("utf-8", errors="replace")
+    reader   = csv.DictReader(io.StringIO(text))
+    rows     = []
+    for i, row in enumerate(reader):
+        if i >= 200:
+            break
+        rows.append(row)
+
+    if not rows:
+        return {"columns": {}, "preview": [], "row_count_sample": 0}
+
+    headers = list(rows[0].keys())
+    columns = {col: _infer_type([r.get(col, "") for r in rows]) for col in headers}
+    preview = [{k: r.get(k, "") for k in headers} for r in rows[:6]]
+
+    return {
+        "columns":          columns,
+        "preview":          preview,
+        "row_count_sample": len(rows),
+        "column_count":     len(headers),
+    }
+
+
+@app.get("/api/executor/download/{container}", tags=["executor"])
+async def download_output(container: str):
+    """Stream the first non-empty CSV blob from the given sink container."""
+    from fastapi.responses import StreamingResponse
+    from azure.storage.blob import BlobServiceClient
+    import config as _cfg
+
+    conn = (
+        f"DefaultEndpointsProtocol=https;"
+        f"AccountName={_cfg.AZURE_STORAGE_ACCOUNT};"
+        f"AccountKey={_cfg.AZURE_STORAGE_KEY};"
+        f"EndpointSuffix=core.windows.net"
+    )
+    client    = BlobServiceClient.from_connection_string(conn)
+    container_client = client.get_container_client(container)
+
+    # Find first .csv blob that has content
+    target = None
+    for blob in container_client.list_blobs():
+        if blob.name.endswith(".csv") and blob.size and blob.size > 0:
+            target = blob.name
+            break
+
+    if not target:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail=f"No output CSV found in '{container}'")
+
+    blob_client = container_client.get_blob_client(target)
+
+    def _stream():
+        stream = blob_client.download_blob()
+        for chunk in stream.chunks():
+            yield chunk
+
+    filename = f"{container}-output.csv"
+    return StreamingResponse(
+        _stream(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.websocket("/ws/live")

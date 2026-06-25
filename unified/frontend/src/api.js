@@ -6,23 +6,32 @@ async function req(path, opts = {}) {
   return res.json();
 }
 
+// ── Schema detection ─────────────────────────────────────────────────────────
+export const schema = {
+  detect: (csvFile) => {
+    const fd = new FormData();
+    fd.append("csv_file", csvFile);
+    return req("/schema/detect", { method: "POST", body: fd });
+  },
+};
+
 // ── Planner ─────────────────────────────────────────────────────────────────
 export const planner = {
-  plan: (schema, prompt) =>
+  plan: (schemaObj, prompt) =>
     req("/planner/plan", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ schema, prompt }),
+      body: JSON.stringify({ schema: schemaObj, prompt }),
     }),
 };
 
 // ── Executor ─────────────────────────────────────────────────────────────────
 export const executor = {
-  run: (csvFile, pipelineConfig, schema) => {
+  run: (csvFile, pipelineConfig, schemaObj) => {
     const fd = new FormData();
     fd.append("csv_file", csvFile);
     fd.append("pipeline_config", JSON.stringify(pipelineConfig));
-    fd.append("schema", JSON.stringify(schema));
+    fd.append("schema", JSON.stringify(schemaObj));
     return req("/executor/run", { method: "POST", body: fd });
   },
   status:   (jobId) => req(`/executor/status/${jobId}`),
@@ -35,6 +44,7 @@ export const monitor = {
   getNames:         ()           => req("/monitor/pipelines/names"),
   sync:             (hours = 48) => req(`/monitor/pipelines/sync?hours=${hours}`, { method: "POST" }),
   getStats:         (name)       => req(`/monitor/pipelines/stats/${encodeURIComponent(name)}`),
+  getSummary:       ()           => req("/monitor/pipelines/summary"),
   getLogs:          (p = {})     => req(`/monitor/logs/${_qs(p)}`),
   getAnomalyLogs:   ()           => req("/monitor/logs/anomalies"),
   getPrediction:    (name)       => req(`/monitor/predictions/${encodeURIComponent(name)}`),

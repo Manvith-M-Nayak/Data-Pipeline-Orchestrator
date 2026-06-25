@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from "react";
-import { monitor } from "../api.js";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import React, { useEffect, useState, useCallback } from "react";
+import { monitor, connectWS } from "../api.js";
+import { ChevronDown, ChevronRight, FileText } from "lucide-react";
 
 const SEV = { low: "#22c55e", medium: "#f59e0b", high: "#ef4444" };
 
@@ -65,38 +65,68 @@ function Row({ run }) {
 }
 
 export default function LogsPage() {
-  const [logs,   setLogs]   = useState([]);
-  const [f,      setF]      = useState({ status: "", pipeline_name: "" });
-  const [loading,setLoading]= useState(false);
+  const [logs,    setLogs]    = useState([]);
+  const [f,       setF]       = useState({ status: "", pipeline_name: "" });
+  const [loading, setLoading] = useState(false);
+  const [newRuns, setNewRuns] = useState(0); // banner counter for live completions
 
-  async function load() {
+  async function load(filters = f) {
     setLoading(true);
+    setNewRuns(0);
     try {
       const params = {};
-      if (f.status)        params.status        = f.status;
-      if (f.pipeline_name) params.pipeline_name = f.pipeline_name;
+      if (filters.status)        params.status        = filters.status;
+      if (filters.pipeline_name) params.pipeline_name = filters.pipeline_name;
       setLogs(await monitor.getLogs(params));
     } finally { setLoading(false); }
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, []); // initial load
+
+  // Auto-refresh when monitor agent finishes analyzing a run
+  const onWs = useCallback((data) => {
+    if (data.event === "run_completed") {
+      setNewRuns((n) => n + 1);
+    }
+  }, []);
+  useEffect(() => connectWS(onWs), [onWs]);
 
   return (
     <div>
       <h1 style={S.title}>Run Logs</h1>
+
+      {newRuns > 0 && (
+        <div style={{ background: "#0c1a2e", border: "1px solid #1e3a5f", borderRadius: 8, padding: "9px 14px", marginBottom: 14, fontSize: 13, color: "#38bdf8", display: "flex", alignItems: "center", gap: 10 }}>
+          {newRuns} new run{newRuns > 1 ? "s" : ""} completed.
+          <button onClick={() => load()} style={{ background: "none", border: "none", color: "#38bdf8", cursor: "pointer", fontWeight: 700, fontSize: 13, textDecoration: "underline" }}>
+            Refresh now
+          </button>
+        </div>
+      )}
+
       <div style={S.filters}>
         <input style={S.ctrl} placeholder="Pipeline name…" value={f.pipeline_name}
           onChange={(e) => setF((p) => ({ ...p, pipeline_name: e.target.value }))}
-          onKeyDown={(e) => e.key === "Enter" && load()} />
+          onKeyDown={(e) => e.key === "Enter" && load(f)} />
         <select style={S.ctrl} value={f.status} onChange={(e) => setF((p) => ({ ...p, status: e.target.value }))}>
           <option value="">All statuses</option>
           <option value="Succeeded">Succeeded</option>
           <option value="Failed">Failed</option>
           <option value="InProgress">InProgress</option>
         </select>
-        <button style={{ ...S.ctrl, background: "#0ea5e9", border: "none", cursor: "pointer" }} onClick={load}>Search</button>
+        <button style={{ ...S.ctrl, background: "#0ea5e9", border: "none", cursor: "pointer" }} onClick={() => load(f)}>Search</button>
       </div>
-      {loading ? <div style={{ color: "#475569" }}>Loading…</div> : (
+      {loading ? (
+        <div style={{ color: "#475569", textAlign: "center", marginTop: 60 }}>Loading logs…</div>
+      ) : logs.length === 0 ? (
+        <div style={{ color: "#475569", textAlign: "center", marginTop: 60 }}>
+          <FileText size={40} style={{ marginBottom: 12, color: "#334155" }} />
+          <p>No runs found.</p>
+          <p style={{ fontSize: 12, color: "#334155", marginTop: 8 }}>
+            Run a pipeline first, or click "Sync history (48h)" in the sidebar to pull recent ADF runs.
+          </p>
+        </div>
+      ) : (
         <table style={S.table}>
           <thead><tr>
             <th style={S.th} /><th style={S.th}>Pipeline</th><th style={S.th}>Status</th>
