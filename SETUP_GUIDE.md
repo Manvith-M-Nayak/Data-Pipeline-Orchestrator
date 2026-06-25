@@ -2,12 +2,15 @@
 
 Complete step-by-step instructions for creating every Azure resource and API key this project needs, and exactly where each value goes in `unified/config.py`.
 
+> **Azure for Students:** You get $100 free credit with no credit card required. All resources in this guide are available on the student tier. Watch the Databricks cost warning in step 6 — it is the only resource that can drain your credit quickly if left running.
+
 ---
 
 ## Prerequisites
 
-- An active Azure subscription
-- Azure CLI installed (`brew install azure-cli`) — optional but helpful
+- An active Azure subscription (including Azure for Students — sign up at azure.microsoft.com/en-us/free/students)
+- Python 3.9 or later (`python --version` to check)
+- Node.js 18 or later for the frontend (`node --version` to check — download from nodejs.org if missing)
 - A Groq account (free at console.groq.com)
 
 ---
@@ -16,15 +19,19 @@ Complete step-by-step instructions for creating every Azure resource and API key
 
 The service principal is a non-human identity that the project uses to authenticate to Azure APIs. One principal is shared across ADF, Storage, and Databricks.
 
+> **Portal name change:** Azure Active Directory was renamed to **Microsoft Entra ID** in the Azure portal. Search for "Microsoft Entra ID" — not "Azure Active Directory" — or the search will return no results.
+
 ### Steps
 
 1. Go to **portal.azure.com**
-2. In the top search bar, type **Azure Active Directory** and click it
+2. In the top search bar, type **Microsoft Entra ID** and click it
 3. In the left sidebar, click **App registrations**
 4. Click **+ New registration**
 5. Fill in:
    - **Name**: `data-pipeline-orchestrator` (or any name you prefer)
-   - **Supported account types**: Accounts in this organizational directory only
+   - **Supported account types**: Choose based on your account type:
+     - **University/organization email** (e.g. `name@university.edu`) → select **Accounts in this organizational directory only**
+     - **Personal Microsoft account** (e.g. `name@outlook.com`) → select **Accounts in any organizational directory and personal Microsoft accounts**
    - **Redirect URI**: leave blank
 6. Click **Register**
 
@@ -148,6 +155,10 @@ The project uses Blob Storage for landing zones (raw, bronze, silver containers)
 
 ## 6. Azure Databricks Workspace
 
+> **Azure for Students — cost warning:** Databricks charges for VM compute time while a cluster is running. The default `Standard_DS3_v2` node costs ~$0.10–0.20/hour. Ephemeral job clusters (the default in this project) shut down automatically after each run, so you will not be charged while idle. Do **not** create an interactive all-purpose cluster and leave it running — it will drain your $100 credit in a few days.
+
+> **Quota issue:** Student subscriptions often have a low vCPU quota (4–10 cores per region). `Standard_DS3_v2` uses 4 cores. If you get a quota error during cluster creation, see the "Request a quota increase" note below or switch to `Standard_DS2_v2` (2 cores, 7 GB RAM) which is smaller but sufficient for testing.
+
 ### Steps
 
 1. In the portal search bar, type **Azure Databricks**
@@ -156,10 +167,18 @@ The project uses Blob Storage for landing zones (raw, bronze, silver containers)
    - **Subscription**: your subscription
    - **Resource group**: `data-pipeline-rg`
    - **Workspace name**: `pipeline-databricks`
-   - **Region**: same region
-   - **Pricing tier**: Standard (sufficient for development)
+   - **Region**: same region — if Databricks is not available in your region, try **East US** or **West Europe**
+   - **Pricing tier**: **Standard** (sufficient for development — do not choose Premium)
 4. Click **Review + create** → **Create**
 5. Deployment takes 3–5 minutes
+
+### If you get a quota error
+
+1. In the portal search bar, type **Quotas**
+2. Click **My quotas**
+3. Filter by your subscription and search for `DSv2`
+4. Click the pencil icon next to the quota and request an increase to 8 cores
+5. Student quota increases are usually auto-approved within minutes
 
 ### Collect the workspace URL
 
@@ -195,7 +214,7 @@ The defaults below work for most cases:
 ```python
 DATABRICKS_CLUSTER_ID    = ""                      # empty = ephemeral job cluster
 DATABRICKS_SPARK_VERSION = "13.3.x-scala2.12"     # LTS runtime
-DATABRICKS_NODE_TYPE     = "Standard_DS3_v2"       # 14 GB RAM, 4 vCPUs
+DATABRICKS_NODE_TYPE     = "Standard_DS3_v2"       # 14 GB RAM, 4 vCPUs — use Standard_DS2_v2 if quota is tight
 DATABRICKS_NOTEBOOK_BASE = "/Shared/unified_orchestrator"
 ```
 
@@ -233,6 +252,8 @@ The service principal you created in step 1 needs permission to control ADF, Sto
 3. Click **+ Add** → **Add role assignment**
 4. Search for and select **Contributor**
 5. Follow the same steps 5–10 above, selecting your service principal
+
+> **If you cannot assign roles:** Student subscriptions where you are not the Owner of the subscription will block role assignments. If you see "You do not have permission to create role assignments", go to **Subscriptions → your sub → Access control (IAM)** and confirm your own role is **Owner**. If you signed up via Azure for Students directly (not through a university-provided subscription), you are the Owner and this will work.
 
 ---
 
@@ -308,7 +329,7 @@ Run these checks in order. Each one is independent and fast.
 
 ```bash
 cd unified
-python -c "import config; print('Tenant:', config.AZURE_TENANT_ID[:8], '...')"
+python3 -c "import config; print('Tenant:', config.AZURE_TENANT_ID[:8], '...')"
 ```
 
 Expected: prints first 8 chars of your tenant ID.
@@ -316,7 +337,7 @@ Expected: prints first 8 chars of your tenant ID.
 ### Check 2 — Database initializes
 
 ```bash
-python -c "
+python3 -c "
 import asyncio, sys
 sys.path.insert(0, '.')
 import config, os
@@ -332,7 +353,7 @@ Expected: `DB OK`. Creates `unified/data/adf_monitor.db`.
 ### Check 3 — Azure token
 
 ```bash
-python -c "
+python3 -c "
 import asyncio, sys, config, os
 sys.path.insert(0, '.')
 os.environ['AZURE_TENANT_ID']     = config.AZURE_TENANT_ID
@@ -352,7 +373,7 @@ Expected: prints first 20 chars of an access token.
 ### Check 4 — ADF connection
 
 ```bash
-python -c "
+python3 -c "
 import asyncio, sys, config, os
 sys.path.insert(0, '.')
 os.environ['AZURE_TENANT_ID']       = config.AZURE_TENANT_ID
@@ -372,7 +393,7 @@ Expected: `ADF OK — 0 active run(s)` (or more if pipelines are running).
 ### Check 5 — Groq connection
 
 ```bash
-python -c "
+python3 -c "
 import asyncio, sys, config, os
 sys.path.insert(0, '.')
 os.environ['GROQ_API_KEY'] = config.GROQ_API_KEY
@@ -417,21 +438,28 @@ Expected: sidebar with Live, Logs, Anomalies, Predictions, Planner, Executor pag
 | `AuthenticationFailed` or `401` | Wrong tenant/client/secret | Re-check steps 1–2, re-generate secret if expired |
 | `ResourceNotFound` or `404` on ADF | Wrong factory name or resource group | Check `AZURE_DATA_FACTORY` and `AZURE_RESOURCE_GROUP` exactly match portal |
 | `Authorization_RequestDenied` | Missing RBAC role | Repeat step 7 for the relevant resource |
-| `InvalidAuthenticationTokenTenant` | Tenant ID mismatch | Make sure `AZURE_TENANT_ID` is the directory ID, not subscription ID |
+| `InvalidAuthenticationTokenTenant` | Tenant ID mismatch | `AZURE_TENANT_ID` must be the **Directory (tenant) ID** from Entra ID, not the Subscription ID |
+| `AADSTS700016: Application not found` | Personal account tenant mismatch | In app registration, change supported account types to include personal accounts (step 1) |
 | `StorageErrorCode.AuthorizationPermissionMismatch` | Storage role missing | Assign Storage Blob Data Contributor (step 7b) |
+| `OperationNotAllowed: Operation results in exceeding quota` | Student vCPU quota hit | Switch `DATABRICKS_NODE_TYPE` to `Standard_DS2_v2` or request quota increase |
 | `groq.AuthenticationError` | Wrong or missing Groq key | Re-check `GROQ_API_KEY` in config.py |
 | `ModuleNotFoundError: No module named 'groq'` | Dependencies not installed | Run `pip install -r unified/requirements.txt` |
-| `node: command not found` | Node.js not installed | Install from nodejs.org (v18 or later) |
+| `node: command not found` | Node.js not installed | Download from nodejs.org — install v18 LTS or later |
+| `python: command not found` | macOS uses `python3` | Use `python3` — all commands in this guide already use `python3` |
+| Role assignment blocked — "You do not have permission" | Not subscription Owner | Confirm you are Owner at Subscriptions → Access control (IAM) |
 
 ---
 
-## Cost Estimates (Development)
+## Cost Estimates (Student Tier)
 
-| Resource | Approximate cost |
-|---|---|
-| Azure Data Factory | ~$1/1000 pipeline runs (free tier: 5 free activities/month) |
-| Azure Storage (LRS) | ~$0.02/GB/month |
-| Azure Databricks (Standard, DS3_v2) | ~$0.10–0.20/hour per cluster — only charged while running |
-| Groq API | Free tier: 14,400 requests/day, 30 requests/minute |
+| Resource | Approximate cost | Student $100 credit impact |
+|---|---|---|
+| Azure Data Factory | ~$1/1000 pipeline runs | Negligible for dev usage |
+| Azure Storage (LRS) | ~$0.02/GB/month | Negligible — test data is tiny |
+| Azure Databricks (DS3_v2, ephemeral) | ~$0.10–0.20/hour per cluster | Low — cluster only runs during pipeline execution |
+| Azure Databricks (DS2_v2, ephemeral) | ~$0.05–0.10/hour per cluster | Even lower — use if quota is tight |
+| Groq API | Free | $0 |
 
 Ephemeral job clusters (the default — `DATABRICKS_CLUSTER_ID = ""`) spin up for each run and shut down automatically, so you only pay for actual compute time.
+
+**To avoid unexpected charges:** do not create an all-purpose interactive cluster in the Databricks UI and leave it running. The project never requires one.

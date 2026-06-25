@@ -5,6 +5,8 @@ __pycache__/
 *.pyd
 .env
 .DS_Store
+*.db
+data/
 
 config.py
 
