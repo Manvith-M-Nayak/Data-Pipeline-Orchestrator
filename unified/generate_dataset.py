@@ -47,8 +47,8 @@ _fake = types.ModuleType("config")
 _fake.GROQ_API_KEY = "synthetic"
 sys.modules.setdefault("config", _fake)
 
-import groq_planner as gp
-from notebook_builder import build_notebook_source, _convert_expr, _convert_filter
+from planner_agent import groq_planner as gp
+from executor_agent.notebook_builder import build_notebook_source, _convert_expr, _convert_filter
 
 random.seed(20260618)
 

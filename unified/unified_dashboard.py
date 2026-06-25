@@ -313,7 +313,7 @@ def run_pipeline_thread(csv_path: str, pipeline_config: dict, schema: dict, resu
 
     try:
         with contextlib.redirect_stdout(tee):
-            from executor import execute_pipeline
+            from executor_agent.executor import execute_pipeline
 
             # Emit progress milestones based on known steps A–K
             step_progress = {
@@ -585,7 +585,7 @@ if st.session_state.stage == "input":
             else:
                 with st.spinner("AI designing unified pipeline..."):
                     try:
-                        from groq_planner import decide_pipeline_config
+                        from planner_agent.groq_planner import decide_pipeline_config
                         config, used_fallback = decide_pipeline_config(
                             st.session_state.schema, prompt_val
                         )
@@ -683,7 +683,7 @@ elif st.session_state.stage == "plan":
     st.session_state.edit_container_names = new_containers
 
     if st.button("Apply Settings", type="primary", use_container_width=True):
-        from groq_planner import decide_pipeline_config
+        from planner_agent.groq_planner import decide_pipeline_config
         container_list = None
         if new_containers.strip():
             container_list = [c.strip() for c in new_containers.split(",")]

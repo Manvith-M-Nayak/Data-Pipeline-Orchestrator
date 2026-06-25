@@ -32,7 +32,7 @@ from config import (
     DATABRICKS_NOTEBOOK_BASE,
 )
 
-from notebook_builder import build_notebook_source
+from .notebook_builder import build_notebook_source
 
 
 ADF_API_VERSION = "2018-06-01"
