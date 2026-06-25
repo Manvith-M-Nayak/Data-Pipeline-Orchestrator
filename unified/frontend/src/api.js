@@ -39,6 +39,35 @@ export const executor = {
   downloadUrl: (container) => `${BASE}/executor/download/${encodeURIComponent(container)}`,
 };
 
+// ── Resource Agent ────────────────────────────────────────────────────────────
+export const resource = {
+  analyze: (plan, csvSizeBytes = 0, schema = null, executionGroups = null) =>
+    req("/resource/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        plan,
+        csv_size_bytes: csvSizeBytes,
+        schema,
+        execution_groups: executionGroups,
+      }),
+    }),
+  reallocate: (liveRuns, allocations, elapsedS = 0) =>
+    req("/resource/reallocate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ live_runs: liveRuns, allocations, elapsed_s: elapsedS }),
+    }),
+  feedback: (body) =>
+    req("/resource/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  accuracy:          () => req("/resource/accuracy"),
+  correctionFactors: () => req("/resource/correction-factors"),
+};
+
 // ── Central Manager ──────────────────────────────────────────────────────────
 export const manager = {
   run: (csvFile, pipelineConfig, schemaObj) => {

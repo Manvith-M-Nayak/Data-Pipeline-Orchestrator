@@ -60,6 +60,7 @@ class RunState:
     # Pre-check outputs
     validation: dict = field(default_factory=dict)
     predictions: dict = field(default_factory=dict)
+    resource_plan: dict = field(default_factory=dict)
     cost_estimate: dict = field(default_factory=dict)
     parallelism: dict = field(default_factory=dict)
     # Execution outputs
@@ -185,16 +186,31 @@ class CentralManager:
         return result
 
     # ────────────────────────────────────────────────────────────────────────
-    # Phase 2a — Resource prediction
+    # Phase 2a — Resource prediction (via Resource Agent)
     # ────────────────────────────────────────────────────────────────────────
-    def predict_resources(self, state: RunState, csv_size_bytes: int) -> dict:
-        plan = state.plan
+    def predict_resources(
+        self, state: RunState, csv_size_bytes: int, schema: dict = None
+    ) -> dict:
+        from resource_agent.resource_agent import ResourceAgent
+        plan   = state.plan
         stages = plan.get("stages", [])
-        rec = plan.get("recommended_settings", {})
-        mb = csv_size_bytes / (1024 * 1024) if csv_size_bytes else 0.0
+        mb     = csv_size_bytes / (1024 * 1024) if csv_size_bytes else 0.0
 
+        # Use execution groups already computed by parallelism analysis (if done)
+        exec_groups = state.parallelism.get("execution_groups") or None
+
+        rp = ResourceAgent().analyze(
+            plan=plan,
+            csv_size_bytes=csv_size_bytes,
+            schema=schema,
+            execution_groups=exec_groups,
+        )
+        state.resource_plan = rp
+
+        # Surface top-level summary into state.predictions for backward compat
         copy_count     = sum(1 for s in stages if s.get("type") == "copy")
         notebook_count = sum(1 for s in stages if s.get("type") == "notebook")
+        rec            = plan.get("recommended_settings", {})
 
         complexity = "low"
         if mb > 100 or len(stages) > 5:
@@ -202,30 +218,42 @@ class CentralManager:
         elif mb > 10 or len(stages) > 2:
             complexity = "medium"
 
-        # Cap at student/free-tier limits
-        suggested_workers = min(int(rec.get("num_workers", 0)), 2)
-
-        # Rough estimate: 60s base + 60s per copy + 120s per notebook + 2s/MB
-        estimated_s = 60 + copy_count * 60 + notebook_count * 120 + int(mb * 2)
-
         result = {
-            "file_size_mb":       round(mb, 2),
-            "stage_count":        len(stages),
-            "copy_stages":        copy_count,
-            "notebook_stages":    notebook_count,
-            "complexity":         complexity,
-            "suggested_workers":  suggested_workers,
-            "estimated_duration_s": estimated_s,
-            "node_type":          rec.get("node_type", "Standard_D4s_v3"),
-            "shuffle_partitions": rec.get("shuffle_partitions", 8),
+            "file_size_mb":         round(mb, 2),
+            "stage_count":          len(stages),
+            "copy_stages":          copy_count,
+            "notebook_stages":      notebook_count,
+            "complexity":           complexity,
+            "suggested_workers":    rp.get("peak_concurrent_workers", 0),
+            "estimated_duration_s": rp.get("estimated_total_s", 0),
+            "node_type":            rec.get("node_type", "Standard_D4s_v3"),
+            "shuffle_partitions":   rec.get("shuffle_partitions", 8),
+            "total_memory_gb":      rp.get("total_memory_gb", 0),
+            "feasible":             rp.get("feasible", True),
+            "correction_factors":   rp.get("correction_factors", {}),
         }
         state.predictions = result
-        self._log(
-            state, "RESOURCE PREDICT",
-            f"{mb:.1f} MB · {len(stages)} stages · complexity={complexity}",
-            f"~{estimated_s}s estimate · {suggested_workers} workers",
-            "info",
-        )
+
+        feasible  = rp.get("feasible", True)
+        violations = rp.get("constraint_violations", [])
+        warnings   = rp.get("warnings", [])
+
+        if not feasible:
+            self._log(
+                state, "RESOURCE PREDICT — INFEASIBLE",
+                "; ".join(violations),
+                "aborting: plan exceeds hard resource limits",
+                "error",
+            )
+        else:
+            warn_str = f" · {len(warnings)} warning(s)" if warnings else ""
+            self._log(
+                state, "RESOURCE PREDICT",
+                f"{mb:.1f} MB · {len(stages)} stages · complexity={complexity}",
+                f"~{rp.get('estimated_total_s', 0)}s · "
+                f"{rp.get('peak_concurrent_workers', 0)} peak workers{warn_str}",
+                "ok" if not warnings else "warn",
+            )
         return result
 
     # ────────────────────────────────────────────────────────────────────────
@@ -542,9 +570,41 @@ class CentralManager:
             }
             with open(log_path, "a") as f:
                 f.write(json.dumps(record) + "\n")
+
+            # Resource Agent self-correction: record actual vs predicted per stage type
+            self._record_resource_feedback(state, actual_duration_s)
+
             self._log(state, "FEEDBACK RECORDED", "→ data/manager_feedback.jsonl", "ok", "ok")
         except Exception as exc:
             self._log(state, "FEEDBACK WARN", str(exc), "non-fatal", "warn")
+
+    def _record_resource_feedback(self, state: RunState, actual_duration_s: float):
+        """Apportion actual duration proportionally across stage types for Resource Agent learning."""
+        try:
+            from resource_agent.resource_agent import ResourceAgent
+            rp = state.resource_plan
+            if not rp:
+                return
+            allocs = rp.get("allocations", [])
+            total_predicted = sum(a.get("duration_s", 0) for a in allocs) or 1
+            agent = ResourceAgent()
+            for alloc in allocs:
+                pred_s = alloc.get("duration_s", 0)
+                if pred_s <= 0:
+                    continue
+                # Proportional actual: each stage gets (pred_s / total_pred) * actual_total
+                actual_s = actual_duration_s * (pred_s / total_predicted)
+                agent.record_actual(
+                    stage_name=alloc.get("stage_name", ""),
+                    stage_type=alloc.get("stage_type", "notebook"),
+                    predicted_duration_s=float(pred_s),
+                    actual_duration_s=actual_s,
+                    predicted_workers=int(alloc.get("workers", 0)),
+                    actual_workers=int(alloc.get("workers", 0)),
+                    run_id=state.run_id,
+                )
+        except Exception as exc:
+            print(f"[Manager] resource feedback non-fatal: {exc}")
 
     # ────────────────────────────────────────────────────────────────────────
     # Public API
@@ -586,9 +646,20 @@ class CentralManager:
             # ── Phase 2: Pre-checks ──────────────────────────────────────
             state.status = "pre_checks"
             self._enter(state, "pre_checks", "Running resource prediction and cost estimation")
-            self.predict_resources(state, csv_size)
-            self.estimate_cost(state, state.predictions)
+            # Parallelism first — Resource Agent uses exec groups for contention detection
             self.analyze_parallelism(state)
+            self.predict_resources(state, csv_size, schema)
+            self.estimate_cost(state, state.predictions)
+
+            # Abort if Resource Agent flagged hard constraint violation
+            if not state.predictions.get("feasible", True):
+                violations = state.resource_plan.get("constraint_violations", [])
+                state.status = "failed"
+                state.error = "Resource constraints violated: " + "; ".join(violations)
+                state.step = "Failed: resource limits exceeded"
+                state.completed_at = _utcnow()
+                await self.record_feedback(state, time.time() - t0)
+                return
 
             # ── Phase 3: Execute ─────────────────────────────────────────
             state.status = "executing"

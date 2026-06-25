@@ -51,6 +51,7 @@ from monitor_agent.routers import anomalies as mon_anomalies
 from planner_agent.router         import router as planner_router
 from executor_agent.router        import router as executor_router
 from central_manager_agent.router import router as manager_router
+from resource_agent.router        import router as resource_router
 
 # ── Service singletons ──────────────────────────────────────────────────────
 db_service      = DBService()
@@ -81,6 +82,7 @@ app.add_middleware(
 app.include_router(planner_router,          prefix="/api/planner",                     tags=["planner"])
 app.include_router(executor_router,         prefix="/api/executor",                    tags=["executor"])
 app.include_router(manager_router,          prefix="/api/manager",                     tags=["manager"])
+app.include_router(resource_router,         prefix="/api/resource",                    tags=["resource"])
 app.include_router(mon_pipelines.router,    prefix="/api/monitor/pipelines",           tags=["monitor-pipelines"])
 app.include_router(mon_logs.router,         prefix="/api/monitor/logs",                tags=["monitor-logs"])
 app.include_router(mon_predictions.router,  prefix="/api/monitor/predictions",         tags=["monitor-predictions"])
@@ -89,7 +91,7 @@ app.include_router(mon_anomalies.router,    prefix="/api/monitor/anomalies",    
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "agents": ["planner", "executor", "monitor", "central_manager"]}
+    return {"status": "ok", "agents": ["planner", "executor", "monitor", "central_manager", "resource"]}
 
 
 # ── Schema detection ────────────────────────────────────────────────────────

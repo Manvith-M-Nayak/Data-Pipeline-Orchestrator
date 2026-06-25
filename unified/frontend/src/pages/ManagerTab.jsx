@@ -177,19 +177,80 @@ function DecisionLog({ decisions }) {
   );
 }
 
-function PredictionsCard({ predictions, cost }) {
+function PredictionsCard({ predictions, cost, resourcePlan }) {
   if (!predictions?.stage_count) return null;
+  const allocs    = resourcePlan?.allocations || [];
+  const feasible  = resourcePlan?.feasible ?? true;
+  const violations = resourcePlan?.constraint_violations || [];
+  const warnings   = resourcePlan?.warnings || [];
+  const factors    = predictions.correction_factors || {};
+
   return (
     <div style={S.card}>
-      <div style={S.cardHdr}><Cpu size={14} color="#38bdf8" />Resource Prediction</div>
+      <div style={S.cardHdr}>
+        <Cpu size={14} color="#38bdf8" />Resource Prediction
+        {resourcePlan && (
+          <span style={{
+            marginLeft: "auto", padding: "2px 8px", borderRadius: 99, fontSize: 11, fontWeight: 700,
+            background: feasible ? "#4ade8022" : "#f8717122", color: feasible ? "#4ade80" : "#f87171",
+          }}>
+            {feasible ? "Feasible" : "Infeasible"}
+          </span>
+        )}
+      </div>
+
+      {/* Constraint violations */}
+      {violations.map((v, i) => (
+        <div key={i} style={{ display: "flex", gap: 6, fontSize: 11, color: "#f87171", marginBottom: 4 }}>
+          <AlertTriangle size={11} style={{ flexShrink: 0, marginTop: 1 }} />{v}
+        </div>
+      ))}
+      {warnings.map((w, i) => (
+        <div key={i} style={{ display: "flex", gap: 6, fontSize: 11, color: "#f59e0b", marginBottom: 4 }}>
+          <AlertTriangle size={11} style={{ flexShrink: 0, marginTop: 1 }} />{w}
+        </div>
+      ))}
+
       <div style={S.kv}>
         <div style={S.kvRow}><span>File size</span><span style={S.kvVal}>{predictions.file_size_mb} MB</span></div>
         <div style={S.kvRow}><span>Stages</span><span style={S.kvVal}>{predictions.stage_count} ({predictions.copy_stages} copy + {predictions.notebook_stages} notebook)</span></div>
         <div style={S.kvRow}><span>Complexity</span><span style={S.kvVal}>{predictions.complexity}</span></div>
-        <div style={S.kvRow}><span>Workers (capped)</span><span style={S.kvVal}>{predictions.suggested_workers}</span></div>
+        <div style={S.kvRow}><span>Peak workers</span><span style={S.kvVal}>{predictions.suggested_workers}</span></div>
+        <div style={S.kvRow}><span>Total memory</span><span style={S.kvVal}>{predictions.total_memory_gb ?? "—"} GB</span></div>
         <div style={S.kvRow}><span>Estimated duration</span><span style={S.kvVal}>~{predictions.estimated_duration_s}s</span></div>
         <div style={S.kvRow}><span>Node type</span><span style={S.kvVal}>{predictions.node_type}</span></div>
+        {(factors.copy || factors.notebook) && (
+          <div style={S.kvRow}>
+            <span>Correction factors</span>
+            <span style={S.kvVal}>{factors.copy}× copy · {factors.notebook}× notebook</span>
+          </div>
+        )}
       </div>
+
+      {/* Per-stage allocations from Resource Agent */}
+      {allocs.length > 0 && (
+        <div style={{ marginTop: 12, borderTop: "1px solid #1e293b", paddingTop: 10 }}>
+          <div style={{ fontSize: 11, color: "#64748b", marginBottom: 8 }}>Stage allocations</div>
+          {allocs.map((a) => (
+            <div key={a.stage_name} style={{
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+              fontSize: 11, color: "#94a3b8", paddingBottom: 4, marginBottom: 4,
+              borderBottom: "1px solid #1e293b",
+            }}>
+              <span style={{ color: "#f1f5f9", fontWeight: 600, minWidth: 120 }}>{a.stage_name}</span>
+              <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                {a.stage_type === "notebook"
+                  ? <span>{a.workers}w · {a.memory_gb}GB · {a.cpu}vCPU</span>
+                  : <span>{a.diu} DIU</span>}
+                <span style={{ color: "#64748b" }}>~{a.duration_s}s</span>
+                {a.right_sized && <span style={{ color: "#4ade80", fontSize: 10 }}>✔ right-sized</span>}
+                {a.contention_adjusted && <span style={{ color: "#f59e0b", fontSize: 10 }}>⚠ adjusted</span>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {cost?.total_usd !== undefined && (
         <div style={{ marginTop: 12, padding: "8px 12px", borderRadius: 8, background: "#0f172a", border: "1px solid #1e293b" }}>
           <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
@@ -512,7 +573,11 @@ export default function ManagerTab() {
           {/* Pre-check cards */}
           {(mgrState.predictions?.stage_count || mgrState.cost_estimate?.total_usd !== undefined) && (
             <div style={S.grid2}>
-              <PredictionsCard predictions={mgrState.predictions} cost={mgrState.cost_estimate} />
+              <PredictionsCard
+                predictions={mgrState.predictions}
+                cost={mgrState.cost_estimate}
+                resourcePlan={mgrState.resource_plan}
+              />
               <ParallelismCard parallelism={mgrState.parallelism} />
             </div>
           )}
