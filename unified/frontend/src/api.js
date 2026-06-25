@@ -43,6 +43,7 @@ export const monitor = {
   getLiveRuns:      ()           => req("/monitor/pipelines/live"),
   getNames:         ()           => req("/monitor/pipelines/names"),
   sync:             (hours = 48) => req(`/monitor/pipelines/sync?hours=${hours}`, { method: "POST" }),
+  cancelRun:        (runId)      => req(`/monitor/pipelines/cancel/${runId}`, { method: "POST" }),
   getStats:         (name)       => req(`/monitor/pipelines/stats/${encodeURIComponent(name)}`),
   getSummary:       ()           => req("/monitor/pipelines/summary"),
   getLogs:          (p = {})     => req(`/monitor/logs/${_qs(p)}`),

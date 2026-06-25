@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { connectWS, monitor } from "../api.js";
-import { AlertTriangle, CheckCircle, Clock } from "lucide-react";
+import { AlertTriangle, CheckCircle, Clock, XCircle } from "lucide-react";
 
 const S = {
   title:  { fontSize: 22, fontWeight: 700, marginBottom: 4, color: "#f1f5f9" },
@@ -22,9 +22,23 @@ function fmtSec(s) {
 }
 
 export default function LiveDashboard() {
-  const [runs, setRuns]     = useState([]);
-  const [ts,   setTs]       = useState(null);
+  const [runs,      setRuns]      = useState([]);
+  const [ts,        setTs]        = useState(null);
   const [completed, setCompleted] = useState([]);
+  const [cancelling, setCancelling] = useState({});
+
+  async function handleCancel(runId) {
+    setCancelling((p) => ({ ...p, [runId]: true }));
+    try {
+      await monitor.cancelRun(runId);
+      setRuns((prev) => prev.filter((r) => r.runId !== runId));
+      monitor.sync(1).catch(() => {});
+    } catch (e) {
+      alert("Cancel failed: " + e.message);
+    } finally {
+      setCancelling((p) => ({ ...p, [runId]: false }));
+    }
+  }
 
   const onWs = useCallback((data) => {
     if (data.event === "live_update") {
@@ -71,9 +85,20 @@ export default function LiveDashboard() {
         <div style={S.grid}>
           {runs.map((r) => (
             <div key={r.runId} style={S.card}>
-              <div style={S.name}>{r.pipelineName}</div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                <div style={S.name}>{r.pipelineName}</div>
+                <button
+                  onClick={() => handleCancel(r.runId)}
+                  disabled={cancelling[r.runId]}
+                  title="Cancel this run"
+                  style={{ background: "none", border: "1px solid #7f1d1d", borderRadius: 6, color: "#f87171", cursor: "pointer", padding: "2px 8px", fontSize: 11, display: "flex", alignItems: "center", gap: 4 }}
+                >
+                  <XCircle size={11} />{cancelling[r.runId] ? "…" : "Cancel"}
+                </button>
+              </div>
               <span style={S.badge}>{r.status}</span>
               <div style={S.meta}><Clock size={13} />Running: {fmtSec(r.elapsedSec)}</div>
+              <div style={{ fontSize: 11, color: "#475569", marginTop: 4 }}>{r.runId?.slice(0, 8)}…</div>
               {r.anomaly && (
                 <div style={S.anomaly}>
                   <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />

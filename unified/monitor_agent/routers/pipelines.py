@@ -1,5 +1,5 @@
-from fastapi import APIRouter, Query
-from monitor_agent.deps import get_db, get_monitor
+from fastapi import APIRouter, Query, HTTPException
+from monitor_agent.deps import get_db, get_monitor, get_adf
 
 router = APIRouter()
 
@@ -23,6 +23,18 @@ async def sync_historical(hours: int = Query(default=48, ge=1, le=168)):
 @router.get("/stats/{pipeline_name}")
 async def pipeline_stats(pipeline_name: str):
     return await get_db().get_historical_stats(pipeline_name)
+
+
+@router.post("/cancel/{run_id}")
+async def cancel_run(run_id: str):
+    ok = await get_adf().cancel_pipeline_run(run_id)
+    if not ok:
+        raise HTTPException(status_code=400, detail=f"Could not cancel run {run_id}")
+    # Remove from live tracking so it no longer shows as running
+    monitor = get_monitor()
+    if monitor and run_id in monitor._tracked:
+        monitor._tracked.pop(run_id, None)
+    return {"cancelled": run_id}
 
 
 @router.get("/summary")

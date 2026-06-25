@@ -117,6 +117,15 @@ export default function ExecutorTab() {
   const fileRef      = useRef();
   const pollRef = useRef();
 
+  function _handleStaleJob() {
+    clearInterval(pollRef.current);
+    setRunning(false);
+    setJobId(null);
+    setJobState(null);
+    setExecStep(-1);
+    setError("Session expired — server was restarted. Click Run Pipeline to start again.");
+  }
+
   // Resume polling if job was running when user switched tabs
   useEffect(() => {
     if (!jobId || jobState?.status !== "running") return;
@@ -129,8 +138,13 @@ export default function ExecutorTab() {
           clearInterval(pollRef.current);
           setRunning(false);
           setExecStep(EXEC_STEPS.length - 1);
+          monitor.sync(2).catch(() => {});
         }
-      } catch {}
+      } catch (e) {
+        if (e.message && (e.message.startsWith("410") || e.message.startsWith("404"))) {
+          _handleStaleJob();
+        }
+      }
     }, 3000);
     return () => clearInterval(pollRef.current);
   }, []); // only on mount
@@ -169,7 +183,6 @@ export default function ExecutorTab() {
       try {
         const s = await executor.status(jobId);
         setJobState(s);
-        // Advance visual step based on the real backend step name
         if (s.step) {
           const idx = EXEC_STEPS.findIndex((label) =>
             s.step.toLowerCase().includes(label.split(" ")[0].toLowerCase())
@@ -180,8 +193,14 @@ export default function ExecutorTab() {
           clearInterval(pollRef.current);
           setRunning(false);
           setExecStep(EXEC_STEPS.length - 1);
+          // Pull this run into the monitor DB immediately
+          monitor.sync(2).catch(() => {});
         }
-      } catch {}
+      } catch (e) {
+        if (e.message && (e.message.startsWith("410") || e.message.startsWith("404"))) {
+          _handleStaleJob();
+        }
+      }
     }, 3000);
     return () => clearInterval(pollRef.current);
   }, [jobId]); // eslint-disable-line

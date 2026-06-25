@@ -492,7 +492,7 @@ def execute_pipeline(csv_path: str, pipeline_config: dict, schema: dict, progres
         if r.status_code not in (200, 201):
             return {"status": "failed", "message": "Copy pipeline creation failed"}
 
-        time.sleep(10)
+        time.sleep(5)
         adf_run_id = trigger_pipeline(token, COPY_PIPELINE_NAME)
         if not adf_run_id:
             return {"status": "failed", "message": "Copy pipeline trigger failed"}

@@ -107,6 +107,14 @@ class ADFService:
             resp.raise_for_status()
         return resp.json().get("value", [])
 
+    async def cancel_pipeline_run(self, run_id: str) -> bool:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                self._factory_url(f"/pipelineRuns/{run_id}/cancel"),
+                headers=await self._headers(), json={}, timeout=15,
+            )
+        return resp.status_code in (200, 202)
+
     async def get_all_pipelines(self) -> List[Dict[str, Any]]:
         async with httpx.AsyncClient() as client:
             resp = await client.get(
