@@ -17,6 +17,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from performance_prediction_agent.router import router as perf_router
 
 # ── Bridge config.py → environment before any service reads os.getenv ──────
 try:
@@ -83,6 +84,7 @@ app.include_router(planner_router,          prefix="/api/planner",              
 app.include_router(executor_router,         prefix="/api/executor",                    tags=["executor"])
 app.include_router(manager_router,          prefix="/api/manager",                     tags=["manager"])
 app.include_router(resource_router,         prefix="/api/resource",                    tags=["resource"])
+app.include_router(perf_router, prefix="/api/performance-prediction", tags=["performance-prediction"])
 app.include_router(mon_pipelines.router,    prefix="/api/monitor/pipelines",           tags=["monitor-pipelines"])
 app.include_router(mon_logs.router,         prefix="/api/monitor/logs",                tags=["monitor-logs"])
 app.include_router(mon_predictions.router,  prefix="/api/monitor/predictions",         tags=["monitor-predictions"])
