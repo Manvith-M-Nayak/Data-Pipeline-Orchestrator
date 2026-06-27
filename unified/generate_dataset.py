@@ -45,6 +45,15 @@ import types
 
 _fake = types.ModuleType("config")
 _fake.GROQ_API_KEY = "synthetic"
+# executor_agent imports Azure/Databricks creds at module top; dataset
+# generation never touches them, so stub with dummies to satisfy the import.
+for _name in (
+    "AZURE_TENANT_ID", "AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET",
+    "AZURE_SUBSCRIPTION_ID", "AZURE_RESOURCE_GROUP", "AZURE_DATA_FACTORY",
+    "AZURE_STORAGE_ACCOUNT", "AZURE_STORAGE_KEY",
+    "DATABRICKS_HOST", "DATABRICKS_TOKEN", "DATABRICKS_NOTEBOOK_BASE",
+):
+    setattr(_fake, _name, "synthetic")
 sys.modules.setdefault("config", _fake)
 
 from planner_agent import groq_planner as gp
@@ -427,7 +436,7 @@ def verify(record, name):
 def main():
     names = list(SCHEMAS.keys())
     plan = []
-    for k in range(100000):
+    for k in range(2000):
         name = names[k % len(names)]
         num_containers = random.choice([3, 3, 3, 4, 4, 5])
         mode = random.choice(["agg", "agg", "tf", "tf", "filter"])
@@ -448,10 +457,11 @@ def main():
               f"filter={'Y' if filt else '-'} xform={'Y' if tf else '-'}"
               + ("" if not errs else "  -> " + "; ".join(errs)))
 
-    with open("synthetic_planner_dataset.json", "w", encoding="utf-8") as f:
-        json.dump(records, f, indent=2)
+    with open("synthetic_planner_dataset.jsonl", "w", encoding="utf-8") as f:
+        for rec in records:
+            f.write(json.dumps(rec, separators=(",", ":")) + "\n")
     print("\n" + ("ALL 20 RECORDS VERIFIED OK" if all_ok else "SOME RECORDS FAILED"))
-    print("Written: synthetic_planner_dataset.json")
+    print("Written: synthetic_planner_dataset.jsonl")
     return 0 if all_ok else 1
 
 
