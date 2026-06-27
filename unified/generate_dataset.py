@@ -198,7 +198,8 @@ def work_aggregate(sd):
     gb = random.choice(list(sd["cat"].keys()))
     measures = list(sd["measures"].items())
     aggs, phrases = [], []
-    for col, kind in random.sample(measures, k=min(2, len(measures))):
+    k = random.randint(1, min(3, len(measures)))
+    for col, kind in random.sample(measures, k=k):
         ops = ["avg", "max", "min"] + (["sum"] if kind == "add" else [])
         op = random.choice(ops)
         aggs.append({"op": op, "column": col, "alias": f"{op}_{col}"})
@@ -220,7 +221,7 @@ def work_transform_filter(sd):
     if convs and random.random() < 0.6:
         src = random.choice(list(convs.keys()))
         newcol, expr, unit = convs[src]
-        thr = random.choice([1, 5, 10, 50])
+        thr = random.choice([1, 2, 3, 5, 8, 10, 15, 25, 50, 75, 100])
         transforms = [f"{newcol} = {expr}"]
         filt = f"{newcol} > {thr}"
         eng = f"convert {src} to {unit} as {newcol}, then keep rows where {newcol} > {thr}"
@@ -253,7 +254,7 @@ def _maybe_simple_filter(sd, allow_cat, force=False):
     meas = [m for m in sd["measures"]]
     if meas:
         m = random.choice(meas)
-        thr = random.choice([10, 50, 100, 500])
+        thr = random.choice([5, 10, 25, 50, 75, 100, 150, 250, 500, 750, 1000])
         options.append((f"{m} > {thr}", f"keep only rows where {m} > {thr}"))
     if allow_cat and sd["cat"]:
         c = random.choice(list(sd["cat"].keys()))
@@ -433,36 +434,87 @@ def verify(record, name):
     return errs
 
 
+def _content_key(rec):
+    """Logical identity of a record: prompt + config only.
+
+    The `samples` rows under schema are random noise (never used by the
+    planner), so two records with identical prompt+config are duplicate
+    training examples even though their JSON bytes differ. Dedup on this.
+    """
+    return json.dumps({"u": rec["user_prompt"], "c": rec["config"]},
+                      sort_keys=True, separators=(",", ":"))
+
+
+TARGET = 5000
+MAX_ATTEMPTS = TARGET * 400  # safety stop if the op-space is exhausted
+SATURATE_AT = 1500           # consecutive collisions on one schema -> exhausted
+
+
 def main():
     names = list(SCHEMAS.keys())
-    plan = []
-    for k in range(2000):
-        name = names[k % len(names)]
+    records, seen = [], set()
+    all_ok = True
+    attempts = collisions = verify_drops = 0
+    saturated = set()                 # schemas whose distinct space is used up
+    streak = {n: 0 for n in names}    # consecutive collisions per schema
+    per_schema = {n: 0 for n in names}
+    rr = 0
+
+    while (len(records) < TARGET and len(saturated) < len(names)
+           and attempts < MAX_ATTEMPTS):
+        attempts += 1
+        # round-robin over schemas that still have unused plans -> keeps the
+        # file balanced, but lets a small-space schema (e.g. transactions) cap
+        # out instead of stalling the whole loop.
+        active = [n for n in names if n not in saturated]
+        name = active[rr % len(active)]
+        rr += 1
         num_containers = random.choice([3, 3, 3, 4, 4, 5])
         mode = random.choice(["agg", "agg", "tf", "tf", "filter"])
-        plan.append((name, build_record(name, num_containers, mode)))
+        rec = build_record(name, num_containers, mode)
 
-    records, all_ok = [], True
-    for i, (name, rec) in enumerate(plan):
+        key = _content_key(rec)
+        if key in seen:           # logical duplicate -> reject, draw again
+            collisions += 1
+            streak[name] += 1
+            if streak[name] >= SATURATE_AT:
+                saturated.add(name)
+                print(f"  [saturated] {name} at {per_schema[name]} unique plans")
+            continue
+
         errs = verify(rec, name)
-        records.append(rec)
-        if errs:
+        if errs:                  # should never fire; never emit a bad record
             all_ok = False
-        agg = any(s.get("aggregation") for s in rec["config"]["stages"])
-        filt = any(s.get("filter_condition") for s in rec["config"]["stages"])
-        tf = any(len([t for t in s.get("transformations", []) if "processed_time" not in t]) > 0
-                 for s in rec["config"]["stages"])
-        print(f"[{'OK ' if not errs else 'FAIL'}] #{i:02d} {name:<14} "
-              f"stages={rec['config']['num_containers']-1} agg={'Y' if agg else '-'} "
-              f"filter={'Y' if filt else '-'} xform={'Y' if tf else '-'}"
-              + ("" if not errs else "  -> " + "; ".join(errs)))
+            verify_drops += 1
+            print(f"[FAIL] dropped {name}: {'; '.join(errs)}")
+            continue
+
+        streak[name] = 0
+        seen.add(key)
+        per_schema[name] += 1
+        records.append(rec)
+        if len(records) % 500 == 0:
+            print(f"  accepted {len(records):>4}/{TARGET}  "
+                  f"(attempts={attempts}, collisions={collisions})")
 
     with open("synthetic_planner_dataset.jsonl", "w", encoding="utf-8") as f:
         for rec in records:
             f.write(json.dumps(rec, separators=(",", ":")) + "\n")
-    print("\n" + ("ALL 20 RECORDS VERIFIED OK" if all_ok else "SOME RECORDS FAILED"))
+
+    print(f"\nunique records written : {len(records)}")
+    print(f"per-schema counts      : "
+          + ", ".join(f"{n}={per_schema[n]}" for n in names))
+    print(f"attempts               : {attempts}")
+    print(f"collisions rejected    : {collisions}")
+    print(f"verify drops           : {verify_drops}")
+    short = len(records) < TARGET
+    if short:
+        print(f"WARNING: op-space exhausted before {TARGET}; "
+              f"widen schemas/ops for more.")
+    print("ALL RECORDS VERIFIED OK & UNIQUE" if all_ok and not short
+          else "SOME RECORDS FAILED OR TARGET NOT MET")
     print("Written: synthetic_planner_dataset.jsonl")
-    return 0 if all_ok else 1
+    return 0 if all_ok and not short else 1
 
 
 if __name__ == "__main__":

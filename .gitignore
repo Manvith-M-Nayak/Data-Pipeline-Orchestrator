@@ -16,6 +16,8 @@ planner.xml
 llama/datasets
 
 *.json
+*.jsonl
+
 !unified/frontend/package.json
 !unified/frontend/package-lock.json
 
