@@ -46,4 +46,31 @@ python evaluate.py
 If the file is missing, `prepare_data.py` writes a tiny 3-example sample so the
 pipeline still runs end to end.
 
-> Stages 2–4 are added in subsequent commits.
+## Output contract (what Stage 4 scores)
+
+The model emits `{"config": <config>, "used_fallback": <bool>}`. `config` has exactly
+9 keys: `containers`, `containers_to_create`, `datasets`, `stages`, `execution_order`,
+`num_containers`, `recommended_settings`, `editable_settings`, `reasoning`.
+Rules checked: `stages[0].type == "copy"` (ADF ingest), later stages `"notebook"`
+(Databricks); `execution_order` equals stage names in order;
+`num_containers == len(containers_to_create)`;
+`datasets` has ≥1 `source` and ≥1 `sink` with known containers;
+`recommended_settings` has exactly `diu`, `num_workers`, `shuffle_partitions`,
+`node_type`.
+
+## Stage 4 metrics
+
+`evaluate.py` generates twice per held-out prompt (base vs `--adapter-path
+planner_adapter`), prints them side by side, then tabulates:
+
+| metric | meaning |
+|--------|---------|
+| Valid-JSON rate | output parses as JSON |
+| Contract adherence | parsed output satisfies the 9-key contract |
+| Settings-key match | `recommended_settings` has exactly the 4 knobs |
+| Token similarity | avg Jaccard token overlap vs reference |
+
+Ends with a `metric | base | fine-tuned | delta` table. Expected story: the
+fine-tuned model scores far higher on valid-JSON and contract adherence.
+
+Models are loaded **sequentially** (one 3B at a time) to stay 16 GB-safe.
