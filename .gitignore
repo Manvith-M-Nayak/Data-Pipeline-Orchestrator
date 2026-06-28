@@ -18,6 +18,10 @@ llama/datasets
 *.json
 *.jsonl
 
+*.zip
+
+unified/planner_agent/model/planner_agent_lora/
+
 !unified/frontend/package.json
 !unified/frontend/package-lock.json
 
