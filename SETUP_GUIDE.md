@@ -300,6 +300,26 @@ Full build details (prereqs, disk, test command) are in
 > To skip the local model and use Groq for the planner too, set
 > `PLANNER_BACKEND = "groq"` in `unified/config.py`.
 
+### Running it (after the one-time build)
+
+The model is built once. Day-to-day you only need Ollama running plus the
+backend:
+
+```bash
+# Ollama server — make it permanent (auto-starts at login, survives reboots):
+brew services start ollama
+#   …or run it temporarily in a terminal for this session only:
+#   ollama serve
+
+# Backend:
+cd unified
+source venv/bin/activate
+python main.py
+```
+
+Verify the model is registered: `ollama list` should show `planner-agent`.
+You do **not** rebuild the model each time.
+
 ---
 
 ## 9. Fill in `unified/config.py`
