@@ -7,9 +7,9 @@ The model was fine-tuned on a fixed contract:
   user    : JSON string {"schema": {...}, "user_prompt": "..."}
   output  : a single compact JSON pipeline config (no prose)
 
-We send that exact contract to Ollama, then reuse the structural validation,
-stage-trimming and deterministic fallback from groq_planner so the rest of the
-pipeline (manager, executor, notebook builder) sees an identical config shape.
+We send that exact contract to Ollama, then reuse the structural validation
+and deterministic fallback from planner_common so the rest of the pipeline
+(manager, executor, notebook builder) sees an identical config shape.
 On any connection / JSON / validation error we fall back to build_default_config.
 """
 
@@ -18,7 +18,7 @@ import os
 
 import requests
 
-from .groq_planner import (
+from .planner_common import (
     DEFAULT_EDITABLE_SETTINGS,
     MAX_CONTAINERS,
     _print_plan_summary,
