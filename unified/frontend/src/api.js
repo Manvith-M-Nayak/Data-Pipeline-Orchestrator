@@ -67,6 +67,20 @@ export const resource = {
   accuracy:          () => req("/resource/accuracy"),
   correctionFactors: () => req("/resource/correction-factors"),
 };
+export const perfPrediction = {
+  predict: (resourcePlan, predictions, plan, slaTargetS = 900) =>
+    req("/performance-prediction/predict", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        resource_plan: resourcePlan,
+        predictions,
+        plan,
+        sla_target_s: slaTargetS,
+      }),
+    }),
+  history: () => req("/performance-prediction/history"),
+};
 
 // ── Central Manager ──────────────────────────────────────────────────────────
 export const manager = {

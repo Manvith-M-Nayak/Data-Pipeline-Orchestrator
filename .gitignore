@@ -16,10 +16,19 @@ planner.xml
 llama/datasets
 
 *.json
+*.jsonl
+
+*.zip
+
+unified/planner_agent/model/planner_agent_lora/
+
+!unified/frontend/package.json
+!unified/frontend/package-lock.json
 
 CLAUDE.md
 
 CENTRAL_PLANNER_OVERVIEW.md
 MONITOR_AGENT_DETAILED_OVERVIEW.md
+PLANNER_MODEL_LEARN.md
 
 node_modules/

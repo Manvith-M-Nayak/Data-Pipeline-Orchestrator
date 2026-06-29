@@ -1,0 +1,18 @@
+# Ollama Modelfile for the fine-tuned planner agent.
+# Build with build_ollama_model.sh, which produces planner-agent-lora.gguf
+# and pulls the base, then runs:
+#   ollama create planner-agent -f Modelfile
+
+# Base model pulled from the Ollama registry (resumable, no 15GB HF download).
+FROM qwen2.5:7b-instruct
+
+# Fine-tuned LoRA adapter (converted from planner_agent_lora.zip), applied on load.
+ADAPTER ./planner-agent-lora.gguf
+
+# Deterministic-ish decoding, matches the eval settings used at fine-tune time.
+PARAMETER temperature 0.2
+PARAMETER top_p 0.8
+PARAMETER num_ctx 2048
+
+# Exact system prompt the adapter was trained with (do not edit).
+SYSTEM """You are the Planner Agent for a data pipeline orchestrator. Given CSV schema metadata and a user transformation request, output ONLY a JSON pipeline configuration with keys: containers, containers_to_create, datasets, stages, execution_order, num_containers, recommended_settings, editable_settings, reasoning. The first stage has type 'copy' (ADF ingest); all later stages have type 'notebook' (Databricks PySpark). Output compact JSON only, no prose."""

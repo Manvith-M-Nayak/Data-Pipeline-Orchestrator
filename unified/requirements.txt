@@ -10,6 +10,9 @@ requests==2.32.3
 aiosqlite==0.20.0
 
 # AI
+# groq SDK powers the monitor / self-healing agents (analysis, prediction).
+# The planner now runs the local fine-tuned model via Ollama (HTTP, uses
+# `requests` above) — see planner_agent/model/README_OLLAMA.md.
 groq==0.9.0
 urllib3>=1.26
 
