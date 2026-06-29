@@ -2,27 +2,27 @@
 #
 # Build the `planner-agent` Ollama model from the fine-tuned LoRA adapter.
 #
-# Pipeline:
-#   1. unzip the LoRA adapter            -> ./adapter
-#   2. merge adapter into FP16 base      -> ./merged   (merge_adapter.py)
-#   3. convert merged HF model to GGUF   -> ./planner-agent-f16.gguf  (llama.cpp)
-#   4. quantize to Q4_K_M                -> ./planner-agent.gguf
-#   5. register with Ollama              -> model name `planner-agent`
+# Adapter path (no 15GB base download, no merge):
+#   1. unzip the LoRA adapter             -> ./adapter
+#   2. clone llama.cpp                     -> ./llama.cpp
+#   3. convert LoRA adapter to GGUF        -> ./planner-agent-lora.gguf
+#   4. pull base model via Ollama          (qwen2.5:7b-instruct, resumable)
+#   5. register base + adapter with Ollama -> model name `planner-agent`
 #
-# Run from this directory:
+# Run from this directory (any venv with `torch`, `transformers`, `peft`):
 #   bash build_ollama_model.sh
 #
-# Requirements: python (peft, transformers, torch), git, cmake, ollama.
+# Requirements: python (torch, transformers, peft), git, ollama (running).
 set -euo pipefail
 
 cd "$(dirname "$0")"
 
 ADAPTER_ZIP="planner_agent_lora.zip"
 ADAPTER_DIR="./adapter"
-MERGED_DIR="./merged"
 LLAMA_CPP_DIR="./llama.cpp"
-GGUF_F16="./planner-agent-f16.gguf"
-GGUF_Q4="./planner-agent.gguf"
+LORA_GGUF="./planner-agent-lora.gguf"
+BASE_MODEL="qwen2.5:7b-instruct"
+BASE_MODEL_ID="Qwen/Qwen2.5-7B-Instruct"   # config-only, for tensor metadata
 OLLAMA_MODEL="planner-agent"
 
 # 1. unzip adapter -----------------------------------------------------------
@@ -31,36 +31,27 @@ if [ ! -d "$ADAPTER_DIR" ]; then
     unzip -o "$ADAPTER_ZIP" -d "$ADAPTER_DIR"
 fi
 
-# 2. merge adapter into full-precision base ----------------------------------
-if [ ! -d "$MERGED_DIR" ]; then
-    echo "==> Merging LoRA adapter into base (this downloads Qwen2.5-7B-Instruct ~15GB)"
-    python merge_adapter.py --adapter "$ADAPTER_DIR" --out "$MERGED_DIR"
-fi
-
-# 3. clone + build llama.cpp converter ---------------------------------------
+# 2. clone llama.cpp (for the LoRA->GGUF converter) --------------------------
 if [ ! -d "$LLAMA_CPP_DIR" ]; then
     echo "==> Cloning llama.cpp"
     git clone --depth 1 https://github.com/ggml-org/llama.cpp "$LLAMA_CPP_DIR"
 fi
-pip install -q -r "$LLAMA_CPP_DIR/requirements.txt"
+# converter deps; the torch pin in this file may not resolve — ignore, an
+# already-installed torch/transformers/peft is sufficient for conversion.
+pip install -q -r "$LLAMA_CPP_DIR/requirements.txt" || true
 
-# 4. convert HF -> GGUF (f16) ------------------------------------------------
-if [ ! -f "$GGUF_F16" ]; then
-    echo "==> Converting merged model to GGUF (f16)"
-    python "$LLAMA_CPP_DIR/convert_hf_to_gguf.py" "$MERGED_DIR" \
-        --outfile "$GGUF_F16" --outtype f16
+# 3. convert LoRA adapter -> GGUF (downloads only the base config, ~KB) ------
+if [ ! -f "$LORA_GGUF" ]; then
+    echo "==> Converting LoRA adapter to GGUF"
+    python "$LLAMA_CPP_DIR/convert_lora_to_gguf.py" "$ADAPTER_DIR" \
+        --base-model-id "$BASE_MODEL_ID" --outtype f16 --outfile "$LORA_GGUF"
 fi
 
-# 5. quantize f16 -> Q4_K_M --------------------------------------------------
-if [ ! -f "$GGUF_Q4" ]; then
-    echo "==> Building llama-quantize"
-    cmake -S "$LLAMA_CPP_DIR" -B "$LLAMA_CPP_DIR/build" -DLLAMA_CURL=OFF >/dev/null
-    cmake --build "$LLAMA_CPP_DIR/build" --target llama-quantize -j >/dev/null
-    echo "==> Quantizing to Q4_K_M"
-    "$LLAMA_CPP_DIR/build/bin/llama-quantize" "$GGUF_F16" "$GGUF_Q4" Q4_K_M
-fi
+# 4. pull the base model via Ollama (resumable) ------------------------------
+echo "==> Pulling base model: $BASE_MODEL"
+ollama pull "$BASE_MODEL"
 
-# 6. register with Ollama ----------------------------------------------------
+# 5. register base + adapter with Ollama -------------------------------------
 echo "==> Creating Ollama model: $OLLAMA_MODEL"
 ollama create "$OLLAMA_MODEL" -f Modelfile
 

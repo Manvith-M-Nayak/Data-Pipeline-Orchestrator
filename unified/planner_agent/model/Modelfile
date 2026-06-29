@@ -1,8 +1,13 @@
 # Ollama Modelfile for the fine-tuned planner agent.
-# Build the GGUF first with build_ollama_model.sh, then:
+# Build with build_ollama_model.sh, which produces planner-agent-lora.gguf
+# and pulls the base, then runs:
 #   ollama create planner-agent -f Modelfile
 
-FROM ./planner-agent.gguf
+# Base model pulled from the Ollama registry (resumable, no 15GB HF download).
+FROM qwen2.5:7b-instruct
+
+# Fine-tuned LoRA adapter (converted from planner_agent_lora.zip), applied on load.
+ADAPTER ./planner-agent-lora.gguf
 
 # Deterministic-ish decoding, matches the eval settings used at fine-tune time.
 PARAMETER temperature 0.2

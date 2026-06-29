@@ -4,28 +4,32 @@ Turn the fine-tuned LoRA adapter (`planner_agent_lora.zip`) into a local Ollama
 model named `planner-agent`, used by the unified backend in place of the Groq
 planner.
 
+This uses the **adapter path**: the base model is pulled from the Ollama
+registry (resumable) and the LoRA is converted to a small GGUF and applied on
+load — no 15 GB HuggingFace download, no full merge.
+
 ## Contents
 | File | Purpose |
 |------|---------|
 | `planner_agent_lora.zip` | LoRA adapter (Qwen2.5-7B-Instruct, from fine-tune) |
-| `merge_adapter.py` | Merge adapter into FP16 base → standalone HF model |
-| `build_ollama_model.sh` | One-shot: unzip → merge → GGUF → quantize → `ollama create` |
-| `Modelfile` | Ollama recipe (base GGUF + training system prompt + params) |
+| `build_ollama_model.sh` | One-shot: unzip → LoRA→GGUF → pull base → `ollama create` |
+| `Modelfile` | Ollama recipe (`FROM qwen2.5:7b-instruct` + `ADAPTER` + system prompt) |
 | `planner finetune.ipynb` | Original training notebook (reference) |
 
 ## Prerequisites
-- [Ollama](https://ollama.com) installed and running (`ollama serve`)
-- Python with `torch`, `transformers`, `peft`
-- `git`, `cmake` (to build llama.cpp's quantizer)
-- ~30 GB free disk (base download + merged + GGUF artifacts)
+- [Ollama](https://ollama.com) installed and running (`ollama serve` or `brew services start ollama`)
+- Python with `torch`, `transformers`, `peft` (a throwaway venv is fine — these
+  are only needed for the one-time LoRA→GGUF conversion, not to run the model)
+- `git`
 
 ## Build
 ```bash
 cd unified/planner_agent/model
 bash build_ollama_model.sh
 ```
-First run downloads the base `Qwen/Qwen2.5-7B-Instruct` (~15 GB) and builds
-`planner-agent.gguf` (Q4_K_M). Re-runs skip completed stages.
+Pulls base `qwen2.5:7b-instruct` (~4.7 GB, resumable) and converts the adapter
+to `planner-agent-lora.gguf` (~80 MB), then registers `planner-agent`. Re-runs
+skip completed stages.
 
 ## Test
 ```bash
@@ -37,7 +41,9 @@ The system prompt is baked into the `Modelfile`, so it does not need to be sent
 at call time. The user message is the JSON `{"schema": {...}, "user_prompt": "..."}`.
 
 ## Notes
-- Build artifacts (`adapter/`, `merged/`, `llama.cpp/`, `*.gguf`) are generated
-  locally and should not be committed.
-- Quantization is Q4_K_M for Mac/CPU. For higher fidelity on a GPU box, skip
-  step 5 and point the `Modelfile` `FROM` at `planner-agent-f16.gguf`.
+- Build artifacts (`adapter/`, `llama.cpp/`, `*.gguf`) are generated locally and
+  should not be committed (see `.gitignore`).
+- The base model lives in Ollama's store (`~/.ollama/models`), not in this repo.
+- The `convert_lora_to_gguf.py` step may print a `torch==2.11.0` pip resolution
+  error from llama.cpp's `requirements.txt`; it is harmless — conversion runs on
+  whatever recent torch is already installed.
