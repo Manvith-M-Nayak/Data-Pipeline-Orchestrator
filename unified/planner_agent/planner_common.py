@@ -212,19 +212,21 @@ def _normalize_container_names(config: dict) -> dict:
     if not originals:
         return config
 
-    mapping, seen = {}, {}
+    mapping, used = {}, set()
+    cleaned = []
     for orig in originals:
-        clean = _sanitize_container_name(orig)
-        if clean in seen.values():
-            n = seen.get(clean, 1) + 1
-            seen[clean] = n
-            clean = _sanitize_container_name(f"{clean}-{n}")
-        seen[clean] = seen.get(clean, 1)
+        base = _sanitize_container_name(orig)
+        clean, n = base, 1
+        while clean in used:
+            n += 1
+            clean = _sanitize_container_name(f"{base}-{n}")
+        used.add(clean)
+        cleaned.append(clean)
         mapping[orig] = clean
 
     remap = lambda v: mapping.get(v, _sanitize_container_name(v)) if v else v
 
-    config["containers_to_create"] = [mapping[o] for o in originals]
+    config["containers_to_create"] = cleaned
     if isinstance(config.get("containers"), dict):
         config["containers"] = {k: remap(v) for k, v in config["containers"].items()}
     for ds in config.get("datasets", []):
