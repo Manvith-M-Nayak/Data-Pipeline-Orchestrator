@@ -67,6 +67,7 @@ class RunState:
     executor_result: Optional[dict] = None
     # Post-execution outputs
     assurance: dict = field(default_factory=dict)
+    performance_prediction: dict = field(default_factory=dict)
 
 
 # ── CentralManager ───────────────────────────────────────────────────────────
@@ -306,7 +307,68 @@ class CentralManager:
                 "warn",
             )
         return result
-
+# PASTE THIS METHOD:
+ 
+    # ────────────────────────────────────────────────────────────────────────
+    # Phase 2b.5 — Performance prediction (via Performance Prediction Agent)
+    # ────────────────────────────────────────────────────────────────────────
+    def predict_performance(
+        self,
+        state: "RunState",
+        sla_target_s: int = 900,
+    ) -> dict:
+        """
+        Calls the PerformancePredictionAgent with the already-populated
+        state.resource_plan and state.predictions (set by predict_resources).
+ 
+        Must be called AFTER predict_resources() in Phase 2.
+ 
+        Stores result on state.performance_prediction and logs a summary.
+        Returns the prediction dict.
+        """
+        from performance_prediction_agent.performance_agent import PerformancePredictionAgent
+ 
+        result = PerformancePredictionAgent().predict(
+            resource_plan=state.resource_plan,
+            predictions=state.predictions,
+            plan=state.plan,
+            sla_target_s=sla_target_s,
+        )
+        state.performance_prediction = result
+ 
+        outcome    = result.get("outcome", "unknown")
+        total_s    = result.get("predicted_total_s", 0)
+        bottleneck = result.get("bottleneck_stage", "?")
+        confidence = result.get("confidence", 0.0)
+        sla_risk   = result.get("sla_breach_risk", False)
+ 
+        level = "ok"
+        if outcome == "failure":
+            level = "error"
+        elif outcome == "slowdown" or sla_risk:
+            level = "warn"
+ 
+        self._log(
+            state, "PERF PREDICT",
+            f"outcome={outcome} · total={total_s}s · bottleneck='{bottleneck}' · "
+            f"confidence={confidence:.0%}{'  ⚠ SLA BREACH RISK' if sla_risk else ''}",
+            f"history_runs_used={result.get('history_runs_used', 0)} · "
+            f"adj_factor={result.get('adjustment_factor', 1.0):.3f}",
+            level,
+        )
+ 
+        if outcome == "failure":
+            self._log(
+                state, "PERF PREDICT — ABORT",
+                f"Performance prediction classified outcome as FAILURE "
+                f"(confidence {confidence:.0%}). Stopping run early.",
+                "aborting — predicted failure before execution",
+                "error",
+            )
+ 
+        return result
+ 
+ 
     # ────────────────────────────────────────────────────────────────────────
     # Phase 2c — Parallelism analysis
     # ────────────────────────────────────────────────────────────────────────
@@ -650,6 +712,7 @@ class CentralManager:
             self.analyze_parallelism(state)
             self.predict_resources(state, csv_size, schema)
             self.estimate_cost(state, state.predictions)
+            perf = self.predict_performance(state)
 
             # Abort if Resource Agent flagged hard constraint violation
             if not state.predictions.get("feasible", True):
@@ -661,6 +724,19 @@ class CentralManager:
                 await self.record_feedback(state, time.time() - t0)
                 return
 
+            # Abort if Performance Agent predicts certain failure
+            if perf.get("outcome") == "failure":
+                state.status = "failed"
+                state.error = (
+                    f"Performance prediction: outcome=failure "
+                    f"(confidence {perf.get('confidence', 0):.0%}). "
+                    f"Bottleneck: '{perf.get('bottleneck_stage', '?')}'. "
+                    f"Rationale: {perf.get('rationale', '')[:200]}"
+                )
+                state.step = "Failed: performance prediction aborted run"
+                state.completed_at = _utcnow()
+                await self.record_feedback(state, time.time() - t0)
+                return
             # ── Phase 3: Execute ─────────────────────────────────────────
             state.status = "executing"
             self._enter(state, "executing", "Handing off to Executor Agent")
