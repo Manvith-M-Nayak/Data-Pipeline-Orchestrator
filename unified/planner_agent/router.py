@@ -1,7 +1,7 @@
 import asyncio
 from fastapi import APIRouter
 from fastapi.concurrency import run_in_threadpool
-from .groq_planner import decide_pipeline_config
+from . import decide_pipeline_config
 
 router = APIRouter()
 
