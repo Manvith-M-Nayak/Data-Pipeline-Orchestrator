@@ -30,6 +30,9 @@ try:
         "AZURE_RESOURCE_GROUP":  getattr(_cfg, "AZURE_RESOURCE_GROUP",  ""),
         "ADF_FACTORY_NAME":      getattr(_cfg, "AZURE_DATA_FACTORY",    ""),
         "GROQ_API_KEY":          getattr(_cfg, "GROQ_API_KEY",          ""),
+        "PLANNER_BACKEND":       getattr(_cfg, "PLANNER_BACKEND",       "ollama"),
+        "OLLAMA_HOST":           getattr(_cfg, "OLLAMA_HOST",           "http://localhost:11434"),
+        "PLANNER_MODEL":         getattr(_cfg, "PLANNER_MODEL",         "planner-agent"),
     }
     for k, v in _BRIDGE.items():
         if v:
