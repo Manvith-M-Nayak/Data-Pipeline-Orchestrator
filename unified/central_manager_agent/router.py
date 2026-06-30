@@ -16,6 +16,7 @@ async def start_managed_run(
     csv_file:        UploadFile = File(...),
     pipeline_config: str        = Form(...),
     schema:          str        = Form(...),
+    user_request:    str        = Form(""),
 ):
     """
     Kick off a fully-managed pipeline run.
@@ -40,7 +41,7 @@ async def start_managed_run(
 
     async def _task():
         try:
-            await _manager.execute_run(run_id, tmp.name, schema_dict, csv_size)
+            await _manager.execute_run(run_id, tmp.name, schema_dict, csv_size, user_request)
         finally:
             try:
                 os.unlink(tmp.name)
