@@ -14,7 +14,7 @@ The Assurance Agent only VERIFIES — it never generates or mutates a plan.
 
 import json
 
-from .config_loader import load_allowed_operations, load_stage_ordering
+from .config_loader import load_allowed_operations, load_stage_ordering, normalize_schema
 from .result import AssuranceResult
 from .semantic import check_intent
 from .structural import StructuralValidator
@@ -39,7 +39,8 @@ class AssuranceAgent:
         schema: dict,
         run_semantic: bool = True,
     ) -> AssuranceResult:
-        # 1. structural (deterministic)
+        # 1. structural (deterministic) — accept any schema shape the project emits
+        schema = normalize_schema(schema)
         structural_results = self.structural.validate(plan, schema)
         structural_pass = all(c.passed for c in structural_results)
 
