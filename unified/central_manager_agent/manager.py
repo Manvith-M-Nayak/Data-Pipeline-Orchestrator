@@ -48,15 +48,18 @@ def _utcnow() -> str:
 class RunState:
     run_id: str
     status: str = "pending"
-    # pending | validating | pre_checks | executing | assurance | feedback | completed | failed
+    # pending | validating | assuring_plan | pre_checks | executing | assurance | feedback | completed | failed
     phase: str = "init"
     step: str = "Queued"
     plan: dict = field(default_factory=dict)
+    user_request: str = ""   # original Planner prompt — drives the semantic assurance layer
     decisions: List[Dict[str, Any]] = field(default_factory=list)
     retries: int = 0
     started_at: str = ""
     completed_at: Optional[str] = None
     error: Optional[str] = None
+    # Independent plan verification (Assurance Agent — structural + semantic)
+    plan_assurance: dict = field(default_factory=dict)
     # Pre-check outputs
     validation: dict = field(default_factory=dict)
     predictions: dict = field(default_factory=dict)
@@ -185,6 +188,61 @@ class CentralManager:
                 "aborting run", "error",
             )
         return result
+
+    # ────────────────────────────────────────────────────────────────────────
+    # Phase 1.5 — Independent plan assurance (Assurance Agent)
+    #   Structural layer (deterministic) is an authoritative gate: a failure
+    #   aborts the run. Semantic layer (base LLM) is advisory — it warns about
+    #   intent mismatches but never aborts. Independent of the Planner: shares
+    #   no generation logic and uses clean base weights (no LoRA adapter).
+    # ────────────────────────────────────────────────────────────────────────
+    async def run_plan_assurance(self, state: RunState, schema: dict) -> dict:
+        from assurance_agent import AssuranceAgent
+        from fastapi.concurrency import run_in_threadpool
+
+        self._enter(state, "assuring_plan", "Verifying plan with Assurance Agent")
+
+        # Semantic layer only runs if we have the original request to compare against.
+        run_semantic = bool(state.user_request)
+        try:
+            agent = AssuranceAgent()
+            result = await run_in_threadpool(
+                agent.assure, state.user_request, state.plan, schema, run_semantic
+            )
+            d = result.to_dict()
+        except Exception as exc:
+            # Never let a verifier crash the orchestrator — fail open with a warning.
+            self._log(state, "ASSURE ERROR", str(exc)[:200],
+                      "skipping assurance (fail-open)", "warn")
+            d = {"overall_status": "pass", "structural_results": [],
+                 "semantic_result": None, "summary": "assurance skipped (error)",
+                 "tiers": {"failure": None}}
+            state.plan_assurance = d
+            return d
+
+        state.plan_assurance = d
+
+        for c in d["structural_results"]:
+            self._log(
+                state, f"ASSURE: {c['label']}", c["message"],
+                "pass" if c["passed"] else "FAIL",
+                "ok" if c["passed"] else "error",
+            )
+
+        sem = d.get("semantic_result")
+        if sem and sem.get("available"):
+            if sem.get("flagged"):
+                self._log(state, "ASSURE: Intent match", sem["reasoning"],
+                          "flagged — advisory, human may override", "warn")
+            else:
+                self._log(state, "ASSURE: Intent match", "plan matches request",
+                          "ok", "ok")
+
+        self._log(
+            state, "ASSURANCE COMPLETE", d["summary"], d["overall_status"],
+            "ok" if d["overall_status"] == "pass" else "error",
+        )
+        return d
 
     # ────────────────────────────────────────────────────────────────────────
     # Phase 2a — Resource prediction (via Resource Agent)
@@ -626,6 +684,7 @@ class CentralManager:
                 "predicted_duration_s": state.predictions.get("estimated_duration_s"),
                 "cost_estimate_usd":   state.cost_estimate.get("total_usd"),
                 "assurance_passed":    state.assurance.get("passed"),
+                "plan_assurance_passed": state.plan_assurance.get("overall_status") == "pass" if state.plan_assurance else None,
                 "used_fallback":       state.plan.get("used_fallback", False),
                 "complexity":          state.predictions.get("complexity"),
                 "validation_issues":   state.validation.get("issues", []),
@@ -688,9 +747,11 @@ class CentralManager:
         csv_path: str,
         schema: dict,
         csv_size: int,
+        user_request: str = "",
     ):
         """Main orchestration entry point — drives the complete run lifecycle."""
         state = self._runs[run_id]
+        state.user_request = user_request or state.user_request
         t0 = time.time()
 
         try:
@@ -705,16 +766,31 @@ class CentralManager:
                 await self.record_feedback(state, time.time() - t0)
                 return
 
+            # ── Phase 1.5: Plan assurance (independent verifier) ─────────
+            state.status = "assuring_plan"
+            pa = await self.run_plan_assurance(state, schema)
+            if pa.get("overall_status") != "pass":
+                failing = [c["label"] for c in pa.get("structural_results", []) if not c["passed"]]
+                state.status = "failed"
+                state.error = (
+                    "Assurance Agent rejected plan — "
+                    + (pa.get("tiers", {}).get("failure") or ("failed: " + ", ".join(failing)))
+                )
+                state.step = "Failed: plan failed assurance"
+                state.completed_at = _utcnow()
+                await self.record_feedback(state, time.time() - t0)
+                return
+
             # ── Phase 2: Pre-checks ──────────────────────────────────────
             state.status = "pre_checks"
             self._enter(state, "pre_checks", "Running resource prediction and cost estimation")
             # Parallelism first — Resource Agent uses exec groups for contention detection
             self.analyze_parallelism(state)
             self.predict_resources(state, csv_size, schema)
-            self.estimate_cost(state, state.predictions)
-            perf = self.predict_performance(state)
 
-            # Abort if Resource Agent flagged hard constraint violation
+            # Abort on hard resource-constraint violation BEFORE cost/perf —
+            # an infeasible plan yields incomplete estimates that would crash
+            # the downstream predictors.
             if not state.predictions.get("feasible", True):
                 violations = state.resource_plan.get("constraint_violations", [])
                 state.status = "failed"
@@ -723,6 +799,9 @@ class CentralManager:
                 state.completed_at = _utcnow()
                 await self.record_feedback(state, time.time() - t0)
                 return
+
+            self.estimate_cost(state, state.predictions)
+            perf = self.predict_performance(state)
 
             # Abort if Performance Agent predicts certain failure
             if perf.get("outcome") == "failure":

@@ -13,6 +13,9 @@ aiosqlite==0.20.0
 # groq SDK powers the monitor / self-healing agents (analysis, prediction).
 # The planner now runs the local fine-tuned model via Ollama (HTTP, uses
 # `requests` above) — see planner_agent/model/README_OLLAMA.md.
+# The assurance_agent verifies planner output: its structural layer is pure
+# stdlib, its semantic layer reuses `requests` to call the BASE model
+# qwen2.5:7b-instruct via Ollama (no LoRA) — see assurance_agent/README.md.
 groq==0.9.0
 urllib3>=1.26
 
