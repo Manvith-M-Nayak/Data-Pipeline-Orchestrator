@@ -246,6 +246,16 @@ def _structural_validate(config: dict, schema: dict = None) -> dict:
     schema = schema or {}
     config = _normalize_container_names(config)
     stages = config.get("stages", [])
+
+    # Size-aware ceilings: the LLM can over-provision workers (e.g. 4 workers on
+    # a tiny CSV → 68 GB cluster, infeasible). Clamp every notebook stage to the
+    # worker/shuffle counts recommended for the detected data size so small data
+    # never demands a big cluster. This is a deterministic guardrail, not a model
+    # change — it applies to every planner backend.
+    _size_rec      = get_recommended_settings(schema.get("size_hint", "medium"))
+    _max_workers   = _size_rec["num_workers"]
+    _max_shuffle   = _size_rec["shuffle_partitions"]
+
     for i, s in enumerate(stages):
         if i == 0 and s.get("type") != "copy":
             print(f"   First stage must be 'copy' — coercing '{s['name']}'")
@@ -266,6 +276,15 @@ def _structural_validate(config: dict, schema: dict = None) -> dict:
             s.setdefault("filter_condition", None)
             s.setdefault("num_workers", 0)
             s.setdefault("shuffle_partitions", 8)
+
+            # Clamp to size-appropriate ceilings (prevents over-provisioning).
+            req_w = int(s.get("num_workers", 0) or 0)
+            if req_w > _max_workers:
+                print(f"   Stage '{s['name']}' num_workers {req_w} → {_max_workers} (size cap)")
+                s["num_workers"] = _max_workers
+            req_sh = int(s.get("shuffle_partitions", 8) or 8)
+            if req_sh > _max_shuffle:
+                s["shuffle_partitions"] = _max_shuffle
 
             if s.get("aggregation"):
                 agg = _validate_aggregation(s["aggregation"], schema, s["name"])
