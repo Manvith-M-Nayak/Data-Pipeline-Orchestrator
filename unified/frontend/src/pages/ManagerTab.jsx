@@ -3,14 +3,15 @@ import { useNavigate } from "react-router-dom";
 import { manager, executor } from "../api.js";
 import { useAppContext } from "../AppContext.jsx";
 import {
-  Shield, Brain, Zap, ClipboardCheck, TrendingUp, CheckCircle,
+  Shield, ShieldCheck, Brain, Zap, ClipboardCheck, TrendingUp, CheckCircle,
   XCircle, AlertTriangle, Clock, Activity, RotateCcw, Download,
   ChevronRight, DollarSign, Cpu, GitBranch, RefreshCw,
 } from "lucide-react";
 
 // ── Phase metadata ────────────────────────────────────────────────────────────
 const PHASES = [
-  { key: "validating",  label: "Validate",  icon: Shield,         color: "#818cf8" },
+  { key: "validating",   label: "Validate", icon: Shield,         color: "#818cf8" },
+  { key: "assuring_plan", label: "Verify",  icon: ShieldCheck,    color: "#34d399" },
   { key: "pre_checks",  label: "Pre-checks", icon: Cpu,           color: "#38bdf8" },
   { key: "executing",   label: "Execute",   icon: Zap,            color: "#f59e0b" },
   { key: "assurance",   label: "Assurance", icon: ClipboardCheck, color: "#4ade80" },
@@ -307,6 +308,175 @@ function ParallelismCard({ parallelism }) {
   );
 }
 
+// Shared context surfaced from the Planner into the Manager (hub view):
+// the original request (editable), the detected schema, and the plan's
+// per-stage transformations/filters/aggregations.
+function ContextCard({ request, setRequest, disabled, detectedSchema, savedPlan }) {
+  const cols = detectedSchema?.columns || {};            // {col: type}
+  const colEntries = Object.entries(cols);
+  const stages = savedPlan?.config?.stages || [];
+  const transformStages = stages.filter(
+    (s) => (s.transformations && s.transformations.length) || s.filter_condition || s.aggregation
+  );
+
+  return (
+    <div style={S.card}>
+      <div style={S.cardHdr}><Brain size={14} color="#a78bfa" />Request &amp; Context</div>
+
+      {/* Editable user request */}
+      <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6 }}>
+        User request (drives semantic intent check — edit before running)
+      </div>
+      <textarea
+        value={request}
+        disabled={disabled}
+        onChange={(e) => setRequest(e.target.value)}
+        placeholder="e.g. Ingest orders, then total revenue per category and region"
+        style={{
+          width: "100%", minHeight: 60, resize: "vertical", boxSizing: "border-box",
+          background: "#0f172a", color: "#e2e8f0", border: "1px solid #334155",
+          borderRadius: 8, padding: "8px 10px", fontSize: 12, fontFamily: "inherit",
+          opacity: disabled ? 0.6 : 1,
+        }}
+      />
+
+      {/* Detected schema */}
+      {colEntries.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6 }}>
+            Detected schema · {colEntries.length} columns
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 96, overflowY: "auto" }}>
+            {colEntries.map(([col, type]) => (
+              <span key={col} style={{
+                padding: "2px 8px", borderRadius: 6, fontSize: 11,
+                background: "#1e293b", border: "1px solid #334155", color: "#cbd5e1",
+              }}>
+                {col}<span style={{ color: "#64748b" }}> · {String(type)}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Plan transformations / filters / aggregations */}
+      {transformStages.length > 0 && (
+        <div style={{ marginTop: 12, borderTop: "1px solid #1e293b", paddingTop: 10 }}>
+          <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6 }}>Transformations &amp; filters</div>
+          {transformStages.map((s) => (
+            <div key={s.name} style={{ marginBottom: 8 }}>
+              <div style={{ fontSize: 12, color: "#f1f5f9", fontWeight: 600 }}>{s.name}</div>
+              {(s.transformations || []).map((t, i) => (
+                <div key={i} style={{ fontSize: 11, color: "#94a3b8", fontFamily: "monospace", marginLeft: 8 }}>• {t}</div>
+              ))}
+              {s.filter_condition && (
+                <div style={{ fontSize: 11, color: "#fbbf24", fontFamily: "monospace", marginLeft: 8 }}>filter: {s.filter_condition}</div>
+              )}
+              {s.aggregation && (
+                <div style={{ fontSize: 11, color: "#7dd3fc", fontFamily: "monospace", marginLeft: 8 }}>
+                  group by [{(s.aggregation.group_by || []).join(", ")}] →{" "}
+                  {(s.aggregation.aggregations || []).map((a) => `${a.op}(${a.column})`).join(", ")}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Performance prediction (gap in the hub view — computed by the manager but
+// not previously surfaced).
+function PerformancePredictionCard({ perf }) {
+  if (!perf || !perf.outcome) return null;
+  const ok = perf.outcome === "success" && !perf.sla_breach_risk;
+  return (
+    <div style={S.card}>
+      <div style={S.cardHdr}>
+        <TrendingUp size={14} color="#c084fc" />Performance Prediction
+        <span style={S.chip(ok)}>{perf.outcome}</span>
+      </div>
+      <div style={S.kv}>
+        <div style={S.kvRow}><span>Predicted total</span><span style={S.kvVal}>~{perf.predicted_total_s}s</span></div>
+        <div style={S.kvRow}><span>Bottleneck stage</span><span style={S.kvVal}>{perf.bottleneck_stage || "—"}</span></div>
+        <div style={S.kvRow}><span>Confidence</span><span style={S.kvVal}>{Math.round((perf.confidence || 0) * 100)}%</span></div>
+        <div style={S.kvRow}>
+          <span>SLA breach risk</span>
+          <span style={S.kvVal}><span style={S.chip(!perf.sla_breach_risk)}>{perf.sla_breach_risk ? "⚠ at risk" : "✔ ok"}</span></span>
+        </div>
+        {perf.history_runs_used !== undefined && (
+          <div style={S.kvRow}><span>History runs used</span><span style={S.kvVal}>{perf.history_runs_used}</span></div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Pre-execution plan verification (Assurance Agent: structural + semantic)
+function PlanAssuranceCard({ planAssurance }) {
+  if (!planAssurance || !planAssurance.summary) return null;
+  const structural = planAssurance.structural_results || [];
+  const sem = planAssurance.semantic_result;
+  const passed = planAssurance.overall_status === "pass";
+
+  return (
+    <div style={S.card}>
+      <div style={S.cardHdr}>
+        <ShieldCheck size={14} color="#34d399" />
+        Plan Assurance
+        <span style={S.chip(passed)}>{passed ? "PASSED" : "REJECTED"}</span>
+      </div>
+
+      <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 10 }}>
+        {planAssurance.summary}
+      </div>
+
+      {/* Structural checks (deterministic) */}
+      <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6 }}>
+        Structural checks (deterministic)
+      </div>
+      <div style={S.kv}>
+        {structural.map((c) => (
+          <div key={c.check} style={S.kvRow}>
+            <span>{c.label}</span>
+            <span style={S.kvVal}>
+              <span style={S.chip(c.passed)}>{c.passed ? "✔ pass" : "✖ fail"}</span>
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {/* Per-check violation messages on failure */}
+      {structural.filter((c) => !c.passed).map((c) => (
+        <div key={c.check + "-msg"} style={{ display: "flex", gap: 6, fontSize: 11, color: "#f87171", marginTop: 6 }}>
+          <AlertTriangle size={11} style={{ flexShrink: 0, marginTop: 1 }} />
+          <span><b>{c.label}:</b> {c.message}</span>
+        </div>
+      ))}
+
+      {/* Semantic check (advisory) */}
+      {sem && (
+        <div style={{ marginTop: 12, padding: "8px 12px", borderRadius: 8, background: "#0f172a", border: "1px solid #1e293b" }}>
+          <div style={{ fontSize: 11, color: "#64748b", marginBottom: 4, display: "flex", alignItems: "center", gap: 6 }}>
+            <Brain size={12} /> Semantic intent check {sem.model ? `· ${sem.model}` : ""} (advisory)
+          </div>
+          {!sem.available ? (
+            <div style={{ fontSize: 12, color: "#64748b" }}>{sem.reasoning}</div>
+          ) : (
+            <>
+              <span style={S.chip(!sem.flagged)}>
+                {sem.flagged ? "⚠ possible mismatch" : "✔ matches request"}
+              </span>
+              <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 6 }}>{sem.reasoning}</div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AssuranceCard({ assurance }) {
   if (!Object.keys(assurance || {}).length) return null;
   const rows = [
@@ -352,9 +522,16 @@ export default function ManagerTab() {
   const {
     csvFile,
     planResult: savedPlan,
+    plannerPrompt, setPlannerPrompt,
+    detectedSchema,
     managerRunId: runId, setManagerRunId: setRunId,
     managerState: mgrState, setManagerState: setMgrState,
   } = useAppContext();
+
+  // Editable user request — prefilled from the Planner prompt, can be edited
+  // here and is sent to the Manager (drives the semantic assurance layer).
+  const [request, setRequest] = useState(plannerPrompt || "");
+  useEffect(() => { setRequest(plannerPrompt || ""); }, [plannerPrompt]);
 
   const savedSchema = (() => {
     try { return JSON.parse(localStorage.getItem("last_csv_schema") || "null"); } catch { return null; }
@@ -401,7 +578,8 @@ export default function ManagerTab() {
     if (!csvFile || !savedPlan) return;
     setError(""); setRunning(true); setMgrState(null);
     try {
-      const res = await manager.run(csvFile, savedPlan.config, savedSchema || {});
+      setPlannerPrompt(request);   // persist any edits so other tabs stay in sync
+      const res = await manager.run(csvFile, savedPlan.config, savedSchema || {}, request || "");
       const rid = res.run_id;
       setRunId(rid);
       setMgrState({ status: "validating", phase: "validating", step: "Starting…", decisions: [] });
@@ -496,6 +674,17 @@ export default function ManagerTab() {
         </div>
       </div>
 
+      {/* Shared context from Planner (request + schema + transformations) */}
+      {savedPlan && (
+        <ContextCard
+          request={request}
+          setRequest={setRequest}
+          disabled={running}
+          detectedSchema={detectedSchema}
+          savedPlan={savedPlan}
+        />
+      )}
+
       {/* Run controls */}
       <div style={{ display: "flex", gap: 10, marginBottom: 20, alignItems: "center" }}>
         <button
@@ -582,7 +771,17 @@ export default function ManagerTab() {
             </div>
           )}
 
-          {/* Assurance */}
+          {/* Performance prediction */}
+          {mgrState.performance_prediction && (
+            <PerformancePredictionCard perf={mgrState.performance_prediction} />
+          )}
+
+          {/* Plan assurance (pre-execution verification) */}
+          {mgrState.plan_assurance && mgrState.plan_assurance.summary && (
+            <PlanAssuranceCard planAssurance={mgrState.plan_assurance} />
+          )}
+
+          {/* Assurance (post-execution runtime checks) */}
           {mgrState.assurance && Object.keys(mgrState.assurance).length > 0 && (
             <AssuranceCard assurance={mgrState.assurance} />
           )}
