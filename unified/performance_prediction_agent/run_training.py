@@ -101,18 +101,37 @@ def _make_row(file_size_mb: float, rng_stage_max: int = 13) -> dict:
     )
     risk_score = np.clip(risk_score + np.random.normal(0, 0.06), 0, 1)
 
-    actual_duration_s = max(
-        floor_s,
-        corrected_baseline_s
-        * np.random.lognormal(0, 0.15)
-        * (1.0 + risk_score * np.random.uniform(2.0, 5.0)),
-    )
+    # Tiny files have much lower chaos variance — cold start dominates,
+    # not data processing. The chaos multiplier should be small.
+    if file_size_mb < 0.01:
+        # For tiny files: actual ≈ baseline (cold start + minimal work)
+        # with small noise. No large chaos events — there's nothing to fail.
+        actual_duration_s = max(
+            floor_s,
+            corrected_baseline_s * np.random.lognormal(0, 0.10),
+        )
+    else:
+        actual_duration_s = max(
+            floor_s,
+            corrected_baseline_s
+            * np.random.lognormal(0, 0.15)
+            * (1.0 + risk_score * np.random.uniform(2.0, 5.0)),
+        )
 
-    outcome = (
-        "failure" if risk_score >= 0.58
-        else "slowdown" if risk_score >= 0.38
-        else "success"
-    )
+    # Tiny files: outcome driven almost entirely by network_quality,
+    # not by file size or stage complexity (which is near zero).
+    if file_size_mb < 0.01:
+        outcome = (
+            "failure" if network_quality < 0.15
+            else "slowdown" if network_quality < 0.35
+            else "success"
+        )
+    else:
+        outcome = (
+            "failure" if risk_score >= 0.58
+            else "slowdown" if risk_score >= 0.38
+            else "success"
+        )
 
     return {
         "stage_count": stage_count,
