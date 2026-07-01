@@ -220,7 +220,7 @@ class CentralManager:
             complexity = "medium"
 
         result = {
-            "file_size_mb":         round(mb, 2),
+            "file_size_mb":         round(mb, 6),
             "stage_count":          len(stages),
             "copy_stages":          copy_count,
             "notebook_stages":      notebook_count,
