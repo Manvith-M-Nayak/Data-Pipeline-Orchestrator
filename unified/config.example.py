@@ -34,5 +34,15 @@ DATABRICKS_NODE_TYPE     = "Standard_DS3_v2"
 # Workspace folder where generated notebooks are uploaded.
 DATABRICKS_NOTEBOOK_BASE = "/Shared/unified_orchestrator"
 
-# ── Groq (planner LLM) ───────────────────────────────────────
+# ── Planner backend selection ────────────────────────────────
+# Which LLM serves the planner agent:
+#   "ollama" → local fine-tuned model (see planner_agent/model/README_OLLAMA.md)
+#   "groq"   → Groq cloud LLaMA (legacy)
+PLANNER_BACKEND = "ollama"
+
+# ── Ollama (local fine-tuned planner) ────────────────────────
+OLLAMA_HOST   = "http://localhost:11434"   # `ollama serve` endpoint
+PLANNER_MODEL = "planner-agent"            # model name from `ollama create`
+
+# ── Groq (planner LLM — fallback / legacy) ───────────────────
 GROQ_API_KEY = "your-groq-api-key"

@@ -109,10 +109,34 @@ def _convert_expr(expr: str) -> str:
 
 
 def _convert_filter(expr: str) -> str:
-    """Convert an ADF-DSL filter_condition into a PySpark boolean expression string."""
+    """Convert a filter_condition into a PySpark boolean expression string.
+
+    Handles two grammars:
+      - function-style ADF-DSL (Groq):  equals(toInteger(eggs), 1), greater(amount, 100)
+      - SQL-style (fine-tuned model):   eggs = 1, amount > 100, region in ('EU','US'),
+                                        price between 10 and 50
+    """
     e = expr.strip()
+    _NUM = r"-?\d+(?:\.\d+)?"
+
+    # SQL-style: col BETWEEN a AND b
+    m = re.match(rf"^(\w+)\s+between\s+({_NUM})\s+and\s+({_NUM})$", e, re.IGNORECASE)
+    if m:
+        c, lo, hi = m.groups()
+        return f'(col("{c}") >= {lo}) & (col("{c}") <= {hi})'
+
+    # SQL-style: col IN (v1, v2, ...) — numbers stay bare, everything else quoted
+    m = re.match(r"^(\w+)\s+in\s*\((.+)\)$", e, re.IGNORECASE)
+    if m:
+        c, items = m.groups()
+        vals = []
+        for it in items.split(","):
+            it = it.strip()
+            vals.append(it if re.fullmatch(_NUM, it) else '"' + it.strip("'\"") + '"')
+        return f'col("{c}").isin({", ".join(vals)})'
 
     patterns = [
+        # function-style ADF-DSL (Groq)
         (r'^equals\(toInteger\((\w+)\),\s*(-?\d+)\)$',    r'col("\1").cast("int") == \2'),
         (r'^notEquals\(toInteger\((\w+)\),\s*(-?\d+)\)$', r'col("\1").cast("int") != \2'),
         (r'^greater\(toInteger\((\w+)\),\s*(-?\d+)\)$',   r'col("\1").cast("int") > \2'),
@@ -123,8 +147,13 @@ def _convert_filter(expr: str) -> str:
         (r'^equals\((\w+),\s*(-?\d+)\)$',       r'col("\1") == \2'),
         (r'^notEquals\((\w+),\s*\'([^\']+)\'\)$', r'col("\1") != "\2"'),
         (r'^isNull\((\w+)\)$',                  r'col("\1").isNull()'),
-        (r'^(\w+)\s*(==|!=|>=|<=|>|<)\s*(-?\d+)$', r'col("\1") \2 \3'),
-        (r'^(\w+)\s*(==|!=)\s*\'([^\']+)\'$',      r'col("\1") \2 "\3"'),
+        # SQL-style (fine-tuned model): single '=' and '<>' equality, ranges, strings
+        (r"^(\w+)\s*=\s*'([^']+)'$",                r'col("\1") == "\2"'),
+        (rf"^(\w+)\s*=\s*({_NUM})$",                r'col("\1") == \2'),
+        (r"^(\w+)\s*(?:!=|<>)\s*'([^']+)'$",        r'col("\1") != "\2"'),
+        (rf"^(\w+)\s*(?:!=|<>)\s*({_NUM})$",        r'col("\1") != \2'),
+        (rf"^(\w+)\s*(>=|<=|>|<)\s*({_NUM})$",      r'col("\1") \2 \3'),
+        (r"^(\w+)\s*(==|!=)\s*'([^']+)'$",          r'col("\1") \2 "\3"'),
     ]
     for pattern, replacement in patterns:
         if re.match(pattern, e, re.IGNORECASE):

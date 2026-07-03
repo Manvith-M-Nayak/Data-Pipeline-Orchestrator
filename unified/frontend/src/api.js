@@ -84,11 +84,12 @@ export const perfPrediction = {
 
 // ── Central Manager ──────────────────────────────────────────────────────────
 export const manager = {
-  run: (csvFile, pipelineConfig, schemaObj) => {
+  run: (csvFile, pipelineConfig, schemaObj, userRequest = "") => {
     const fd = new FormData();
     fd.append("csv_file", csvFile);
     fd.append("pipeline_config", JSON.stringify(pipelineConfig));
     fd.append("schema", JSON.stringify(schemaObj));
+    fd.append("user_request", userRequest);
     return req("/manager/run", { method: "POST", body: fd });
   },
   status:   (runId)  => req(`/manager/status/${runId}`),
