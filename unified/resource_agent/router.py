@@ -4,7 +4,16 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Any, Dict, List, Optional
 
-from .resource_agent import ResourceAgent
+from .resource_agent import (
+    ResourceAgent,
+    MAX_WORKERS,
+    MAX_DIU,
+    MAX_CONCURRENT,
+    MAX_TOTAL_MEM_GB,
+    NODE_SPECS,
+    DEFAULT_NODE,
+    ADF_MB_PER_DIU_PER_S,
+)
 
 router = APIRouter()
 _agent = ResourceAgent()
@@ -98,4 +107,18 @@ def correction_factors():
     return {
         "copy":     _agent.get_correction_factor("copy"),
         "notebook": _agent.get_correction_factor("notebook"),
+    }
+
+
+@router.get("/limits")
+def limits():
+    """Student-tier hard limits and node catalogue (single source of truth for the UI)."""
+    return {
+        "max_workers":          MAX_WORKERS,
+        "max_diu":              MAX_DIU,
+        "max_concurrent":       MAX_CONCURRENT,
+        "max_total_mem_gb":     MAX_TOTAL_MEM_GB,
+        "default_node":         DEFAULT_NODE,
+        "adf_mb_per_diu_per_s": ADF_MB_PER_DIU_PER_S,
+        "node_specs":           NODE_SPECS,
     }
