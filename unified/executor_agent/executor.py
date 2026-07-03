@@ -17,6 +17,7 @@ Flow:
 import os
 import time
 import base64
+import traceback
 import requests
 
 from config import (
@@ -99,8 +100,9 @@ def purge_container(container_name: str):
         print(f"   Purging {len(blobs)} blob(s) from '{container_name}'...")
         for b in blobs:
             container.delete_blob(b.name)
-    except Exception as e:
-        print(f"   Purge of '{container_name}' failed: {e}")
+    except Exception:
+        traceback.print_exc()
+        raise
 
 
 def upload_csv(filepath: str, container_name: str) -> str:

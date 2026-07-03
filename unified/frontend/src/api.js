@@ -39,13 +39,58 @@ export const executor = {
   downloadUrl: (container) => `${BASE}/executor/download/${encodeURIComponent(container)}`,
 };
 
+// ── Resource Agent ────────────────────────────────────────────────────────────
+export const resource = {
+  analyze: (plan, csvSizeBytes = 0, schema = null, executionGroups = null) =>
+    req("/resource/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        plan,
+        csv_size_bytes: csvSizeBytes,
+        schema,
+        execution_groups: executionGroups,
+      }),
+    }),
+  reallocate: (liveRuns, allocations, elapsedS = 0) =>
+    req("/resource/reallocate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ live_runs: liveRuns, allocations, elapsed_s: elapsedS }),
+    }),
+  feedback: (body) =>
+    req("/resource/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  accuracy:          () => req("/resource/accuracy"),
+  correctionFactors: () => req("/resource/correction-factors"),
+  limits:            () => req("/resource/limits"),
+};
+export const perfPrediction = {
+  predict: (resourcePlan, predictions, plan, slaTargetS = 900) =>
+    req("/performance-prediction/predict", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        resource_plan: resourcePlan,
+        predictions,
+        plan,
+        sla_target_s: slaTargetS,
+      }),
+    }),
+  history: () => req("/performance-prediction/history"),
+};
+
 // ── Central Manager ──────────────────────────────────────────────────────────
 export const manager = {
-  run: (csvFile, pipelineConfig, schemaObj) => {
+  run: (csvFile, pipelineConfig, schemaObj, userRequest = "") => {
     const fd = new FormData();
     fd.append("csv_file", csvFile);
     fd.append("pipeline_config", JSON.stringify(pipelineConfig));
     fd.append("schema", JSON.stringify(schemaObj));
+    fd.append("user_request", userRequest);
     return req("/manager/run", { method: "POST", body: fd });
   },
   status:   (runId)  => req(`/manager/status/${runId}`),

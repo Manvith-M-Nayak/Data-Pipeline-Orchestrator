@@ -1,0 +1,5 @@
+# Apple MLX fine-tuning stack — Apple Silicon (Metal) ONLY.
+# No CUDA / Unsloth / bitsandbytes / Triton / torch-gpu anywhere.
+mlx>=0.21.0
+mlx-lm[train]>=0.20.0
+pyyaml>=6.0
