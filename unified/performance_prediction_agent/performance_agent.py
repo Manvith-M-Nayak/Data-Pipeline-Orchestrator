@@ -339,19 +339,22 @@ class PerformancePredictionAgent:
           - Compute mean(actual / predicted) for recent runs.
           - Damp by DAMPING to avoid overcorrection.
         """
+        # NOTE: `.get(k, 0)` returns None when the key exists but is null
+        # (e.g. a prior infeasible run logged predicted_duration_s: null), so
+        # coerce with `or 0` before comparing to avoid `None > 0` crashes.
         same_complexity = [
             r for r in history
             if r.get("complexity") == complexity
-            and r.get("actual_duration_s", 0) > 0
-            and r.get("predicted_duration_s", 0) > 0
+            and (r.get("actual_duration_s") or 0) > 0
+            and (r.get("predicted_duration_s") or 0) > 0
         ]
 
         # Fall back to all history if not enough same-complexity runs
         if len(same_complexity) < MIN_HISTORY_FOR_ML:
             usable = [
                 r for r in history
-                if r.get("actual_duration_s", 0) > 0
-                and r.get("predicted_duration_s", 0) > 0
+                if (r.get("actual_duration_s") or 0) > 0
+                and (r.get("predicted_duration_s") or 0) > 0
             ]
         else:
             usable = same_complexity

@@ -259,7 +259,8 @@ The service principal you created in step 1 needs permission to control ADF, Sto
 
 ## 8. Groq API Key
 
-Groq provides the LLM used by the planner, monitor, and self-healing agents.
+Groq provides the LLM used by the monitor and self-healing agents (the **planner**
+now runs the local fine-tuned model — see step 8b).
 
 ### Steps
 
@@ -273,6 +274,51 @@ Groq provides the LLM used by the planner, monitor, and self-healing agents.
 | Value | Where | Config key |
 |---|---|---|
 | `GROQ_API_KEY` | Groq Console → API Keys → your key | `unified/config.py` |
+
+---
+
+## 8b. Local Planner Model (Ollama)
+
+The planner agent runs a fine-tuned Qwen2.5-7B model locally via
+[Ollama](https://ollama.com), instead of Groq. Build it once:
+
+```bash
+# install + start Ollama (https://ollama.com), then:
+cd unified/planner_agent/model
+bash build_ollama_model.sh        # unzip → merge → GGUF → `ollama create planner-agent`
+```
+
+Full build details (prereqs, disk, test command) are in
+`unified/planner_agent/model/README_OLLAMA.md`.
+
+| Config key | Default | Meaning |
+|---|---|---|
+| `PLANNER_BACKEND` | `ollama` | `ollama` (local model) or `groq` (legacy cloud) |
+| `OLLAMA_HOST` | `http://localhost:11434` | Ollama `serve` endpoint |
+| `PLANNER_MODEL` | `planner-agent` | model name from `ollama create` |
+
+> To skip the local model and use Groq for the planner too, set
+> `PLANNER_BACKEND = "groq"` in `unified/config.py`.
+
+### Running it (after the one-time build)
+
+The model is built once. Day-to-day you only need Ollama running plus the
+backend:
+
+```bash
+# Ollama server — make it permanent (auto-starts at login, survives reboots):
+brew services start ollama
+#   …or run it temporarily in a terminal for this session only:
+#   ollama serve
+
+# Backend:
+cd unified
+source venv/bin/activate
+python main.py
+```
+
+Verify the model is registered: `ollama list` should show `planner-agent`.
+You do **not** rebuild the model each time.
 
 ---
 
@@ -311,7 +357,12 @@ DATABRICKS_SPARK_VERSION = "13.3.x-scala2.12"
 DATABRICKS_NODE_TYPE     = "Standard_DS3_v2"
 DATABRICKS_NOTEBOOK_BASE = "/Shared/unified_orchestrator"
 
-# ── Groq ─────────────────────────────────────────────────────
+# ── Planner backend (local fine-tuned model) ────────────────
+PLANNER_BACKEND = "ollama"                                     # step 8b ("groq" for legacy)
+OLLAMA_HOST     = "http://localhost:11434"                     # step 8b
+PLANNER_MODEL   = "planner-agent"                              # step 8b
+
+# ── Groq (monitor + self-healing) ────────────────────────────
 GROQ_API_KEY = "gsk_xxxxxxxxxxxxxxxxxxxxxxxxxxxx"               # step 8
 ```
 
