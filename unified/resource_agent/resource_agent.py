@@ -72,11 +72,15 @@ class StageRequirements:
     stage_type:        str          # "copy" | "notebook"
     estimated_cpu:     float        # total vCPUs needed
     estimated_mem_gb:  float        # total GB needed across all workers
-    estimated_workers: int          # Databricks workers (0 = driver-only)
-    estimated_diu:     int          # ADF DIU (copy stages only)
+    estimated_workers: int          # Databricks workers (0 = driver-only), clamped to MAX_WORKERS
+    estimated_diu:     int          # ADF DIU (copy stages only), clamped to MAX_DIU
     estimated_duration_s: int       # wall-clock seconds at this allocation
     confidence:        float        # 0–1 based on data richness
     rationale:         str          # human-readable reasoning
+    # Raw amounts the plan *requested* before clamping to hard limits.
+    # Lets check_feasibility surface a clamp instead of swallowing it silently.
+    requested_workers: int = 0
+    requested_diu:     int = 0
 
 
 @dataclass
@@ -134,25 +138,29 @@ class ResourceAgent:
     def _predict_copy(
         self, name: str, stage: dict, mb: float, cf: float
     ) -> StageRequirements:
-        diu  = min(int(stage.get("diu", 4)), MAX_DIU)
+        requested_diu = int(stage.get("diu", 4))
+        diu  = min(requested_diu, MAX_DIU)
         raw_s = ADF_STARTUP_S + max(20, int(mb / max(diu * ADF_MB_PER_DIU_PER_S, 0.1)))
         dur_s = max(30, int(raw_s * cf))
         cpu   = float(diu)        # ADF DIU ≈ 1 vCPU each
         mem   = diu * 1.5         # ~1.5 GB per DIU for shuffle buffers
 
         conf  = 0.85 if mb > 0 else 0.5
+        clamp_note = f" (clamped from requested {requested_diu})" if requested_diu > diu else ""
         return StageRequirements(
             stage_name=name, stage_type="copy",
             estimated_cpu=cpu, estimated_mem_gb=round(mem, 2),
             estimated_workers=0, estimated_diu=diu,
             estimated_duration_s=dur_s, confidence=conf,
-            rationale=f"ADF copy: {diu} DIU × {ADF_MB_PER_DIU_PER_S} MB/s, {mb:.1f} MB input → ~{dur_s}s",
+            rationale=f"ADF copy: {diu} DIU{clamp_note} × {ADF_MB_PER_DIU_PER_S} MB/s, {mb:.1f} MB input → ~{dur_s}s",
+            requested_workers=0, requested_diu=requested_diu,
         )
 
     def _predict_notebook(
         self, name: str, stage: dict, mb: float, schema: dict, cf: float
     ) -> StageRequirements:
-        workers = min(int(stage.get("num_workers", 0)), MAX_WORKERS)
+        requested_workers = int(stage.get("num_workers", 0))
+        workers = min(requested_workers, MAX_WORKERS)
         node    = stage.get("node_type", DEFAULT_NODE)
         spec    = NODE_SPECS.get(node, NODE_SPECS[DEFAULT_NODE])
 
@@ -190,6 +198,55 @@ class ResourceAgent:
             estimated_workers=workers, estimated_diu=0,
             estimated_duration_s=dur_s, confidence=conf,
             rationale=rationale,
+            requested_workers=requested_workers, requested_diu=0,
+        )
+
+    # ── 2: Duration at a given allocation ────────────────────────────────────
+    @staticmethod
+    def _scale_duration(base_s: float, base_units: int, new_units: int, stype: str) -> int:
+        """
+        Re-estimate wall-clock time when parallelism changes.
+
+        Only the *variable* portion of the run scales with parallelism — the
+        fixed startup / cold-start floor does not (spinning up a cluster or
+        triggering an ADF pipeline costs the same regardless of DIU/worker
+        count). Scaling the whole duration (as the old inline formulas did)
+        over-penalized down-sizing; here the floor is held constant and only
+        the work above it scales inversely with parallelism.
+        """
+        if stype == "copy":
+            floor, min_s = float(ADF_STARTUP_S), 30
+        else:
+            floor, min_s = float(DBX_COLD_START_S + DBX_PIP_INSTALL_S), 60
+
+        variable = max(0.0, base_s - floor)
+        bu = max(base_units, 1)          # driver-only / 0-DIU → treat as 1 unit
+        nu = max(new_units, 1)
+        scaled = floor + variable * (bu / nu)
+        return max(min_s, int(round(scaled)))
+
+    def estimate_stage_duration(
+        self,
+        req: StageRequirements,
+        workers: Optional[int] = None,
+        diu: Optional[int] = None,
+    ) -> int:
+        """
+        Function 2 — wall-clock seconds for a stage at a *given* allocation.
+
+        Uses the stage's predicted duration (computed at its predicted
+        allocation) as the baseline and re-scales it for the requested worker
+        (notebook) or DIU (copy) count. Passing the predicted allocation back
+        in returns the baseline unchanged.
+        """
+        if req.stage_type == "copy":
+            target = req.estimated_diu if diu is None else diu
+            return self._scale_duration(
+                req.estimated_duration_s, req.estimated_diu, target, "copy"
+            )
+        target = req.estimated_workers if workers is None else workers
+        return self._scale_duration(
+            req.estimated_duration_s, req.estimated_workers, target, "notebook"
         )
 
     # ── 3: Feasibility ────────────────────────────────────────────────────────
@@ -206,15 +263,22 @@ class ResourceAgent:
         violations: List[str] = []
         warnings:   List[str] = []
 
-        # Per-stage checks
+        # Per-stage checks.
+        #   Workers/DIU are auto-clamped during prediction, so an over-request is
+        #   still runnable — surface it as a warning (the plan asked for more than
+        #   the tier allows and we quietly reduced it) rather than a hard failure.
+        #   Memory is NOT clamped, so a single stage exceeding the cap is a true
+        #   infeasibility that must abort the run.
         for r in requirements:
-            if r.stage_type == "copy" and r.estimated_diu > MAX_DIU:
-                violations.append(
-                    f"Stage '{r.stage_name}': DIU {r.estimated_diu} > limit {MAX_DIU}"
+            if r.stage_type == "copy" and r.requested_diu > MAX_DIU:
+                warnings.append(
+                    f"Stage '{r.stage_name}': requested {r.requested_diu} DIU > limit "
+                    f"{MAX_DIU} — clamped to {r.estimated_diu}"
                 )
-            if r.stage_type == "notebook" and r.estimated_workers > MAX_WORKERS:
-                violations.append(
-                    f"Stage '{r.stage_name}': workers {r.estimated_workers} > limit {MAX_WORKERS}"
+            if r.stage_type == "notebook" and r.requested_workers > MAX_WORKERS:
+                warnings.append(
+                    f"Stage '{r.stage_name}': requested {r.requested_workers} workers > limit "
+                    f"{MAX_WORKERS} — clamped to {r.estimated_workers}"
                 )
             if r.estimated_mem_gb > MAX_TOTAL_MEM_GB:
                 violations.append(
@@ -245,6 +309,53 @@ class ResourceAgent:
 
         return len(violations) == 0, violations, warnings
 
+    # ── 5: Right-size one stage ──────────────────────────────────────────────
+    def right_size(
+        self,
+        r: StageRequirements,
+        rec_workers: int,
+        rec_diu: int,
+        node: str = DEFAULT_NODE,
+    ) -> StageAllocation:
+        """
+        Function 5 — shrink a single over-allocated stage.
+
+        Caps the raw prediction at the Planner's recommended_settings and the
+        hard limits, applies a driver-only / reduce-by-one heuristic for short
+        notebook runs, and re-estimates duration for the smaller allocation.
+        """
+        if r.stage_type == "copy":
+            alloc_diu   = min(r.estimated_diu, rec_diu, MAX_DIU)
+            right_sized = alloc_diu < r.estimated_diu
+            return StageAllocation(
+                stage_name=r.stage_name, stage_type="copy",
+                workers=0, diu=alloc_diu,
+                memory_gb=round(alloc_diu * 1.5, 2), cpu=float(alloc_diu),
+                duration_s=self.estimate_stage_duration(r, diu=alloc_diu),
+                right_sized=right_sized, contention_adjusted=False,
+            )
+
+        # notebook
+        raw_w   = r.estimated_workers
+        alloc_w = raw_w
+        if r.estimated_duration_s < 120:
+            alloc_w = 0                       # driver-only — no need for workers
+        elif r.estimated_duration_s < 300 and raw_w > 0:
+            alloc_w = max(0, raw_w - 1)       # reduce by one
+        alloc_w = min(alloc_w, rec_workers, MAX_WORKERS)
+        right_sized = alloc_w < raw_w
+
+        spec   = NODE_SPECS.get(node, NODE_SPECS[DEFAULT_NODE])
+        mem_gb = round(4.0 + alloc_w * spec["memory_gb"], 2)
+        cpu    = float(spec["cpu"] * max(alloc_w, 1))
+        return StageAllocation(
+            stage_name=r.stage_name, stage_type="notebook",
+            workers=alloc_w, diu=0,
+            memory_gb=mem_gb, cpu=cpu,
+            duration_s=self.estimate_stage_duration(r, workers=alloc_w),
+            right_sized=right_sized, contention_adjusted=False,
+        )
+
     # ── 4 + 5: Allocate + right-size ─────────────────────────────────────────
     def propose_allocations(
         self,
@@ -258,52 +369,8 @@ class ResourceAgent:
         rec   = plan.get("recommended_settings", {})
         rec_w = min(int(rec.get("num_workers", 0)), MAX_WORKERS)
         rec_d = min(int(rec.get("diu", 4)), MAX_DIU)
-        allocs: List[StageAllocation] = []
-
-        for r in requirements:
-            if r.stage_type == "copy":
-                alloc_diu    = min(r.estimated_diu, rec_d, MAX_DIU)
-                right_sized  = alloc_diu < r.estimated_diu
-                # Recompute duration at actual DIU
-                mb_input     = 0.0  # no file size here; keep original estimate
-                adj_dur      = r.estimated_duration_s
-                if alloc_diu < r.estimated_diu and r.estimated_diu > 0:
-                    adj_dur = int(r.estimated_duration_s * (r.estimated_diu / alloc_diu))
-                allocs.append(StageAllocation(
-                    stage_name=r.stage_name, stage_type="copy",
-                    workers=0, diu=alloc_diu,
-                    memory_gb=round(alloc_diu * 1.5, 2), cpu=float(alloc_diu),
-                    duration_s=adj_dur, right_sized=right_sized,
-                    contention_adjusted=False,
-                ))
-            else:  # notebook
-                raw_w        = r.estimated_workers
-                # Right-size: driver-only if short run or minimal data
-                alloc_w      = raw_w
-                if r.estimated_duration_s < 120:
-                    alloc_w = 0   # driver-only — no need for workers
-                elif r.estimated_duration_s < 300 and raw_w > 0:
-                    alloc_w = max(0, raw_w - 1)   # reduce by one
-                alloc_w = min(alloc_w, rec_w, MAX_WORKERS)
-                right_sized = alloc_w < raw_w
-
-                node   = plan.get("recommended_settings", {}).get("node_type", DEFAULT_NODE)
-                spec   = NODE_SPECS.get(node, NODE_SPECS[DEFAULT_NODE])
-                mem_gb = round(4.0 + alloc_w * spec["memory_gb"], 2)
-                cpu    = float(spec["cpu"] * max(alloc_w, 1))
-                # Recompute duration at actual workers (less parallelism → longer)
-                adj_dur = r.estimated_duration_s
-                if alloc_w < raw_w and raw_w > 0:
-                    adj_dur = int(r.estimated_duration_s * max(1, raw_w / max(alloc_w, 0.5)))
-                allocs.append(StageAllocation(
-                    stage_name=r.stage_name, stage_type="notebook",
-                    workers=alloc_w, diu=0,
-                    memory_gb=mem_gb, cpu=cpu,
-                    duration_s=adj_dur, right_sized=right_sized,
-                    contention_adjusted=False,
-                ))
-
-        return allocs
+        node  = rec.get("node_type", DEFAULT_NODE)
+        return [self.right_size(r, rec_w, rec_d, node) for r in requirements]
 
     # ── 6: Contention + 8: Constraint enforcement ─────────────────────────────
     def resolve_contention(
@@ -357,7 +424,7 @@ class ResourceAgent:
                         stage_name=a.stage_name, stage_type=a.stage_type,
                         workers=new_w, diu=a.diu,
                         memory_gb=new_mem, cpu=float(new_w * node_spec["cpu"]),
-                        duration_s=int(a.duration_s * max(1, a.workers / max(new_w, 0.5))),
+                        duration_s=self._scale_duration(a.duration_s, a.workers, new_w, a.stage_type),
                         right_sized=True, contention_adjusted=True,
                     )
 
@@ -399,6 +466,97 @@ class ResourceAgent:
 
         updated_allocs = list(alloc_map.values())
         return updated_allocs, new_groups
+
+    # ── 8: Final constraint enforcement (hard-cap pass) ──────────────────────
+    def enforce_constraints(
+        self,
+        allocations: List[StageAllocation],
+        execution_groups: List[List[str]],
+    ) -> Tuple[List[StageAllocation], List[List[str]], List[str]]:
+        """
+        Function 8 — the last gate before the plan is returned.
+
+        Guarantees the emitted plan honors every hard limit no matter what the
+        upstream heuristics produced:
+          * per-stage workers ≤ MAX_WORKERS, DIU ≤ MAX_DIU (re-scaling duration);
+          * every execution group ≤ MAX_CONCURRENT stages AND ≤ MAX_WORKERS
+            combined workers AND ≤ MAX_TOTAL_MEM_GB combined memory — oversized
+            groups are greedily split into sequential sub-groups.
+
+        Returns (allocations, execution_groups, notes). `notes` describes any
+        adjustment made here and is merged into the plan's warnings.
+        """
+        notes: List[str] = []
+        alloc_map = {a.stage_name: a for a in allocations}
+
+        # 1) Per-stage hard caps (belt-and-suspenders behind right_size).
+        for name, a in list(alloc_map.items()):
+            capped_w = min(a.workers, MAX_WORKERS)
+            capped_d = min(a.diu, MAX_DIU)
+            if capped_w == a.workers and capped_d == a.diu:
+                continue
+            spec    = NODE_SPECS.get(DEFAULT_NODE)
+            new_mem = round(4.0 + capped_w * spec["memory_gb"], 2) if a.stage_type == "notebook" \
+                else round(capped_d * 1.5, 2)
+            new_cpu = float(capped_w * spec["cpu"]) if a.stage_type == "notebook" \
+                else float(capped_d)
+            base_units = a.workers if a.stage_type == "notebook" else a.diu
+            new_units  = capped_w if a.stage_type == "notebook" else capped_d
+            alloc_map[name] = StageAllocation(
+                stage_name=a.stage_name, stage_type=a.stage_type,
+                workers=capped_w, diu=capped_d,
+                memory_gb=new_mem, cpu=new_cpu,
+                duration_s=self._scale_duration(a.duration_s, base_units, new_units, a.stage_type),
+                right_sized=True, contention_adjusted=a.contention_adjusted,
+            )
+            notes.append(
+                f"Stage '{name}': hard-capped to {capped_w} workers / {capped_d} DIU"
+            )
+
+        # 2) Split any group that exceeds concurrency, worker, or memory limits.
+        enforced_groups: List[List[str]] = []
+        for group in execution_groups:
+            subgroups: List[List[str]] = []
+            cur: List[str] = []
+            cur_w, cur_m = 0, 0.0
+            for name in group:
+                a  = alloc_map.get(name)
+                w  = a.workers   if a else 0
+                m  = a.memory_gb if a else 0.0
+                if cur and (
+                    len(cur) >= MAX_CONCURRENT
+                    or cur_w + w > MAX_WORKERS
+                    or cur_m + m > MAX_TOTAL_MEM_GB
+                ):
+                    subgroups.append(cur)
+                    cur, cur_w, cur_m = [], 0, 0.0
+                cur.append(name)
+                cur_w += w
+                cur_m += m
+            if cur:
+                subgroups.append(cur)
+
+            if len(subgroups) > 1:
+                notes.append(
+                    f"Group {group} split into {len(subgroups)} sequential sub-group(s) "
+                    f"to respect hard limits"
+                )
+                # Every stage past the first sub-group was moved due to contention.
+                for sg in subgroups[1:]:
+                    for name in sg:
+                        if name in alloc_map and not alloc_map[name].contention_adjusted:
+                            a = alloc_map[name]
+                            alloc_map[name] = StageAllocation(
+                                stage_name=a.stage_name, stage_type=a.stage_type,
+                                workers=a.workers, diu=a.diu,
+                                memory_gb=a.memory_gb, cpu=a.cpu,
+                                duration_s=a.duration_s, right_sized=a.right_sized,
+                                contention_adjusted=True,
+                            )
+            enforced_groups.extend(subgroups)
+
+        enforced_groups = [g for g in enforced_groups if g]
+        return list(alloc_map.values()), enforced_groups, notes
 
     # ── 7: Dynamic re-allocation ──────────────────────────────────────────────
     def dynamic_reallocate(
@@ -466,6 +624,14 @@ class ResourceAgent:
         return recommendations
 
     # ── 9: Feedback / self-correction ────────────────────────────────────────
+    @staticmethod
+    def _load_feedback(stage_type: Optional[str]) -> List[dict]:
+        """Return recorded feedback rows, optionally filtered by stage_type."""
+        return [
+            r for r in _load_feedback_raw()
+            if stage_type is None or r.get("stage_type") == stage_type
+        ]
+
     def get_correction_factor(self, stage_type: str) -> float:
         """
         Load historical feedback and compute a damped correction multiplier.
@@ -516,6 +682,9 @@ class ResourceAgent:
                 f.write(json.dumps(record) + "\n")
         except Exception as exc:
             print(f"[ResourceAgent] feedback write failed (non-fatal): {exc}")
+
+    # Documented name in the responsibility list (function 9) — same behavior.
+    record_feedback = record_actual
 
     def get_accuracy_report(self) -> dict:
         """Summarize prediction accuracy across all recorded runs."""
@@ -583,10 +752,17 @@ class ResourceAgent:
         # 4 + 5 — Right-sized allocations
         allocations = self.propose_allocations(requirements, plan)
 
-        # 6 + 8 — Contention resolution + constraint enforcement
+        # 6 — Contention resolution across parallel groups
         allocations, execution_groups = self.resolve_contention(
             allocations, execution_groups
         )
+
+        # 8 — Final hard-cap pass: the emitted plan is now guaranteed to honor
+        #     every hard limit regardless of upstream heuristics.
+        allocations, execution_groups, enforce_notes = self.enforce_constraints(
+            allocations, execution_groups
+        )
+        warnings = warnings + enforce_notes
 
         # Summary metrics
         total_workers = sum(a.workers for a in allocations)
@@ -667,12 +843,3 @@ def _load_feedback_raw() -> List[dict]:
     except Exception:
         pass
     return records
-
-
-# Monkey-patch private loader onto the class (keeps it DRY)
-ResourceAgent._load_feedback = staticmethod(
-    lambda stage_type: [
-        r for r in _load_feedback_raw()
-        if stage_type is None or r.get("stage_type") == stage_type
-    ]
-)
