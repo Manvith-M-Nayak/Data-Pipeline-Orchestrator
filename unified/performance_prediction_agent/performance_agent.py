@@ -44,10 +44,7 @@ import math
 import os
 from dataclasses import dataclass, field, asdict
 from typing import Dict, List, Optional, Tuple
-<<<<<<< HEAD
-=======
 from .ml_predictor import MLPredictor, MLNotAvailable
->>>>>>> main
 
 _DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 _FEEDBACK_LOG = os.path.join(_DATA_DIR, "manager_feedback.jsonl")
@@ -101,21 +98,10 @@ class PerformancePredictionAgent:
         """
         Main prediction entry point. Called by the Central Manager during Phase 2.
 
-<<<<<<< HEAD
-        Args:
-            resource_plan : output of ResourceAgent.analyze()
-            predictions   : Manager's state.predictions dict
-            plan          : raw Planner plan (stages list, recommended_settings)
-            sla_target_s  : wall-clock SLA budget in seconds (default 15 min)
-
-        Returns:
-            Serialisable dict of PerformancePrediction.
-=======
         Primary path:  trained ML model (RandomForest + GradientBoosting),
                        loaded locally from performance_prediction_agent/models/.
         Fallback path: transparent formula (critical path + history damping),
                        used if model files are missing or inference fails.
->>>>>>> main
         """
         # ── 1. Extract per-stage durations from resource plan ─────────────
         allocations      = resource_plan.get("allocations", [])
@@ -124,8 +110,6 @@ class PerformancePredictionAgent:
         if not allocations:
             return self._empty_prediction("No allocations in resource plan", sla_target_s)
 
-<<<<<<< HEAD
-=======
         # ── Try ML model first ──────────────────────────────────────────
         try:
             ml_result = MLPredictor.predict(resource_plan, predictions, plan)
@@ -141,7 +125,6 @@ class PerformancePredictionAgent:
         #    from the original implementation) ─────────────────────────
  
 
->>>>>>> main
         # ── 2. Compute baseline critical-path total ───────────────────────
         #    Critical path = sum of each group's slowest stage (parallel aware)
         stage_dur: Dict[str, int] = {
@@ -212,11 +195,6 @@ class PerformancePredictionAgent:
             throughput_rows_per_s=throughput_rows_per_s,
             rationale=rationale,
         )
-<<<<<<< HEAD
-        return asdict(result)
-
-    # ── Critical-path calculator ──────────────────────────────────────────────
-=======
         d = asdict(result)
         d["prediction_source"] = "formula"
         return d
@@ -313,7 +291,6 @@ class PerformancePredictionAgent:
         d = asdict(result)
         d["prediction_source"] = "ml_model"   # lets the dashboard show which path ran
         return d
->>>>>>> main
     def _critical_path_duration(
         self,
         stage_dur: Dict[str, int],
@@ -362,22 +339,19 @@ class PerformancePredictionAgent:
           - Compute mean(actual / predicted) for recent runs.
           - Damp by DAMPING to avoid overcorrection.
         """
-        # NOTE: `.get(k, 0)` returns None when the key exists but is null
-        # (e.g. a prior infeasible run logged predicted_duration_s: null), so
-        # coerce with `or 0` before comparing to avoid `None > 0` crashes.
         same_complexity = [
             r for r in history
             if r.get("complexity") == complexity
-            and (r.get("actual_duration_s") or 0) > 0
-            and (r.get("predicted_duration_s") or 0) > 0
+            and r.get("actual_duration_s", 0) > 0
+            and r.get("predicted_duration_s", 0) > 0
         ]
 
         # Fall back to all history if not enough same-complexity runs
         if len(same_complexity) < MIN_HISTORY_FOR_ML:
             usable = [
                 r for r in history
-                if (r.get("actual_duration_s") or 0) > 0
-                and (r.get("predicted_duration_s") or 0) > 0
+                if r.get("actual_duration_s", 0) > 0
+                and r.get("predicted_duration_s", 0) > 0
             ]
         else:
             usable = same_complexity
