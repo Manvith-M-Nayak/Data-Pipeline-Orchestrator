@@ -183,6 +183,8 @@ function LiveAnalysis({ plan, allocations, feasible, violations, warnings, execG
                   <span style={{ color: workerColor }}>{a.workers} worker{a.workers !== 1 ? "s" : ""}</span>
                   <span>{a.memory_gb} GB memory</span>
                   <span>{a.cpu} vCPU</span>
+                  {a.node_type && <span>{a.node_type}</span>}
+                  {a.shuffle_partitions != null && <span>{a.shuffle_partitions} shuffle</span>}
                 </>
               ) : (
                 <>
@@ -190,6 +192,7 @@ function LiveAnalysis({ plan, allocations, feasible, violations, warnings, execG
                   <span>{a.memory_gb} GB scratch</span>
                 </>
               )}
+              {a.ml_sized && <span style={S.tag("#c084fc")}>ML-sized</span>}
               <span><Clock size={10} style={{ marginRight: 3, verticalAlign: "middle" }} />~{a.duration_s}s</span>
             </div>
           </div>
@@ -240,6 +243,7 @@ function ReallocationPanel({ recs }) {
 export default function ResourceTab() {
   const [accuracy, setAccuracy]           = useState(null);
   const [factors, setFactors]             = useState(null);
+  const [modelInfo, setModelInfo]         = useState(null);
   const [recs, setRecs]                   = useState(null);
   const [liveRp, setLiveRp]              = useState(null);
   const [loading, setLoading]             = useState(false);
@@ -249,9 +253,14 @@ export default function ResourceTab() {
   const fetchAccuracy = useCallback(async () => {
     setLoading(true);
     try {
-      const [acc, cf] = await Promise.all([resource.accuracy(), resource.correctionFactors()]);
+      const [acc, cf, mi] = await Promise.all([
+        resource.accuracy(),
+        resource.correctionFactors(),
+        resource.modelInfo().catch(() => null),
+      ]);
       setAccuracy(acc);
       setFactors(cf);
+      setModelInfo(mi);
       setErr("");
     } catch (e) {
       setErr(e.message);
@@ -294,9 +303,37 @@ export default function ResourceTab() {
     <div style={S.page}>
       <div style={S.heading}>Resource Agent</div>
       <div style={S.sub}>
-        Predicts compute requirements, proposes right-sized allocations, resolves contention,
-        and self-corrects from historical run data.
+        Recommends right-sized compute settings (workers, DIU, memory, shuffle, node) per
+        stage via a supervised model, resolves contention, enforces student-tier limits,
+        and self-corrects from historical run data. Runtime &amp; SLA forecasting is owned by
+        the Performance Prediction Agent.
       </div>
+
+      {/* Sizing engine banner */}
+      {modelInfo && (
+        <div style={{ ...S.card, display: "flex", alignItems: "center", gap: 10, padding: "12px 20px" }}>
+          <Cpu size={15} color={modelInfo.ml_available ? "#c084fc" : "#64748b"} />
+          <span style={{ fontSize: 13, color: "#f1f5f9", fontWeight: 600 }}>
+            Sizing engine:
+          </span>
+          <Badge
+            text={modelInfo.ml_available ? "ML model" : "Heuristic fallback"}
+            color={modelInfo.ml_available ? "#c084fc" : "#f59e0b"}
+          />
+          {modelInfo.metrics?.rows && (
+            <span style={{ fontSize: 11, color: "#64748b" }}>
+              trained on {Number(modelInfo.metrics.rows).toLocaleString()} stages
+              {modelInfo.metrics?.targets?.rec_workers?.within1_acc != null &&
+                ` · workers ±1 acc ${(modelInfo.metrics.targets.rec_workers.within1_acc * 100).toFixed(1)}%`}
+            </span>
+          )}
+          {!modelInfo.ml_available && (
+            <span style={{ fontSize: 11, color: "#64748b" }}>
+              train &amp; drop resource_models.pkl into resource_agent/models/
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Summary stats */}
       <div style={S.grid3}>

@@ -1,13 +1,30 @@
 """
-Resource Agent
+Resource Agent — owns RESOURCE MANAGEMENT for the pipeline.
 
-All nine responsibilities implemented as one cohesive class:
+Given a plan + its data, it recommends the compute SETTINGS every stage should
+run with and guarantees they fit the student-tier hard limits. It deliberately
+does NOT own runtime / SLA / outcome prediction — that is the Performance
+Prediction Agent's job (see RESPONSIBILITIES.md). The per-stage `duration_s`
+fields here are an INTERNAL sizing aid only (used to compare allocation options
+and to drive mid-run reallocation); they are never the plan's authoritative
+runtime.
 
-  1.  predict_stage()          → CPU, memory, worker, DIU estimates
-  2.  estimate_stage_duration()→ wall-clock time at given allocation
-  3.  check_feasibility()      → validates plan fits hard limits
-  4.  propose_allocations()    → concrete worker/DIU assignment per stage
-  5.  right_size()             → shrinks over-allocated stages
+Sizing is ML-first with a transparent heuristic fallback (mirrors the Planner
+and Performance agents):
+  * Primary  : models/resource_models.pkl — multi-target HistGradientBoosting
+               trained on 500k synthetic-but-real-telemetry-grounded stages
+               (see training/ and ml/). Recommends workers / DIU / peak memory /
+               shuffle partitions / node type per stage.
+  * Fallback : the heuristic in predict_stage() / right_size(), used whenever the
+               model bundle is missing or inference fails.
+
+Responsibilities (all as one cohesive class):
+
+  1.  predict_stage()          → ML-recommended (or heuristic) settings per stage
+  2.  estimate_stage_duration()→ INTERNAL sizing estimate (not the plan runtime)
+  3.  check_feasibility()      → validates recommendations fit hard limits
+  4.  propose_allocations()    → concrete worker/DIU/node/shuffle per stage
+  5.  right_size()             → finalizes one stage (ML authoritative when present)
   6.  resolve_contention()     → serializes parallel groups that exceed limits
   7.  dynamic_reallocate()     → mid-run adjustment from Monitor data
   8.  enforce_constraints()    → final hard-cap pass before returning plan
@@ -17,7 +34,8 @@ All nine responsibilities implemented as one cohesive class:
 Integration:
   - Central Manager calls analyze() in Phase 2 (pre_checks).
   - Manager passes resource_plan into RunState for UI display.
-  - After execution, Manager calls record_actual() for learning loop.
+  - The Performance Prediction Agent consumes these settings to forecast runtime.
+  - After execution, Manager calls record_actual() for the learning loop.
   - Monitor Agent data fed into dynamic_reallocate() mid-run.
 
 Student-tier hard limits (Azure free / trial):
@@ -74,13 +92,20 @@ class StageRequirements:
     estimated_mem_gb:  float        # total GB needed across all workers
     estimated_workers: int          # Databricks workers (0 = driver-only), clamped to MAX_WORKERS
     estimated_diu:     int          # ADF DIU (copy stages only), clamped to MAX_DIU
-    estimated_duration_s: int       # wall-clock seconds at this allocation
+    estimated_duration_s: int       # INTERNAL sizing aid only — NOT the plan's
+                                    # runtime. Runtime/SLA is owned by the
+                                    # Performance Prediction Agent (see RESPONSIBILITIES.md).
     confidence:        float        # 0–1 based on data richness
     rationale:         str          # human-readable reasoning
     # Raw amounts the plan *requested* before clamping to hard limits.
     # Lets check_feasibility surface a clamp instead of swallowing it silently.
     requested_workers: int = 0
     requested_diu:     int = 0
+    # Extra settings the ML recommender proposes (Databricks stages).
+    recommended_node:    str = DEFAULT_NODE
+    recommended_shuffle: int = 8
+    # True when the ML model (not the heuristic) sized this stage.
+    ml_sized: bool = False
 
 
 @dataclass
@@ -91,9 +116,15 @@ class StageAllocation:
     diu:           int
     memory_gb:     float
     cpu:           float
-    duration_s:    int
+    duration_s:    int              # INTERNAL sizing/reallocation input only —
+                                    # the authoritative runtime is the Performance
+                                    # Prediction Agent's predicted_total_s.
     right_sized:   bool             # True if shrunk from raw prediction
     contention_adjusted: bool       # True if moved due to group conflict
+    # ── Recommended compute settings (the Resource Agent's real output) ──
+    shuffle_partitions: int = 8
+    node_type:          str = DEFAULT_NODE
+    ml_sized:           bool = False
 
 
 @dataclass
@@ -121,10 +152,19 @@ class ResourceAgent:
         csv_size_bytes: int = 0,
         schema: dict = None,
         correction_factor: float = 1.0,
+        stage_index: int = 0,
+        n_stages: int = 1,
     ) -> StageRequirements:
         """
         Translate a stage definition into concrete resource requirements.
-        Uses correction_factor derived from historical feedback (function 9).
+
+        Primary path : the trained ML recommender (models/resource_models.pkl)
+                       proposes workers / DIU / peak memory / shuffle / node.
+        Fallback path: the transparent heuristic below, used when the model is
+                       missing or inference fails (mirrors the Planner/Perf agents).
+
+        `correction_factor` (from historical feedback, function 9) still damps the
+        internal sizing estimate used by the heuristic fallback.
         """
         name  = stage.get("name", "unknown")
         stype = stage.get("type", "notebook")
@@ -132,8 +172,50 @@ class ResourceAgent:
         schema = schema or {}
 
         if stype == "copy":
-            return self._predict_copy(name, stage, mb, correction_factor)
-        return self._predict_notebook(name, stage, mb, schema, correction_factor)
+            req = self._predict_copy(name, stage, mb, correction_factor)
+        else:
+            req = self._predict_notebook(name, stage, mb, schema, correction_factor)
+
+        # ── ML override (settings only) ──────────────────────────────────────
+        self._apply_ml_recommendation(req, stage, schema, csv_size_bytes, stage_index, n_stages)
+        return req
+
+    def _apply_ml_recommendation(
+        self, req: "StageRequirements", stage: dict, schema: dict,
+        csv_size_bytes: int, stage_index: int, n_stages: int,
+    ) -> None:
+        """
+        Overlay the ML recommender's compute settings onto a heuristic
+        requirement in place. Silently no-ops (leaving the heuristic values) if
+        the model can't be loaded — so the agent always produces an answer.
+        """
+        try:
+            from .ml_predictor import ResourceMLPredictor, MLNotAvailable
+        except Exception:
+            return
+        try:
+            rec = ResourceMLPredictor.predict_settings(
+                stage, schema, csv_size_bytes, stage_index, n_stages
+            )
+        except MLNotAvailable:
+            return
+        except Exception as exc:   # never let inference crash the pre-checks
+            print(f"[ResourceAgent] ML recommend failed (non-fatal): {exc}")
+            return
+
+        if req.stage_type == "copy":
+            req.estimated_diu = rec["diu"]
+            req.estimated_cpu = float(rec["diu"])
+            req.estimated_mem_gb = rec["memory_gb"]
+        else:
+            req.estimated_workers = rec["workers"]
+            req.estimated_mem_gb = rec["memory_gb"]
+            spec = NODE_SPECS.get(rec["node_type"], NODE_SPECS[DEFAULT_NODE])
+            req.estimated_cpu = float(spec["cpu"] * max(rec["workers"], 1))
+            req.recommended_node = rec["node_type"]
+            req.recommended_shuffle = rec["shuffle_partitions"]
+        req.ml_sized = True
+        req.rationale = f"ML recommender ({rec['source']}): " + req.rationale
 
     def _predict_copy(
         self, name: str, stage: dict, mb: float, cf: float
@@ -318,42 +400,56 @@ class ResourceAgent:
         node: str = DEFAULT_NODE,
     ) -> StageAllocation:
         """
-        Function 5 — shrink a single over-allocated stage.
+        Function 5 — turn a requirement into a concrete allocation.
 
-        Caps the raw prediction at the Planner's recommended_settings and the
-        hard limits, applies a driver-only / reduce-by-one heuristic for short
-        notebook runs, and re-estimates duration for the smaller allocation.
+        When the ML recommender sized the stage, its numbers are AUTHORITATIVE:
+        they already reflect a demand-driven right-sizing, so we only cap them at
+        the hard limits (the Planner's recommended_settings is just a hint that
+        the Resource Agent may override — see RESPONSIBILITIES.md).
+
+        Fallback (heuristic) path: cap at recommended_settings + hard limits and
+        apply a size-based driver-only / reduce-by-one shrink.
         """
         if r.stage_type == "copy":
-            alloc_diu   = min(r.estimated_diu, rec_diu, MAX_DIU)
-            right_sized = alloc_diu < r.estimated_diu
+            if r.ml_sized:
+                alloc_diu = min(r.estimated_diu, MAX_DIU)      # ML is authoritative
+            else:
+                alloc_diu = min(r.estimated_diu, rec_diu, MAX_DIU)
             return StageAllocation(
                 stage_name=r.stage_name, stage_type="copy",
                 workers=0, diu=alloc_diu,
                 memory_gb=round(alloc_diu * 1.5, 2), cpu=float(alloc_diu),
                 duration_s=self.estimate_stage_duration(r, diu=alloc_diu),
-                right_sized=right_sized, contention_adjusted=False,
+                right_sized=alloc_diu < r.estimated_diu, contention_adjusted=False,
+                shuffle_partitions=8, node_type=DEFAULT_NODE, ml_sized=r.ml_sized,
             )
 
-        # notebook
-        raw_w   = r.estimated_workers
-        alloc_w = raw_w
-        if r.estimated_duration_s < 120:
-            alloc_w = 0                       # driver-only — no need for workers
-        elif r.estimated_duration_s < 300 and raw_w > 0:
-            alloc_w = max(0, raw_w - 1)       # reduce by one
-        alloc_w = min(alloc_w, rec_workers, MAX_WORKERS)
-        right_sized = alloc_w < raw_w
+        # ── notebook ────────────────────────────────────────────────────────
+        raw_w = r.estimated_workers
+        if r.ml_sized:
+            alloc_w = min(raw_w, MAX_WORKERS)                  # ML is authoritative
+            node    = r.recommended_node
+            shuffle = r.recommended_shuffle
+        else:
+            alloc_w = raw_w
+            if r.estimated_duration_s < 120:
+                alloc_w = 0                    # driver-only — no need for workers
+            elif r.estimated_duration_s < 300 and raw_w > 0:
+                alloc_w = max(0, raw_w - 1)    # reduce by one
+            alloc_w = min(alloc_w, rec_workers, MAX_WORKERS)
+            shuffle = 8
 
         spec   = NODE_SPECS.get(node, NODE_SPECS[DEFAULT_NODE])
-        mem_gb = round(4.0 + alloc_w * spec["memory_gb"], 2)
+        # Prefer the ML-recommended peak memory; else derive from the node.
+        mem_gb = r.estimated_mem_gb if r.ml_sized else round(4.0 + alloc_w * spec["memory_gb"], 2)
         cpu    = float(spec["cpu"] * max(alloc_w, 1))
         return StageAllocation(
             stage_name=r.stage_name, stage_type="notebook",
             workers=alloc_w, diu=0,
-            memory_gb=mem_gb, cpu=cpu,
+            memory_gb=round(mem_gb, 2), cpu=cpu,
             duration_s=self.estimate_stage_duration(r, workers=alloc_w),
-            right_sized=right_sized, contention_adjusted=False,
+            right_sized=alloc_w < raw_w, contention_adjusted=False,
+            shuffle_partitions=shuffle, node_type=node, ml_sized=r.ml_sized,
         )
 
     # ── 4 + 5: Allocate + right-size ─────────────────────────────────────────
@@ -426,6 +522,8 @@ class ResourceAgent:
                         memory_gb=new_mem, cpu=float(new_w * node_spec["cpu"]),
                         duration_s=self._scale_duration(a.duration_s, a.workers, new_w, a.stage_type),
                         right_sized=True, contention_adjusted=True,
+                        shuffle_partitions=a.shuffle_partitions, node_type=a.node_type,
+                        ml_sized=a.ml_sized,
                     )
 
                 # Re-check after reduction
@@ -453,6 +551,8 @@ class ResourceAgent:
                         memory_gb=a.memory_gb, cpu=a.cpu,
                         duration_s=a.duration_s, right_sized=a.right_sized,
                         contention_adjusted=True,
+                        shuffle_partitions=a.shuffle_partitions, node_type=a.node_type,
+                        ml_sized=a.ml_sized,
                     )
                 new_groups.append(keep)
             else:
@@ -508,6 +608,8 @@ class ResourceAgent:
                 memory_gb=new_mem, cpu=new_cpu,
                 duration_s=self._scale_duration(a.duration_s, base_units, new_units, a.stage_type),
                 right_sized=True, contention_adjusted=a.contention_adjusted,
+                shuffle_partitions=a.shuffle_partitions, node_type=a.node_type,
+                ml_sized=a.ml_sized,
             )
             notes.append(
                 f"Stage '{name}': hard-capped to {capped_w} workers / {capped_d} DIU"
@@ -552,6 +654,8 @@ class ResourceAgent:
                                 memory_gb=a.memory_gb, cpu=a.cpu,
                                 duration_s=a.duration_s, right_sized=a.right_sized,
                                 contention_adjusted=True,
+                                shuffle_partitions=a.shuffle_partitions, node_type=a.node_type,
+                                ml_sized=a.ml_sized,
                             )
             enforced_groups.extend(subgroups)
 
@@ -738,11 +842,14 @@ class ResourceAgent:
         corr_notebook = self.get_correction_factor("notebook")
         correction_factors = {"copy": corr_copy, "notebook": corr_notebook}
 
-        # 1 + 2 — Predict per stage
+        # 1 + 2 — Predict per stage (ML recommender first, heuristic fallback)
+        n_stages = len(stages)
         requirements: List[StageRequirements] = []
-        for s in stages:
+        for i, s in enumerate(stages):
             cf = corr_copy if s.get("type") == "copy" else corr_notebook
-            requirements.append(self.predict_stage(s, csv_size_bytes, schema, cf))
+            requirements.append(
+                self.predict_stage(s, csv_size_bytes, schema, cf, stage_index=i, n_stages=n_stages)
+            )
 
         # 3 — Feasibility check
         feasible, violations, warnings = self.check_feasibility(
@@ -797,7 +904,12 @@ class ResourceAgent:
             estimated_total_s=total_s,
             correction_factors=correction_factors,
         )
-        return _serialize(plan_out)
+        out = _serialize(plan_out)
+        # Surface which sizing path ran so the Manager/UI can label it (mirrors
+        # the Performance agent's prediction_source). Not a dataclass field to
+        # keep the ResourcePlan contract backward-compatible.
+        out["sizing_source"] = "ml_model" if any(a.ml_sized for a in allocations) else "heuristic"
+        return out
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -819,6 +931,7 @@ def _empty_plan(reason: str) -> dict:
         "peak_concurrent_workers": 0,
         "estimated_total_s": 0,
         "correction_factors": {},
+        "sizing_source": "none",
     }
 
 

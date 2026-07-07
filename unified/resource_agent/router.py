@@ -70,6 +70,9 @@ def reallocate(req: ReallocateRequest):
             duration_s=int(a.get("duration_s", 0)),
             right_sized=bool(a.get("right_sized", False)),
             contention_adjusted=bool(a.get("contention_adjusted", False)),
+            shuffle_partitions=int(a.get("shuffle_partitions", 8)),
+            node_type=a.get("node_type", "Standard_D4s_v3"),
+            ml_sized=bool(a.get("ml_sized", False)),
         )
         for a in req.allocations
     ]
@@ -108,6 +111,26 @@ def correction_factors():
         "copy":     _agent.get_correction_factor("copy"),
         "notebook": _agent.get_correction_factor("notebook"),
     }
+
+
+@router.get("/model-info")
+def model_info():
+    """Report whether the ML sizing model is loaded and its training metrics."""
+    import json as _json, os as _os
+    from .ml_predictor import ResourceMLPredictor, _MODEL_DIR
+
+    available = ResourceMLPredictor.is_available()
+    info = {"ml_available": available, "sizing_source": "ml_model" if available else "heuristic"}
+    metrics_path = _os.path.join(_MODEL_DIR, "metrics.json")
+    if _os.path.exists(metrics_path):
+        try:
+            with open(metrics_path) as f:
+                info["metrics"] = _json.load(f)
+        except Exception:
+            pass
+    if not available and ResourceMLPredictor._load_error:
+        info["load_error"] = ResourceMLPredictor._load_error
+    return info
 
 
 @router.get("/limits")

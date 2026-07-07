@@ -44,10 +44,7 @@ import math
 import os
 from dataclasses import dataclass, field, asdict
 from typing import Dict, List, Optional, Tuple
-<<<<<<< HEAD
-=======
 from .ml_predictor import MLPredictor, MLNotAvailable
->>>>>>> main
 
 _DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 _FEEDBACK_LOG = os.path.join(_DATA_DIR, "manager_feedback.jsonl")
@@ -101,21 +98,10 @@ class PerformancePredictionAgent:
         """
         Main prediction entry point. Called by the Central Manager during Phase 2.
 
-<<<<<<< HEAD
-        Args:
-            resource_plan : output of ResourceAgent.analyze()
-            predictions   : Manager's state.predictions dict
-            plan          : raw Planner plan (stages list, recommended_settings)
-            sla_target_s  : wall-clock SLA budget in seconds (default 15 min)
-
-        Returns:
-            Serialisable dict of PerformancePrediction.
-=======
         Primary path:  trained ML model (RandomForest + GradientBoosting),
                        loaded locally from performance_prediction_agent/models/.
         Fallback path: transparent formula (critical path + history damping),
                        used if model files are missing or inference fails.
->>>>>>> main
         """
         # ── 1. Extract per-stage durations from resource plan ─────────────
         allocations      = resource_plan.get("allocations", [])
@@ -124,8 +110,6 @@ class PerformancePredictionAgent:
         if not allocations:
             return self._empty_prediction("No allocations in resource plan", sla_target_s)
 
-<<<<<<< HEAD
-=======
         # ── Try ML model first ──────────────────────────────────────────
         try:
             ml_result = MLPredictor.predict(resource_plan, predictions, plan)
@@ -139,9 +123,7 @@ class PerformancePredictionAgent:
 
         # ── Formula fallback (everything below this line is UNCHANGED
         #    from the original implementation) ─────────────────────────
- 
 
->>>>>>> main
         # ── 2. Compute baseline critical-path total ───────────────────────
         #    Critical path = sum of each group's slowest stage (parallel aware)
         stage_dur: Dict[str, int] = {
@@ -212,17 +194,10 @@ class PerformancePredictionAgent:
             throughput_rows_per_s=throughput_rows_per_s,
             rationale=rationale,
         )
-<<<<<<< HEAD
-        return asdict(result)
-
-    # ── Critical-path calculator ──────────────────────────────────────────────
-=======
         d = asdict(result)
         d["prediction_source"] = "formula"
         return d
-        
-    
-    
+
     # ── Critical-path calculator ──────────────────────────────────────────────
     def _build_ml_response(
         self,
@@ -241,7 +216,7 @@ class PerformancePredictionAgent:
         predicted_total_s = ml_result["predicted_total_s"]
         outcome           = ml_result["outcome"]
         confidence         = ml_result["confidence"]
- 
+
         # Distribute the ML's total prediction across stages proportionally
         # to each stage's share of the Resource Agent's baseline — this
         # keeps stage_forecasts meaningful even though the ML model only
@@ -250,39 +225,39 @@ class PerformancePredictionAgent:
         stage_forecasts: List[StageForecast] = []
         bottleneck = allocations[0]["stage_name"] if allocations else "unknown"
         max_s = 0
- 
+
         for a in allocations:
             share = int(a.get("duration_s", 0)) / total_baseline
             adjusted_s = max(30, int(predicted_total_s * share))
- 
+
             if adjusted_s >= STAGE_RISK_HIGH_S:
                 risk = "high"
             elif adjusted_s >= STAGE_RISK_WARN_S:
                 risk = "warning"
             else:
                 risk = "ok"
- 
+
             is_bottleneck = adjusted_s > max_s
             if is_bottleneck:
                 max_s = adjusted_s
                 bottleneck = a["stage_name"]
- 
+
             stage_forecasts.append(StageForecast(
                 name=a["stage_name"], predicted_s=adjusted_s,
                 risk_level=risk, is_bottleneck=False,
             ))
- 
+
         for f in stage_forecasts:
             f.is_bottleneck = (f.name == bottleneck)
- 
+
         sla_breach = predicted_total_s > sla_target_s
- 
+
         file_size_mb = predictions.get("file_size_mb", 0) or 0
         throughput_mb_per_s = (
             round(file_size_mb / predicted_total_s, 3)
             if predicted_total_s > 0 and file_size_mb > 0 else None
         )
- 
+
         proba_str = ", ".join(
             f"{k}={v:.2f}" for k, v in ml_result.get("class_probabilities", {}).items()
         )
@@ -295,7 +270,7 @@ class PerformancePredictionAgent:
         )
         if sla_breach:
             rationale += f" SLA BREACH RISK: predicted {predicted_total_s}s > target {sla_target_s}s."
- 
+
         result = PerformancePrediction(
             predicted_total_s=predicted_total_s,
             bottleneck_stage=bottleneck,
@@ -313,7 +288,6 @@ class PerformancePredictionAgent:
         d = asdict(result)
         d["prediction_source"] = "ml_model"   # lets the dashboard show which path ran
         return d
->>>>>>> main
     def _critical_path_duration(
         self,
         stage_dur: Dict[str, int],

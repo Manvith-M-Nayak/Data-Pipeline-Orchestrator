@@ -24,6 +24,13 @@ unified/planner_agent/model/planner_agent_lora/
 
 !unified/frontend/package.json
 !unified/frontend/package-lock.json
+!unified/metrics.json
+!unified/resource_agent/models/metrics.json
+!unified/performance_prediction_agent/models/metrics.json
+
+Datasets/Datasets/Cleaned/job_runs_cleaned.csv
+Datasets/Datasets/Synthetic/synthetic_planner_dataset.json
+Datasets/Datasets/Synthetic/synthetic_resource_dataset.json
 
 CLAUDE.md
 

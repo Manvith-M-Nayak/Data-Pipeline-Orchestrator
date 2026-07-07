@@ -26,3 +26,13 @@ azure-storage-blob>=12.20.0
 
 # File handling
 python-multipart==0.0.9
+
+# Machine learning — resource_agent + performance_prediction_agent load trained
+# model bundles (.pkl) at runtime. joblib pickles are tied to the sklearn version
+# that wrote them, so pin sklearn exactly and train (Kaggle notebook / run_training)
+# against the SAME version, or model loading fails and the agents fall back to
+# their heuristics. See resource_agent/training/README.md.
+scikit-learn==1.7.0
+joblib>=1.3.0
+numpy>=1.26
+pandas>=2.0

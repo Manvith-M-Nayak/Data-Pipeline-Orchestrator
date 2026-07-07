@@ -67,6 +67,7 @@ export const resource = {
   accuracy:          () => req("/resource/accuracy"),
   correctionFactors: () => req("/resource/correction-factors"),
   limits:            () => req("/resource/limits"),
+  modelInfo:         () => req("/resource/model-info"),
 };
 export const perfPrediction = {
   predict: (resourcePlan, predictions, plan, slaTargetS = 900) =>

@@ -1,0 +1,27 @@
+{
+  "sklearn_version": "1.7.0",
+  "rows": 5000,
+  "targets": {
+    "rec_workers": {
+      "mae": 0.083,
+      "r2": 0.9886,
+      "within1_acc": 1.0
+    },
+    "rec_diu": {
+      "mae": 0.046,
+      "r2": 0.9881,
+      "within1_acc": 0.995
+    },
+    "rec_memory_gb": {
+      "mae": 0.396,
+      "r2": 0.9402
+    },
+    "rec_shuffle_partitions": {
+      "mae": 2.945,
+      "r2": 0.934
+    }
+  },
+  "node_type": {
+    "balanced_accuracy": 0.5
+  }
+}

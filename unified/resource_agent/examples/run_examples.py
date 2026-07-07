@@ -134,16 +134,48 @@ def section_duration(agent):
 
 
 def section_right_size(agent):
-    _hr("C. right_size() — short runs collapse to driver-only")
-    short = agent.predict_stage(
-        {"name": "tiny", "type": "notebook", "source_container": "a",
-         "sink_container": "b", "num_workers": 4},
-        csv_size_bytes=0, schema={"row_count": 100})
-    alloc = agent.right_size(short, rec_workers=3, rec_diu=8)
-    print(f"  tiny predicted {short.estimated_workers}w / {short.estimated_duration_s}s  "
+    _hr("C. right_size() heuristic fallback — short runs collapse to driver-only")
+    # Force the heuristic path: build a requirement by hand (no ML overlay) so
+    # this section validates the fallback shrink logic regardless of whether the
+    # trained model bundle is present.
+    from resource_agent.resource_agent import StageRequirements
+    big = StageRequirements(
+        stage_name="tiny", stage_type="notebook",
+        estimated_cpu=16.0, estimated_mem_gb=68.0, estimated_workers=4,
+        estimated_diu=0, estimated_duration_s=90, confidence=0.6,
+        rationale="hand-built heuristic requirement", requested_workers=4,
+        requested_diu=0, ml_sized=False,
+    )
+    alloc = agent.right_size(big, rec_workers=3, rec_diu=8)
+    print(f"  requirement {big.estimated_workers}w / {big.estimated_duration_s}s  "
           f"-> allocated {alloc.workers}w  right_sized={alloc.right_sized}")
     _assert(alloc.workers == 0, "a sub-2-minute notebook is right-sized to driver-only")
-    _assert(alloc.right_sized, "right_sized flag is set")
+    _assert(alloc.right_sized, "right_sized flag is set (shrunk from 4 workers)")
+
+
+def section_ml(agent):
+    _hr("C2. ML recommender — settings scale with workload")
+    from resource_agent.ml_predictor import ResourceMLPredictor
+    if not ResourceMLPredictor.is_available():
+        print("  [SKIP] no model bundle present (heuristic fallback active) — "
+              "run training/generate_resource_dataset.py + train_resource_model.py")
+        return
+    small = agent.predict_stage(
+        {"name": "s", "type": "notebook", "transformations": ["x=1"]},
+        csv_size_bytes=20_000 * 140, schema={"row_count": 20_000, "columns": list("abc")},
+        stage_index=1, n_stages=3)
+    heavy = agent.predict_stage(
+        {"name": "h", "type": "notebook", "transformations": ["x=1"],
+         "aggregations": {"group_by": ["g"], "agg_exprs": ["sum(a)", "avg(b)"]}},
+        csv_size_bytes=40_000_000 * 140,
+        schema={"row_count": 40_000_000, "columns": list("abcdefgh")},
+        stage_index=2, n_stages=3)
+    print(f"  small notebook -> {small.estimated_workers}w (ml_sized={small.ml_sized})")
+    print(f"  heavy  agg     -> {heavy.estimated_workers}w node={heavy.recommended_node} "
+          f"shuffle={heavy.recommended_shuffle} (ml_sized={heavy.ml_sized})")
+    _assert(small.ml_sized and heavy.ml_sized, "ML recommender sized both stages")
+    _assert(heavy.estimated_workers >= small.estimated_workers,
+            "a heavy aggregation gets at least as many workers as a small stage")
 
 
 def section_enforce(agent):
@@ -212,6 +244,7 @@ def main():
     section_analyze(agent)
     section_duration(agent)
     section_right_size(agent)
+    section_ml(agent)
     section_enforce(agent)
     section_reallocate(agent)
     section_feedback()

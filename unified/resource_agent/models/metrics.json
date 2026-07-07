@@ -1,0 +1,29 @@
+{
+  "sklearn_version": "1.7.0",
+  "rows": 500000,
+  "targets": {
+    "rec_workers": {
+      "mae": 0.066,
+      "r2": 0.9896,
+      "exact_acc": 0.9642,
+      "within1_acc": 0.9998
+    },
+    "rec_diu": {
+      "mae": 0.03,
+      "r2": 0.9922,
+      "exact_acc": 0.9794,
+      "within1_acc": 0.9965
+    },
+    "rec_memory_gb": {
+      "mae": 0.451,
+      "r2": 0.9392
+    },
+    "rec_shuffle_partitions": {
+      "mae": 3.053,
+      "r2": 0.9363
+    }
+  },
+  "node_type": {
+    "balanced_accuracy": 0.4571
+  }
+}

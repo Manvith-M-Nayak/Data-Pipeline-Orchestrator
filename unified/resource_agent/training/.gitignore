@@ -1,0 +1,7 @@
+# The generated training CSV is a build artifact — regenerate it, don't commit it.
+resource_training.csv
+_sample.csv
+*.csv
+
+# The trained model bundle IS committed (see resource_agent/models/) so the agent
+# works out of the box; only the bulky intermediate data is ignored here.
