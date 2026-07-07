@@ -34,6 +34,8 @@ class SemanticResult:
     reasoning: str                      # model's explanation
     model: str = ""                     # which base model judged
     available: bool = True              # False = Ollama/model was unreachable
+    # specific findings: [{"stage": ..., "problem": ..., "suggestion": ...}]
+    issues: List[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -69,8 +71,8 @@ class AssuranceResult:
         """SUMMARY tier — one compact line, always shown."""
         struct = self._glyph(self._structure_ok())
         schema = self._glyph(self._schema_ok())
-        if self.semantic_result and not self.semantic_result.available:
-            intent = "—"     # — unavailable
+        if self.semantic_result is None or not self.semantic_result.available:
+            intent = "—"     # — skipped or unavailable, not actually judged
         else:
             intent = self._glyph(self._intent_ok())
         verb = "passed" if self.overall_status == "pass" else "FAILED"
@@ -91,6 +93,9 @@ class AssuranceResult:
                 state = "FLAGGED — possible mismatch" if s.flagged else "no mismatch"
                 lines.append(f"Semantic check ({s.model}): {state}")
                 lines.append(f"  reasoning: {s.reasoning}")
+                for it in s.issues:
+                    lines.append(f"  - [{it.get('stage', 'plan')}] {it.get('problem', '')}"
+                                 + (f" → fix: {it['suggestion']}" if it.get("suggestion") else ""))
         else:
             lines.append("Semantic check: skipped")
         return "\n".join(lines)
@@ -114,6 +119,9 @@ class AssuranceResult:
             tag = "BLOCKING" if self.semantic_blocks_overall else "ADVISORY (human may override)"
             lines.append(f"[Intent match] FLAGGED — {tag}")
             lines.append(f"   why: {self.semantic_result.reasoning}")
+            for it in self.semantic_result.issues:
+                lines.append(f"   - [{it.get('stage', 'plan')}] {it.get('problem', '')}"
+                             + (f" → fix: {it['suggestion']}" if it.get("suggestion") else ""))
         return "\n".join(lines)
 
     def to_dict(self) -> dict:

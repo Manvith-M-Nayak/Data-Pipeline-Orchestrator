@@ -433,6 +433,28 @@ class CentralManager:
     def analyze_parallelism(self, state: RunState) -> dict:
         stages = state.plan.get("stages", [])
 
+        # A concurrency plan chosen at planning time (by the user or the
+        # planner) takes precedence over the derived maximum parallelism —
+        # it was already dependency-validated by the planner.
+        plan_groups = state.plan.get("execution_groups")
+        if isinstance(plan_groups, list) and plan_groups:
+            parallel_count = sum(1 for g in plan_groups if len(g) > 1)
+            result = {
+                "execution_groups":  plan_groups,
+                "parallel_groups":   parallel_count,
+                "sequential_groups": len(plan_groups) - parallel_count,
+                "can_parallelize":   parallel_count > 0,
+            }
+            state.parallelism = result
+            self._log(
+                state, "PARALLELISM",
+                f"Using execution groups from the plan "
+                f"({parallel_count} parallel group(s))",
+                f"groups: {plan_groups}",
+                "ok" if parallel_count > 0 else "info",
+            )
+            return result
+
         # Build dependency graph: stage B depends on stage A if A.sink == B.source.
         # copy stages use dataset refs (DS_Bronze); notebook stages use container refs (bronze).
         # Normalize both to a lowercase bare name: "DS_Bronze" → "bronze", "bronze" → "bronze".

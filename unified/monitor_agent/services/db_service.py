@@ -3,7 +3,12 @@ import json
 import aiosqlite
 from typing import Optional, List, Dict, Any
 
-DB_PATH = os.getenv("DB_PATH", "./data/adf_monitor.db")
+# Default is anchored to the project root (unified/), not the CWD, so the
+# server finds the same DB regardless of where it was launched from.
+_DEFAULT_DB = os.path.normpath(os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "..", "data", "adf_monitor.db"
+))
+DB_PATH = os.getenv("DB_PATH", _DEFAULT_DB)
 
 
 class DBService:

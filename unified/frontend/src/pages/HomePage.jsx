@@ -316,9 +316,13 @@ export default function HomePage() {
                   <CheckCircle size={13} /> Plan loaded from Planner Agent
                 </div>
                 <div style={{ fontSize: 12, color: "#64748b" }}>
-                  {savedPlan.config?.stages?.length || 0} stages ·
+                  {savedPlan.config?.stages?.length || 0} stages
+                  {savedPlan.config?.execution_groups?.some((g) => g.length > 1) && (
+                    <span style={{ color: "#a78bfa" }}> (parallel ⚡)</span>
+                  )} ·
                   cluster: {savedPlan.config?.recommended_settings?.node_type || "auto"} ·
-                  workers: {savedPlan.config?.recommended_settings?.num_workers ?? "auto"}
+                  workers: {savedPlan.config?.recommended_settings?.num_workers ?? "auto"} ·
+                  DIU: {savedPlan.config?.recommended_settings?.diu ?? "auto"}
                 </div>
               </div>
               <button onClick={() => navigate("/executor")} style={{ ...S.ctaBtn(true), marginTop: 12 }}>

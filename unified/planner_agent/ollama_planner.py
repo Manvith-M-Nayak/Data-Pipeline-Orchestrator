@@ -23,8 +23,13 @@ from .planner_common import (
     MAX_CONTAINERS,
     _print_plan_summary,
     _structural_validate,
+    apply_custom_settings,
+    apply_prompt_stage_names,
     build_default_config,
+    enforce_container_count,
     get_recommended_settings,
+    redistribute_operations,
+    required_containers_for_prompt,
 )
 
 # Exact system prompt the adapter was trained with (matches the Modelfile).
@@ -69,12 +74,22 @@ def decide_pipeline_config(
     Returns (config_dict, used_fallback_bool).
 
     Mirrors groq_planner.decide_pipeline_config's signature and return shape.
-    num_containers / container_names are used only for the deterministic
-    fallback — the fine-tuned model chooses its own stage count.
+    The fine-tuned model has a fixed contract and picks its own stage count,
+    so when the user requests num_containers / container_names they are
+    enforced afterwards via enforce_container_count (pass-through stages are
+    appended if the model produced fewer, extras trimmed if more).
     """
     rec = get_recommended_settings(schema.get("size_hint", "medium"))
     if custom_settings:
         rec.update(custom_settings)
+
+    # K numbered stages in the prompt are transformation stages — the copy
+    # stage must not consume one of them, so K+2 containers are required.
+    needed = required_containers_for_prompt(user_prompt)
+    if needed and (num_containers or 0) < needed:
+        if num_containers:
+            print(f"   Prompt numbers {needed - 2} stage(s) — raising containers {num_containers} → {needed}")
+        num_containers = needed
 
     user_message = json.dumps(
         {"schema": schema, "user_prompt": user_prompt},
@@ -92,7 +107,10 @@ def decide_pipeline_config(
         "options": {
             "temperature": 0.2,
             "top_p": 0.8,
-            "num_ctx": 2048,
+            # 2048 truncated large schemas + the generated config itself;
+            # the full contract (system + schema + samples + output JSON)
+            # regularly exceeds it, which silently degraded output quality.
+            "num_ctx": 4096,
         },
     }
 
@@ -121,7 +139,20 @@ def decide_pipeline_config(
         if clist:
             config["num_containers"] = min(MAX_CONTAINERS, len(clist))
 
-        config = _structural_validate(config, schema)
+        # The model ignores stage-count requests (fixed contract) — enforce
+        # the user's choice on the produced config.
+        if num_containers:
+            config = enforce_container_count(config, num_containers, container_names, rec)
+        # Spread stacked operations into any do-nothing stages — only when
+        # the prompt shows distribution intent (numbered stages, "each stage",
+        # "distribute", ...); otherwise the model's grouping is respected.
+        config = redistribute_operations(config, user_prompt)
+        # Explicit user resource settings override whatever the model emitted.
+        config = apply_custom_settings(config, custom_settings)
+        # Prompt-referenced stage numbers become the notebook stage names.
+        config = apply_prompt_stage_names(config, user_prompt)
+
+        config = _structural_validate(config, schema, custom_settings=custom_settings)
         _print_plan_summary(config)
         return config, False
 

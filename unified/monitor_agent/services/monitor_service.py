@@ -19,6 +19,10 @@ class MonitorService:
         self._db      = db
         self._groq    = groq
         self._tracked: Dict[str, Dict] = {}
+        # run_id -> verdict for runs already logged as anomalous — prevents
+        # re-logging (and re-calling Groq) on every 20s poll while the run
+        # remains slow, and keeps the warning visible in live updates
+        self._anomaly_verdicts: Dict[str, str] = {}
         self._sem     = asyncio.Semaphore(ANALYSIS_CONCURRENCY)
         self.ws_clients: Set[WebSocket] = set()
 
@@ -44,25 +48,27 @@ class MonitorService:
         live_ids  = {r["runId"] for r in live_runs}
 
         for run_id in set(self._tracked) - live_ids:
+            self._anomaly_verdicts.pop(run_id, None)
             asyncio.create_task(self._handle_completed_run(self._tracked.pop(run_id)))
 
-        anomaly_warnings: Dict[str, str] = {}
         for run in live_runs:
             run_id = run["runId"]
             self._tracked[run_id] = run
             await self._db.upsert_run(run)
 
+            if run_id in self._anomaly_verdicts:
+                continue
             stats = await self._db.get_historical_stats(run.get("pipelineName", ""))
             if stats["count"] >= 3 and run.get("runStart"):
                 elapsed = self._elapsed(run["runStart"])
                 if elapsed > stats["p95"] * 1.2:
                     verdict = await self._groq.detect_anomaly(run["pipelineName"], elapsed, stats)
                     if verdict.get("is_anomaly"):
+                        self._anomaly_verdicts[run_id] = verdict.get("verdict", "")
                         await self._db.log_anomaly(
                             run_id, run["pipelineName"], elapsed,
                             stats["avg"], stats["p95"], verdict.get("verdict", ""),
                         )
-                        anomaly_warnings[run_id] = verdict.get("verdict", "")
 
         await self._broadcast({
             "event": "live_update",
@@ -73,7 +79,7 @@ class MonitorService:
                     "status":       r.get("status"),
                     "runStart":     r.get("runStart"),
                     "elapsedSec":   self._elapsed(r.get("runStart", "")),
-                    "anomaly":      anomaly_warnings.get(r["runId"]),
+                    "anomaly":      self._anomaly_verdicts.get(r["runId"]),
                 }
                 for r in live_runs
             ],
@@ -86,7 +92,8 @@ class MonitorService:
             activities = await self._adf.get_activity_runs(run_id)
             stats     = await self._db.get_historical_stats(pipeline_name)
             await self._db.upsert_run(final)
-        except Exception:
+        except Exception as exc:
+            print(f"[monitor] completed-run fetch failed for {run_id}: {exc}")
             return
         asyncio.create_task(
             self._analyze(run_id, pipeline_name, final, activities, stats)
@@ -104,8 +111,8 @@ class MonitorService:
                     "severity": analysis.get("severity", "low"),
                     "summary":  analysis.get("status_summary", ""),
                 })
-            except Exception:
-                pass
+            except Exception as exc:
+                print(f"[monitor] analysis failed for {run_id}: {exc}")
 
     async def sync_historical(self, hours: int = 48) -> int:
         runs = await self._adf.get_recent_pipeline_runs(hours)
