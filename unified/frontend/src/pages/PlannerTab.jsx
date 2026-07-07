@@ -201,9 +201,18 @@ export default function PlannerTab() {
         lines.push(`- Stage '${it.stage}': ${it.problem}${it.suggestion ? ` — fix: ${it.suggestion}` : ""}`));
     }
     if (!lines.length) return;
+    const constraints = [];
+    if (numStages !== null) {
+      constraints.push(
+        `The pipeline must have exactly ${numStages - 1} stage(s); ` +
+        "distribute the operations across ALL of them in the order the request numbers them — " +
+        "do not stack multiple operations into one stage while leaving others empty."
+      );
+    }
     await handlePlan(
       "IMPORTANT — a previous plan for this request was rejected by review. " +
-      "Generate a corrected plan that fixes these issues:\n" + lines.join("\n")
+      "Generate a corrected plan that fixes these issues:\n" + lines.join("\n") +
+      (constraints.length ? "\n" + constraints.join("\n") : "")
     );
   }
 
@@ -319,11 +328,15 @@ export default function PlannerTab() {
         )}
       </div>
 
-      {/* Prompt */}
-      {detected && !plan && (
+      {/* Prompt — stays visible after planning so it can be edited + re-run */}
+      {detected && (
         <div style={C.card}>
           <div style={C.cardHdr}><Brain size={16} color="#a78bfa" />Describe your goal</div>
-          <div style={C.cardSub}>Plain English — no technical knowledge needed.</div>
+          <div style={C.cardSub}>
+            {plan
+              ? "Edit the prompt and re-generate to refine the plan."
+              : "Plain English — no technical knowledge needed."}
+          </div>
 
           <textarea
             style={{ ...C.textarea, minHeight: 80 }}
@@ -333,19 +346,23 @@ export default function PlannerTab() {
             onKeyDown={(e) => { if (e.key === "Enter" && e.metaKey) handlePlan(); }}
           />
 
-          <div style={{ marginTop: 8, marginBottom: 6, fontSize: 11, color: "#475569" }}>Click an example to use it:</div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {EXAMPLE_PROMPTS.map((p, i) => (
-              <button key={i} onClick={() => setPrompt(p)}
-                style={{ fontSize: 11, color: "#64748b", background: "#0f172a", border: "1px solid #334155", borderRadius: 6, padding: "4px 8px", cursor: "pointer", textAlign: "left" }}>
-                {p.slice(0, 55)}…
-              </button>
-            ))}
-          </div>
+          {!plan && (
+            <>
+              <div style={{ marginTop: 8, marginBottom: 6, fontSize: 11, color: "#475569" }}>Click an example to use it:</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {EXAMPLE_PROMPTS.map((p, i) => (
+                  <button key={i} onClick={() => setPrompt(p)}
+                    style={{ fontSize: 11, color: "#64748b", background: "#0f172a", border: "1px solid #334155", borderRadius: 6, padding: "4px 8px", cursor: "pointer", textAlign: "left" }}>
+                    {p.slice(0, 55)}…
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
 
           <div style={C.btnRow}>
             <button style={C.btnPrimary(!prompt.trim() || planning)} disabled={!prompt.trim() || planning} onClick={handlePlan}>
-              <Brain size={13} />{planning ? <><Spinner /> Planning…</> : "Generate Pipeline Plan"}
+              <Brain size={13} />{planning ? <><Spinner /> Planning…</> : plan ? "Re-generate Plan" : "Generate Pipeline Plan"}
             </button>
           </div>
         </div>
@@ -368,7 +385,9 @@ export default function PlannerTab() {
               <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 4 }}>
                 Storage Containers (2–10)
                 <span style={{ color: "#475569", marginLeft: 6 }}>
-                  {numStages !== null ? `= ${numStages - 1} pipeline stage(s)` : "auto — model decides"}
+                  {numStages !== null
+                    ? `= 1 copy + ${numStages - 2} transform stage(s)`
+                    : "auto — model decides"}
                 </span>
               </div>
               <input

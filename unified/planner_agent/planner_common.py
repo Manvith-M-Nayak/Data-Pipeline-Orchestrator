@@ -159,6 +159,105 @@ def apply_prompt_stage_names(config: dict, user_prompt: str) -> dict:
     return config
 
 
+def _stage_op_load(s: dict) -> int:
+    """How many meaningful operations a notebook stage performs."""
+    if s.get("type") != "notebook":
+        return 0
+    transforms = [t for t in (s.get("transformations") or [])
+                  if t and "processed_time" not in t]
+    load = len(transforms)
+    if s.get("filter_condition"):
+        load += 1
+    if (s.get("aggregation") or {}).get("aggregations"):
+        load += 1
+    return load
+
+
+# Signals that the user wants the work spread over the stages: numbered
+# stages ("Stage 1: ...", "step 2 ..."), per-stage phrasing, or explicit
+# distribute/split language.
+_DISTRIBUTE_HINTS = re.compile(
+    r"\b(?:stage|step)\s*[-#]?\s*\d+"
+    r"|\b(?:each|every|separate|individual)\s+(?:stage|step)s?\b"
+    r"|\bone\s+(?:operation|transformation|filter|step)\s+per\s+(?:stage|step)\b"
+    r"|\bdistribute\b|\bsplit\s+(?:across|into|over)\b",
+    re.IGNORECASE,
+)
+
+
+def prompt_requests_distribution(user_prompt) -> bool:
+    return bool(user_prompt) and bool(_DISTRIBUTE_HINTS.search(str(user_prompt)))
+
+
+def required_containers_for_prompt(user_prompt) -> int:
+    """Containers needed to honor the stages the user numbered in the prompt.
+
+    K numbered stages ("Stage 1..K") are transformation stages — the ADF copy
+    stage must NOT consume one of them: copy + K notebooks = K+1 stages =
+    K+2 containers. Returns 0 when the prompt numbers no stages."""
+    if not user_prompt:
+        return 0
+    nums = {m.group(1) for m in re.finditer(
+        r"\b(?:stage|step)\s*[-#]?\s*(\d+)", str(user_prompt), re.IGNORECASE)}
+    return min(MAX_CONTAINERS, len(nums) + 2) if nums else 0
+
+
+def redistribute_operations(config: dict, user_prompt: str = None) -> dict:
+    """Spread stacked operations into pass-through stages.
+
+    The LLM often piles every transformation/filter into one notebook stage
+    and leaves later stages doing nothing (especially after padding to a
+    user-requested stage count). A stage's output is a full CSV, so a later
+    operation can always move one stage forward: repeatedly shift the LAST
+    operation (aggregation, then filter, then the tail half of transforms —
+    matching the transforms → filter → aggregation execution order) from any
+    stage doing ≥2 things into an adjacent do-nothing stage.
+
+    Only applied when the user asked for it: user_prompt (when given) must
+    show distribution intent — numbered stages, per-stage phrasing, or
+    distribute/split language. Pass user_prompt=None to force it."""
+    if user_prompt is not None and not prompt_requests_distribution(user_prompt):
+        return config
+    stages = config.get("stages", [])
+    moved_any = True
+    while moved_any:
+        moved_any = False
+        # Fill empty stages right-to-left so the last operation of a loaded
+        # stage lands in the last empty stage (keeps transforms → filter →
+        # aggregation execution order intact across the chain).
+        for i in range(len(stages) - 1, 0, -1):
+            tgt = stages[i]
+            if tgt.get("type") != "notebook" or _stage_op_load(tgt) != 0:
+                continue
+            # Nearest loaded stage to the left, crossing only empty stages —
+            # crossing a stage that does work would reorder operations.
+            j = i - 1
+            while j > 0 and stages[j].get("type") == "notebook" and _stage_op_load(stages[j]) == 0:
+                j -= 1
+            src = stages[j]
+            if src.get("type") != "notebook" or _stage_op_load(src) < 2:
+                continue
+
+            agg = src.get("aggregation")
+            if agg and agg.get("aggregations"):
+                tgt["aggregation"] = agg
+                src.pop("aggregation", None)
+            elif src.get("filter_condition"):
+                tgt["filter_condition"] = src["filter_condition"]
+                src["filter_condition"] = None
+            else:
+                transforms = [t for t in (src.get("transformations") or [])
+                              if t and "processed_time" not in t]
+                if len(transforms) < 2:
+                    continue
+                half = len(transforms) // 2
+                src["transformations"] = transforms[:half] + ["processed_time = currentTimestamp()"]
+                tgt["transformations"] = transforms[half:] + ["processed_time = currentTimestamp()"]
+            print(f"   Redistributing work: '{src.get('name')}' → '{tgt.get('name')}'")
+            moved_any = True
+    return config
+
+
 def apply_custom_settings(config: dict, custom_settings: dict) -> dict:
     """Explicit user resource settings override whatever the LLM produced —
     both the top-level recommendation and every stage's own values. Without
@@ -520,6 +619,39 @@ def _structural_validate(config: dict, schema: dict = None, custom_settings: dic
             _max_workers = max(_max_workers, int(custom_settings["num_workers"]))
         if custom_settings.get("shuffle_partitions") is not None:
             _max_shuffle = max(_max_shuffle, int(custom_settings["shuffle_partitions"]))
+
+    # The model often maps the user's "Stage 1" onto the literal first stage.
+    # Coercing that stage to copy would DELETE its operations (off-by-one:
+    # every filter shifts up a stage and the first one is lost). Instead,
+    # insert a dedicated landing container + copy stage in front, keeping all
+    # transformation stages intact. If padding previously appended a trailing
+    # do-nothing stage, drop it to reclaim the slot.
+    if stages and stages[0].get("type") != "copy" and _stage_op_load(stages[0]) > 0 and clist:
+        landing, n = _sanitize_container_name(f"{clist[0]}-landing"), 1
+        while landing in clist:
+            n += 1
+            landing = _sanitize_container_name(f"{clist[0]}-landing-{n}")
+        clist.insert(0, landing)
+        stages.insert(0, {
+            "name": f"Ingest_{landing.title().replace('-', '')}",
+            "type": "copy",
+            "source_dataset": _dataset_name(landing),
+            "sink_dataset":   _dataset_name(clist[1]),
+            "diu": 2,
+        })
+        print(f"   First stage transforms data — inserted copy stage '{stages[0]['name']}' "
+              f"(landing container '{landing}') so ingestion does not consume a transformation stage")
+        if (len(stages) > 2 and stages[-1].get("type") == "notebook"
+                and _stage_op_load(stages[-1]) == 0 and len(clist) > 2):
+            dropped = stages.pop()
+            clist.pop()
+            if stages[-1].get("type") == "notebook":
+                stages[-1]["sink_container"] = clist[-1]
+            print(f"   Dropped trailing pass-through stage '{dropped.get('name')}' to keep the stage count")
+        config["containers_to_create"] = clist
+        config["containers"] = {f"stage{i}": c for i, c in enumerate(clist)}
+        config["datasets"] = _build_datasets(clist)
+        config["num_containers"] = len(clist)
 
     for i, s in enumerate(stages):
         if i == 0 and s.get("type") != "copy":

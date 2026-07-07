@@ -28,6 +28,8 @@ from .planner_common import (
     build_default_config,
     enforce_container_count,
     get_recommended_settings,
+    redistribute_operations,
+    required_containers_for_prompt,
 )
 
 # Exact system prompt the adapter was trained with (matches the Modelfile).
@@ -81,6 +83,14 @@ def decide_pipeline_config(
     if custom_settings:
         rec.update(custom_settings)
 
+    # K numbered stages in the prompt are transformation stages — the copy
+    # stage must not consume one of them, so K+2 containers are required.
+    needed = required_containers_for_prompt(user_prompt)
+    if needed and (num_containers or 0) < needed:
+        if num_containers:
+            print(f"   Prompt numbers {needed - 2} stage(s) — raising containers {num_containers} → {needed}")
+        num_containers = needed
+
     user_message = json.dumps(
         {"schema": schema, "user_prompt": user_prompt},
         ensure_ascii=False,
@@ -133,6 +143,10 @@ def decide_pipeline_config(
         # the user's choice on the produced config.
         if num_containers:
             config = enforce_container_count(config, num_containers, container_names, rec)
+        # Spread stacked operations into any do-nothing stages — only when
+        # the prompt shows distribution intent (numbered stages, "each stage",
+        # "distribute", ...); otherwise the model's grouping is respected.
+        config = redistribute_operations(config, user_prompt)
         # Explicit user resource settings override whatever the model emitted.
         config = apply_custom_settings(config, custom_settings)
         # Prompt-referenced stage numbers become the notebook stage names.
