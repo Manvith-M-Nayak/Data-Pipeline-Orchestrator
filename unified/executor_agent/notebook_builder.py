@@ -139,7 +139,25 @@ def _convert_filter(expr: str) -> str:
             vals.append(it if re.fullmatch(_NUM, it) else '"' + it.strip("'\"") + '"')
         return f'col("{c}").isin({", ".join(vals)})'
 
+    # SQL-style: col LIKE 'a%' / '%s' / '%x%' → startswith / endswith / contains
+    m = re.match(r"^(\w+)\s+(not\s+)?like\s+'([^']+)'$", e, re.IGNORECASE)
+    if m:
+        c, neg, pat = m.groups()
+        if pat.startswith("%") and pat.endswith("%") and len(pat) > 2:
+            cond = f'col("{c}").contains("{pat[1:-1]}")'
+        elif pat.endswith("%"):
+            cond = f'col("{c}").startswith("{pat[:-1]}")'
+        elif pat.startswith("%"):
+            cond = f'col("{c}").endswith("{pat[1:]}")'
+        else:
+            cond = f'col("{c}") == "{pat}"'
+        return f"~({cond})" if neg else cond
+
     patterns = [
+        # function-style string matchers
+        (r"^startsWith\((\w+),\s*'([^']+)'\)$", r'col("\1").startswith("\2")'),
+        (r"^endsWith\((\w+),\s*'([^']+)'\)$",   r'col("\1").endswith("\2")'),
+        (r"^contains\((\w+),\s*'([^']+)'\)$",   r'col("\1").contains("\2")'),
         # function-style ADF-DSL (Groq)
         (r'^equals\(toInteger\((\w+)\),\s*(-?\d+)\)$',    r'col("\1").cast("int") == \2'),
         (r'^notEquals\(toInteger\((\w+)\),\s*(-?\d+)\)$', r'col("\1").cast("int") != \2'),

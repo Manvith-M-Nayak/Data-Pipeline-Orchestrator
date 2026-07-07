@@ -121,6 +121,44 @@ def _build_stages(clist: list, rec: dict) -> list:
     return stages
 
 
+def apply_prompt_stage_names(config: dict, user_prompt: str) -> dict:
+    """If the user's prompt references numbered stages ("Stage 1: ...",
+    "step 2 ..."), rename the notebook stages to match that vocabulary
+    (Stage_1, Stage_2, ...) so the plan mirrors the user's own naming.
+    The first (copy/ingest) stage always keeps its generated name.
+    execution_order / execution_groups references are renamed in step."""
+    if not user_prompt or not isinstance(user_prompt, str):
+        return config
+    nums = []
+    for m in re.finditer(r"\b(?:stage|step)\s*[-#]?\s*(\d+)", user_prompt, re.IGNORECASE):
+        if m.group(1) not in nums:
+            nums.append(m.group(1))
+    if not nums:
+        return config
+
+    stages = config.get("stages", [])
+    notebooks = [s for s in stages if s.get("type") != "copy"]
+    used = {s.get("name") for s in stages}
+    mapping = {}
+    for s, n in zip(notebooks, nums):
+        new_name = f"Stage_{n}"
+        if new_name == s.get("name") or new_name in used:
+            continue
+        mapping[s.get("name")] = new_name
+        used.add(new_name)
+        s["name"] = new_name
+    if not mapping:
+        return config
+
+    config["execution_order"] = [mapping.get(n, n) for n in config.get("execution_order", [])]
+    if isinstance(config.get("execution_groups"), list):
+        config["execution_groups"] = [
+            [mapping.get(n, n) for n in g] if isinstance(g, list) else g
+            for g in config["execution_groups"]
+        ]
+    return config
+
+
 def apply_custom_settings(config: dict, custom_settings: dict) -> dict:
     """Explicit user resource settings override whatever the LLM produced —
     both the top-level recommendation and every stage's own values. Without
@@ -340,7 +378,7 @@ def build_default_config(
     stages = _build_stages(clist, rec)
     execution_order = [s["name"] for s in stages]
 
-    return {
+    config = {
         "containers":           containers,
         "containers_to_create": clist,
         "datasets":             datasets,
@@ -356,6 +394,7 @@ def build_default_config(
             f"Remaining stages run as Databricks notebooks invoked by ADF."
         ),
     }
+    return apply_prompt_stage_names(config, user_prompt)
 
 
 _AGG_OPS = {"avg", "sum", "min", "max", "count"}

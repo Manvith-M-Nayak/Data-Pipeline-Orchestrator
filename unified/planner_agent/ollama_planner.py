@@ -24,6 +24,7 @@ from .planner_common import (
     _print_plan_summary,
     _structural_validate,
     apply_custom_settings,
+    apply_prompt_stage_names,
     build_default_config,
     enforce_container_count,
     get_recommended_settings,
@@ -134,6 +135,8 @@ def decide_pipeline_config(
             config = enforce_container_count(config, num_containers, container_names, rec)
         # Explicit user resource settings override whatever the model emitted.
         config = apply_custom_settings(config, custom_settings)
+        # Prompt-referenced stage numbers become the notebook stage names.
+        config = apply_prompt_stage_names(config, user_prompt)
 
         config = _structural_validate(config, schema, custom_settings=custom_settings)
         _print_plan_summary(config)

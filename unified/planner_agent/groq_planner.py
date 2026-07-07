@@ -21,6 +21,7 @@ from .planner_common import (
     _resolve_container_names,
     _structural_validate,
     apply_custom_settings,
+    apply_prompt_stage_names,
     build_default_config,
     enforce_container_count,
     get_recommended_settings,
@@ -88,11 +89,15 @@ Write transformations as 'output_column = expression' strings. Supported:
   - ALWAYS include: processed_time = currentTimestamp()
 
 === FILTER SYNTAX ===
-For row filters, set "filter_condition" on the notebook stage. Examples:
+For row filters, set "filter_condition" on the notebook stage (ONE condition
+per stage — use separate sequential stages for multiple filters). Examples:
   - equals(toInteger(eggs), 1)
   - notEquals(toInteger(status), 0)
   - greater(toInteger(amount), 100)
   - isNull(email)
+  - startsWith(animal_name, 'a')
+  - endsWith(animal_name, 's')
+  - contains(product, 'pro')
 
 === AGGREGATION SYNTAX (optional, notebook stages only) ===
 To group + aggregate, add an "aggregation" object to a notebook stage:
@@ -220,6 +225,8 @@ Design the complete unified ADF+Databricks pipeline configuration JSON:
         config = enforce_container_count(config, num_containers, container_names, rec)
         # Explicit user resource settings override whatever the model echoed.
         config = apply_custom_settings(config, custom_settings)
+        # Prompt-referenced stage numbers become the notebook stage names.
+        config = apply_prompt_stage_names(config, user_prompt)
 
         config = _structural_validate(config, schema, custom_settings=custom_settings)
 

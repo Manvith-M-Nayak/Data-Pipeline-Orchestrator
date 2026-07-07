@@ -33,8 +33,14 @@ SYSTEM_PROMPT = (
     "missing operations the user asked for, extra operations the user did not ask "
     "for, wrong columns, wrong aggregation, wrong filtering, wrong direction of "
     "data flow. Respond with STRICT JSON only, no prose, in the form "
-    '{"flagged": true|false, "reasoning": "<one or two sentences>"}. '
-    "Set flagged=true if the plan does NOT faithfully match the request."
+    '{"flagged": true|false, "reasoning": "<one or two sentences>", '
+    '"issues": [{"stage": "<exact stage name, or \'plan\' for plan-wide issues>", '
+    '"problem": "<the specific operation, filter, or column that is wrong and why>", '
+    '"suggestion": "<the concrete change that would fix it>"}]}. '
+    "Set flagged=true if the plan does NOT faithfully match the request. "
+    "issues MUST be an empty list when flagged is false. Every issue must name "
+    "the exact stage and the exact operation/filter/column at fault — never say "
+    "'unnecessary transformations' without listing which ones."
 )
 
 
@@ -100,7 +106,24 @@ def check_intent(user_request: str, plan: dict, timeout: int = 120) -> SemanticR
         else:
             flagged = bool(flagged_val)
         reasoning = str(data.get("reasoning", "")).strip() or "(model returned no reasoning)"
-        return SemanticResult(flagged=flagged, reasoning=reasoning, model=model, available=True)
+
+        issues = []
+        for it in (data.get("issues") or []):
+            if not isinstance(it, dict):
+                continue
+            problem = str(it.get("problem", "")).strip()
+            if not problem:
+                continue
+            issues.append({
+                "stage":      str(it.get("stage", "plan")).strip() or "plan",
+                "problem":    problem,
+                "suggestion": str(it.get("suggestion", "")).strip(),
+            })
+        if not flagged:
+            issues = []
+
+        return SemanticResult(flagged=flagged, reasoning=reasoning, model=model,
+                              available=True, issues=issues)
 
     except json.JSONDecodeError as e:
         return SemanticResult(

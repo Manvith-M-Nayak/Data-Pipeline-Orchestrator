@@ -170,18 +170,41 @@ export default function PlannerTab() {
 
   function onDrop(e) { e.preventDefault(); setDragging(false); handleFile(e.dataTransfer.files[0]); }
 
-  async function handlePlan() {
+  function buildSchemaPayload() {
+    return { columns: detected.columns, row_count: detected.row_count_sample, size_hint: "auto-detected", preview: detected.preview };
+  }
+
+  async function handlePlan(extraInstructions = "") {
     if (!prompt.trim() || !detected) return;
+    // guard: buttons pass the click event as the first arg
+    const extra = typeof extraInstructions === "string" ? extraInstructions : "";
     setError(""); setPlanning(true); setPlan(null); setAssuranceResult(null);
     try {
-      const result = await planner.plan(
-        { columns: detected.columns, row_count: detected.row_count_sample, size_hint: "auto-detected", preview: detected.preview },
-        prompt,
-        buildPlanOpts(),
-      );
+      const fullPrompt = extra ? `${prompt}\n\n${extra}` : prompt;
+      const result = await planner.plan(buildSchemaPayload(), fullPrompt, buildPlanOpts());
       setPlan(result);
     } catch (e) { setError("Planner failed: " + e.message); }
     finally { setPlanning(false); }
+  }
+
+  // Feed assurance findings back to the planner as corrective instructions.
+  async function handleReplanWithFixes() {
+    if (!assuranceResult) return;
+    const lines = [];
+    (assuranceResult.structural_results || [])
+      .filter((c) => !c.passed)
+      .forEach((c) => lines.push(`- ${c.label}: ${c.message}`));
+    const sem = assuranceResult.semantic_result;
+    if (sem?.flagged) {
+      lines.push(`- ${sem.reasoning}`);
+      (sem.issues || []).forEach((it) =>
+        lines.push(`- Stage '${it.stage}': ${it.problem}${it.suggestion ? ` — fix: ${it.suggestion}` : ""}`));
+    }
+    if (!lines.length) return;
+    await handlePlan(
+      "IMPORTANT — a previous plan for this request was rejected by review. " +
+      "Generate a corrected plan that fixes these issues:\n" + lines.join("\n")
+    );
   }
 
   function reset() { setCsvFile(null); setDetected(null); setPrompt(""); setPlan(null); setError(""); }
@@ -566,6 +589,25 @@ export default function PlannerTab() {
                     Intent ({sem.model || "semantic"}):{" "}
                     {!sem.available ? "unavailable" : sem.flagged ? "FLAGGED (advisory)" : "matches request"} — {sem.reasoning}
                   </div>
+                )}
+                {(sem?.issues?.length ?? 0) > 0 && (
+                  <div style={{ marginTop: 6 }}>
+                    {sem.issues.map((it, i) => (
+                      <div key={i} style={{ fontSize: 12, color: "#fbbf24", marginBottom: 3 }}>
+                        • <span style={{ fontWeight: 600 }}>{it.stage}</span>: {it.problem}
+                        {it.suggestion && <span style={{ color: "#94a3b8" }}> — fix: {it.suggestion}</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {(failures.length > 0 || sem?.flagged) && (
+                  <button
+                    style={{ ...C.btnSecondary, marginTop: 10, color: "#fbbf24", borderColor: "#92400e" }}
+                    disabled={planning}
+                    onClick={handleReplanWithFixes}
+                  >
+                    <RotateCcw size={13} />{planning ? <><Spinner /> Re-planning…</> : "Fix & Re-plan"}
+                  </button>
                 )}
               </div>
             );
