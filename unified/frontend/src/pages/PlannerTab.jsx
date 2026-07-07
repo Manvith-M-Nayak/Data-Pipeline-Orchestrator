@@ -1,9 +1,9 @@
 import React, { useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { schema as schemaApi, planner } from "../api.js";
+import { schema as schemaApi, planner, assurance } from "../api.js";
 import { useAppContext } from "../AppContext.jsx";
 import {
-  Upload, Brain, CheckCircle, XCircle, Zap, RotateCcw, ArrowRight,
+  Upload, Brain, CheckCircle, XCircle, Zap, RotateCcw, ArrowRight, Settings, ShieldCheck,
 } from "lucide-react";
 
 const C = {
@@ -52,7 +52,7 @@ const C = {
   },
   stageGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))", gap: 10, marginTop: 14 },
   stage: { background: "#0f172a", borderRadius: 8, padding: 12, border: "1px solid #334155" },
-  stageName: { fontWeight: 700, fontSize: 13, color: "#f1f5f9", marginBottom: 5 },
+  stageName: { fontWeight: 700, fontSize: 13, color: "#f1f5f9", marginBottom: 5, overflowWrap: "anywhere" },
   stageType: (t) => ({
     display: "inline-block", padding: "2px 8px", borderRadius: 10, fontSize: 11, fontWeight: 600,
     background: t === "copy" ? "#1e3a5f" : "#2d1b69",
@@ -80,6 +80,22 @@ function Spinner() {
   );
 }
 
+// Mirrors DEFAULT_EDITABLE_SETTINGS in planner_agent/planner_common.py —
+// used until a plan arrives with its own editable_settings.
+const DEFAULT_EDITABLE = {
+  diu:                [1, 2, 4, 8, 16, 32],
+  num_workers:        [0, 2, 4, 8, 16],
+  shuffle_partitions: [4, 8, 16, 32, 64],
+  node_type:          ["Standard_D4s_v3", "Standard_DS4_v2", "Standard_D8s_v3"],
+};
+
+const SETTING_LABELS = {
+  diu:                "DIU (Copy Activity)",
+  num_workers:        "Notebook Workers",
+  shuffle_partitions: "Shuffle Partitions",
+  node_type:          "Node Type",
+};
+
 const EXAMPLE_PROMPTS = [
   "Filter rows where status is 'active' and calculate average amount by region.",
   "Remove duplicates, compute total sales per product, flag products below 100 units.",
@@ -102,6 +118,44 @@ export default function PlannerTab() {
   const [error,     setError]     = useState("");
   const fileRef = useRef();
 
+  // ── assurance (plan validation) ────────────────────────────────────────────
+  const [assuring,        setAssuring]        = useState(false);
+  const [assuranceResult, setAssuranceResult] = useState(null);
+
+  async function handleValidate() {
+    if (!plan?.config) return;
+    setError(""); setAssuring(true); setAssuranceResult(null);
+    try {
+      const res = await assurance.validate(prompt, plan.config, { columns: detected?.columns || {} });
+      setAssuranceResult(res);
+    } catch (e) { setError("Assurance failed: " + e.message); }
+    finally { setAssuring(false); }
+  }
+
+  // ── pipeline settings (user overrides; null/"" = auto/recommended) ────────
+  const [numStages,      setNumStages]      = useState(null);   // null = model decides
+  const [containerNames, setContainerNames] = useState("");
+  const [overrides,      setOverrides]      = useState({
+    diu: "", num_workers: "", shuffle_partitions: "", node_type: "",
+  });
+
+  function buildPlanOpts() {
+    const opts = {};
+    if (numStages !== null) opts.num_containers = numStages;
+    const custom = {};
+    Object.entries(overrides).forEach(([k, v]) => {
+      if (v !== "") custom[k] = k === "node_type" ? v : Number(v);
+    });
+    if (Object.keys(custom).length) opts.custom_settings = custom;
+    const names = containerNames.split(",").map((s) => s.trim()).filter(Boolean);
+    if (numStages !== null && names.length === numStages) opts.container_names = names;
+    return opts;
+  }
+
+  const containerNameCount = containerNames.split(",").map((s) => s.trim()).filter(Boolean).length;
+  const containerNamesMismatch =
+    containerNameCount > 0 && (numStages === null || containerNameCount !== numStages);
+
   async function handleFile(file) {
     if (!file?.name.endsWith(".csv")) { setError("Upload a .csv file."); return; }
     setError(""); setCsvFile(file); setDetecting(true); setDetected(null); setPlan(null);
@@ -118,11 +172,12 @@ export default function PlannerTab() {
 
   async function handlePlan() {
     if (!prompt.trim() || !detected) return;
-    setError(""); setPlanning(true); setPlan(null);
+    setError(""); setPlanning(true); setPlan(null); setAssuranceResult(null);
     try {
       const result = await planner.plan(
         { columns: detected.columns, row_count: detected.row_count_sample, size_hint: "auto-detected", preview: detected.preview },
         prompt,
+        buildPlanOpts(),
       );
       setPlan(result);
     } catch (e) { setError("Planner failed: " + e.message); }
@@ -130,6 +185,39 @@ export default function PlannerTab() {
   }
 
   function reset() { setCsvFile(null); setDetected(null); setPrompt(""); setPlan(null); setError(""); }
+
+  // ── execution flow (concurrency) editing ──────────────────────────────────
+  const cfg = plan?.config;
+
+  // A notebook stage that only adds processed_time does nothing useful.
+  const isPassThrough = (s) =>
+    s.type === "notebook" &&
+    !(s.transformations || []).some((t) => t && !t.includes("processed_time")) &&
+    !s.filter_condition &&
+    !(s.aggregation?.aggregations?.length);
+  const passThroughStages = (cfg?.stages || []).filter(isPassThrough);
+  const stageNames = cfg?.stages?.map((s) => s.name) || [];
+  const execGroups = cfg?.execution_groups?.length
+    ? cfg.execution_groups
+    : stageNames.map((n) => [n]);
+
+  function stageGroupIndex(name) {
+    const i = execGroups.findIndex((g) => g.includes(name));
+    return i === -1 ? 0 : i;
+  }
+
+  function setStageGroup(name, gi) {
+    const idx = {};
+    stageNames.forEach((n) => { idx[n] = stageGroupIndex(n); });
+    idx[name] = gi;
+    const rebuilt = [];
+    stageNames.forEach((n) => {
+      (rebuilt[idx[n]] = rebuilt[idx[n]] || []).push(n);
+    });
+    const cleaned = rebuilt.filter((g) => g && g.length);
+    setPlan({ ...plan, config: { ...cfg, execution_groups: cleaned } });
+    setAssuranceResult(null);   // groups changed — previous validation is stale
+  }
 
   return (
     <div style={C.page}>
@@ -240,6 +328,91 @@ export default function PlannerTab() {
         </div>
       )}
 
+      {/* Pipeline settings — stage count + cloud resources */}
+      {detected && (
+        <div style={C.card}>
+          <div style={C.cardHdr}>
+            <Settings size={16} color="#f59e0b" />Pipeline Settings
+            <span style={{ fontSize: 11, color: "#475569", fontWeight: 400 }}>(optional)</span>
+          </div>
+          <div style={C.cardSub}>
+            Auto uses size-based recommendations. Override to control stage count and cloud resources
+            {plan ? " — then re-plan to apply." : " before generating the plan."}
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div>
+              <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 4 }}>
+                Storage Containers (2–10)
+                <span style={{ color: "#475569", marginLeft: 6 }}>
+                  {numStages !== null ? `= ${numStages - 1} pipeline stage(s)` : "auto — model decides"}
+                </span>
+              </div>
+              <input
+                type="number" min={2} max={10} value={numStages ?? ""} placeholder="auto"
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setNumStages(v === "" ? null : Math.max(2, Math.min(10, Number(v) || 3)));
+                }}
+                style={{ ...C.textarea, padding: "8px 10px", fontSize: 13 }}
+                title="N containers = N−1 stages: the first stage is always an ADF Copy (ingest); the rest are Databricks notebooks. Leave empty to let the planner decide."
+              />
+            </div>
+            <div>
+              <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 4 }}>
+                Container Names (comma-separated)
+                {containerNamesMismatch && (
+                  <span style={{ color: "#f59e0b", marginLeft: 6 }}>
+                    {numStages === null
+                      ? "set container count first — ignored"
+                      : `${containerNameCount} name(s) ≠ ${numStages} containers — ignored`}
+                  </span>
+                )}
+              </div>
+              <input
+                type="text" value={containerNames} placeholder="auto (e.g. raw, bronze, silver)"
+                onChange={(e) => setContainerNames(e.target.value)}
+                style={{ ...C.textarea, padding: "8px 10px", fontSize: 13 }}
+              />
+            </div>
+
+            {Object.keys(SETTING_LABELS).map((key) => {
+              const options = plan?.config?.editable_settings?.[key] || DEFAULT_EDITABLE[key];
+              const recommended = plan?.config?.recommended_settings?.[key];
+              return (
+                <div key={key}>
+                  <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 4 }}>{SETTING_LABELS[key]}</div>
+                  <select
+                    value={overrides[key]}
+                    onChange={(e) => setOverrides({ ...overrides, [key]: e.target.value })}
+                    style={{ ...C.textarea, padding: "8px 10px", fontSize: 13 }}
+                  >
+                    <option value="">
+                      Auto{recommended !== undefined ? ` (recommended: ${recommended})` : " (recommended)"}
+                    </option>
+                    {options.map((o) => (
+                      <option key={o} value={o}>{o}</option>
+                    ))}
+                  </select>
+                </div>
+              );
+            })}
+          </div>
+
+          {plan && (
+            <div style={C.btnRow}>
+              <button
+                style={C.btnPrimary(planning || !prompt.trim())}
+                disabled={planning || !prompt.trim()}
+                onClick={handlePlan}
+              >
+                <Settings size={13} />{planning ? <><Spinner /> Re-planning…</> : "Apply Settings & Re-plan"}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Plan result */}
       {plan && (
         <div style={C.card}>
@@ -256,26 +429,154 @@ export default function PlannerTab() {
             </div>
           </div>
 
+          {passThroughStages.length > 0 && (
+            <div style={{
+              background: "#451a03", border: "1px solid #92400e", borderRadius: 8,
+              padding: "10px 14px", marginTop: 12, fontSize: 12, color: "#fbbf24",
+            }}>
+              ⚠ {passThroughStages.map((s) => s.name).join(", ")}{" "}
+              {passThroughStages.length > 1 ? "do" : "does"} nothing except copy data forward.
+              Reduce Storage Containers in Pipeline Settings, or re-plan with a prompt
+              describing what each stage should do.
+            </div>
+          )}
+
           <div style={C.stageGrid}>
-            {(plan.config?.stages || []).map((s, i) => (
-              <div key={i} style={C.stage}>
-                <div style={C.stageName}>{s.name}</div>
-                <div style={C.stageType(s.type)}>{s.type}</div>
-                {s.transforms?.length > 0 && <div style={C.stageDetail}>Transforms: {s.transforms.slice(0, 2).join(", ")}</div>}
-                {s.filter_condition && <div style={C.stageDetail}>Filter: {s.filter_condition}</div>}
-                {s.aggregation?.aggregations?.length > 0 && (
-                  <div style={C.stageDetail}>
-                    Group by: {s.aggregation.group_by?.join(", ")} ·{" "}
-                    {s.aggregation.aggregations.map((a) => `${a.op}(${a.column})`).join(", ")}
+            {(plan.config?.stages || []).map((s, i) => {
+              const transforms = (s.transformations || []).filter((t) => t && !t.includes("processed_time"));
+              const srcSink = (s.source_container && s.sink_container)
+                ? `${s.source_container} → ${s.sink_container}` : null;
+              return (
+                <div key={i} style={C.stage}>
+                  <div style={C.stageName} title={s.name}>{s.name}</div>
+                  <div style={C.stageType(s.type)}>{s.type}</div>
+                  {s.type === "copy" ? (
+                    <div style={C.stageDetail}>
+                      Ingests raw files unchanged via ADF Copy
+                      {srcSink ? ` (${srcSink})` : ""} · DIU: {s.diu ?? "auto"}
+                    </div>
+                  ) : (
+                    <>
+                      {srcSink && <div style={C.stageDetail}>{srcSink}</div>}
+                      {transforms.length > 0 && (
+                        <div style={C.stageDetail}>
+                          Transforms: {transforms.slice(0, 3).join(", ")}
+                          {transforms.length > 3 ? ` (+${transforms.length - 3} more)` : ""}
+                        </div>
+                      )}
+                      {s.filter_condition && <div style={C.stageDetail}>Filter: {s.filter_condition}</div>}
+                      {s.aggregation?.aggregations?.length > 0 && (
+                        <div style={C.stageDetail}>
+                          Group by: {s.aggregation.group_by?.join(", ")} ·{" "}
+                          {s.aggregation.aggregations.map((a) => `${a.op}(${a.column})`).join(", ")}
+                        </div>
+                      )}
+                      {isPassThrough(s) && (
+                        <div style={{ ...C.stageDetail, color: "#f59e0b" }}>
+                          Pass-through — copies data unchanged (adds processed_time only)
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {cfg?.recommended_settings && (
+            <div style={{ marginTop: 12, fontSize: 12, color: "#64748b" }}>
+              Resources: DIU {cfg.recommended_settings.diu} ·{" "}
+              workers {cfg.recommended_settings.num_workers} ·{" "}
+              shuffle {cfg.recommended_settings.shuffle_partitions} ·{" "}
+              {cfg.recommended_settings.node_type}
+            </div>
+          )}
+
+          {/* Execution flow — user-controlled concurrency */}
+          {stageNames.length > 1 && (
+            <div style={{ marginTop: 18 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#f1f5f9", marginBottom: 4 }}>
+                Execution Flow
+              </div>
+              <div style={{ fontSize: 11, color: "#64748b", marginBottom: 10 }}>
+                Stages in the same group run in parallel; groups run in order.
+                Data dependencies are validated and auto-repaired at run time.
+              </div>
+              {execGroups.map((g, gi) => (
+                <div key={gi} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                  <span style={{ fontSize: 11, color: g.length > 1 ? "#a78bfa" : "#64748b", width: 70, flexShrink: 0, fontWeight: 600 }}>
+                    Group {gi + 1}{g.length > 1 ? " ⚡" : ""}
+                  </span>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {g.map((n) => {
+                      const st = cfg.stages.find((s) => s.name === n);
+                      const locked = st?.type === "copy";
+                      return (
+                        <span key={n} style={{
+                          display: "inline-flex", alignItems: "center", gap: 6,
+                          background: "#0f172a", border: "1px solid #334155",
+                          borderRadius: 8, padding: "4px 8px", fontSize: 11, color: "#cbd5e1",
+                        }}>
+                          {n}
+                          <select
+                            value={gi}
+                            disabled={locked}
+                            title={locked ? "Copy stage always runs first" : "Move to another group"}
+                            onChange={(e) => setStageGroup(n, Number(e.target.value))}
+                            style={{
+                              background: "#1e293b", color: locked ? "#475569" : "#94a3b8",
+                              border: "1px solid #334155", borderRadius: 6, fontSize: 11,
+                            }}
+                          >
+                            {stageNames.map((_, i) => (
+                              <option key={i} value={i}>G{i + 1}</option>
+                            ))}
+                          </select>
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Assurance validation result */}
+          {assuranceResult && (() => {
+            const pass = assuranceResult.overall_status === "pass";
+            const failures = (assuranceResult.structural_results || []).filter((c) => !c.passed);
+            const sem = assuranceResult.semantic_result;
+            return (
+              <div style={{
+                marginTop: 14, borderRadius: 10, padding: 12,
+                background: pass ? "#0d2b0d" : "#2d0808",
+                border: `1px solid ${pass ? "#166534" : "#7f1d1d"}`,
+              }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: pass ? "#4ade80" : "#f87171", marginBottom: failures.length || sem ? 8 : 0 }}>
+                  <ShieldCheck size={13} style={{ verticalAlign: "middle", marginRight: 6 }} />
+                  {assuranceResult.summary}
+                </div>
+                {failures.map((c) => (
+                  <div key={c.check} style={{ fontSize: 12, color: "#f87171", marginBottom: 4 }}>
+                    ✗ {c.label}: {c.message}
+                  </div>
+                ))}
+                {sem && (
+                  <div style={{ fontSize: 12, color: sem.available ? (sem.flagged ? "#f59e0b" : "#64748b") : "#475569" }}>
+                    Intent ({sem.model || "semantic"}):{" "}
+                    {!sem.available ? "unavailable" : sem.flagged ? "FLAGGED (advisory)" : "matches request"} — {sem.reasoning}
                   </div>
                 )}
               </div>
-            ))}
-          </div>
+            );
+          })()}
 
           <div style={C.btnRow}>
             <button style={C.btnPrimary(false)} onClick={() => navigate("/executor")}>
               <Zap size={13} /> Send to Executor <ArrowRight size={13} />
+            </button>
+            <button style={{ ...C.btnSecondary, color: "#4ade80", borderColor: "#166534" }} disabled={assuring} onClick={handleValidate}>
+              <ShieldCheck size={13} />{assuring ? <><Spinner /> Validating…</> : "Validate Plan"}
             </button>
             <button style={C.btnSecondary} onClick={() => { setPlan(null); }}>
               <RotateCcw size={13} /> Re-plan

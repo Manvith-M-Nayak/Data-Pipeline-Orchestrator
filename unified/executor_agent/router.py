@@ -24,16 +24,38 @@ async def run_pipeline(
     from .executor import execute_pipeline
 
     contents = await csv_file.read()
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".csv")
-    tmp.write(contents)
-    tmp.close()
+    # Keep the user's original filename — it becomes the blob name in the
+    # source container (a NamedTemporaryFile would upload as "tmpXXXX.csv").
+    orig_name = os.path.basename(csv_file.filename or "") or "input.csv"
+    if not orig_name.lower().endswith(".csv"):
+        orig_name += ".csv"
+    tmp_dir  = tempfile.mkdtemp(prefix="orchestrator_")
+    tmp_path = os.path.join(tmp_dir, orig_name)
+    with open(tmp_path, "wb") as f:
+        f.write(contents)
+
+    def _cleanup():
+        try:
+            os.unlink(tmp_path)
+            os.rmdir(tmp_dir)
+        except OSError:
+            pass
 
     try:
         config_dict = json.loads(pipeline_config)
         schema_dict = json.loads(schema)
     except json.JSONDecodeError as e:
-        os.unlink(tmp.name)
+        _cleanup()
         raise HTTPException(status_code=422, detail=f"Invalid JSON: {e}")
+
+    # The UI lets users edit execution_groups by hand — repair any data-flow
+    # violations (a stage grouped with its dependency) before spending cloud
+    # resources on a run that would read an empty container.
+    try:
+        from planner_agent.planner_common import sanitize_execution_groups
+        config_dict = sanitize_execution_groups(config_dict)
+    except Exception as e:
+        print(f"[executor] execution_groups sanitize skipped: {e}")
 
     job_id = str(uuid.uuid4())
     _jobs[job_id] = {"status": "running", "step": "Starting…", "result": None, "error": None}
@@ -46,7 +68,7 @@ async def run_pipeline(
     async def _run():
         start = time.time()
         try:
-            result = await run_in_threadpool(execute_pipeline, tmp.name, config_dict, schema_dict, _progress)
+            result = await run_in_threadpool(execute_pipeline, tmp_path, config_dict, schema_dict, _progress)
             elapsed_ms = int((time.time() - start) * 1000)
             if isinstance(result, dict) and result.get("status") in ("failed", "error"):
                 _jobs[job_id].update({
@@ -60,10 +82,7 @@ async def run_pipeline(
         except Exception as exc:
             _jobs[job_id].update({"status": "failed", "error": str(exc)})
         finally:
-            try:
-                os.unlink(tmp.name)
-            except OSError:
-                pass
+            _cleanup()
 
     asyncio.create_task(_run())
     return {"job_id": job_id, "status": "running"}

@@ -32,8 +32,9 @@ async def cancel_run(run_id: str):
         raise HTTPException(status_code=400, detail=f"Could not cancel run {run_id}")
     # Remove from live tracking so it no longer shows as running
     monitor = get_monitor()
-    if monitor and run_id in monitor._tracked:
+    if monitor:
         monitor._tracked.pop(run_id, None)
+        monitor._anomaly_verdicts.pop(run_id, None)
     return {"cancelled": run_id}
 
 
@@ -54,7 +55,7 @@ async def summary():
     recent_runs = runs[:5]
     recent_anomalies = anomalies[:3]
 
-    # Recent failed runs that have AI analysis
+    # Most recent failed runs (analysis fields joined in when available)
     recent_failed = [
         r for r in runs if r.get("status") == "Failed"
     ][:3]

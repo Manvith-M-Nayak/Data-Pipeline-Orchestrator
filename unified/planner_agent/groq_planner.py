@@ -20,7 +20,9 @@ from .planner_common import (
     _print_plan_summary,
     _resolve_container_names,
     _structural_validate,
+    apply_custom_settings,
     build_default_config,
+    enforce_container_count,
     get_recommended_settings,
 )
 
@@ -111,6 +113,17 @@ Rules for aggregation:
   - Aggregation runs AFTER transformations and filter within the same stage.
   - Omit "aggregation" entirely (or set null) for stages that do not group.
 
+=== EXECUTION GROUPS (optional parallelism) ===
+"execution_groups" is a list of lists of stage names: groups run in order,
+stages inside one group run CONCURRENTLY. Two notebook stages may run in the
+same group ONLY if they are independent: they read from the same (or an
+already-produced) source container and write to DIFFERENT sink containers
+(fan-out). Rules:
+  - The copy stage is always alone in the first group.
+  - A stage must appear in a group AFTER the stage that produces its source.
+  - Max 3 stages per group.
+  - For a purely sequential pipeline use one stage per group.
+
 === RULES ===
 1. First stage (stage0 → stage1) MUST be type "copy". No transformations.
 2. Subsequent stages MUST be type "notebook".
@@ -125,6 +138,7 @@ Rules for aggregation:
   "datasets": {datasets_json},
   "stages": {stages_json},
   "execution_order": {exec_order_json},
+  "execution_groups": {json.dumps([[s["name"]] for s in default_stages])},
   "num_containers": {num_containers},
   "recommended_settings": {{
     "diu": {rec['diu']},
@@ -163,6 +177,7 @@ Design the complete unified ADF+Databricks pipeline configuration JSON:
         "temperature": 0.2,
         "max_completion_tokens": 2048,
         "top_p": 0.8,
+        "response_format": {"type": "json_object"},
     }
 
     print("Groq LLaMA 3.3 70B is designing your unified ADF+Databricks pipeline...")
@@ -200,17 +215,13 @@ Design the complete unified ADF+Databricks pipeline configuration JSON:
         config.setdefault("editable_settings", DEFAULT_EDITABLE_SETTINGS)
         config["num_containers"] = num_containers
 
-        expected = num_containers - 1
-        stages = config.get("stages", [])
-        if len(stages) > expected:
-            extras = [s["name"] for s in stages[expected:]]
-            print(f"   LLM produced extra stages — trimming: {extras}")
-            config["stages"] = stages[:expected]
-            config["execution_order"] = [
-                n for n in config.get("execution_order", []) if n not in extras
-            ]
+        # Enforce the requested container/stage count: trims extra stages the
+        # LLM invented, pads with pass-through stages if it produced too few.
+        config = enforce_container_count(config, num_containers, container_names, rec)
+        # Explicit user resource settings override whatever the model echoed.
+        config = apply_custom_settings(config, custom_settings)
 
-        config = _structural_validate(config, schema)
+        config = _structural_validate(config, schema, custom_settings=custom_settings)
 
         _print_plan_summary(config)
         return config, False

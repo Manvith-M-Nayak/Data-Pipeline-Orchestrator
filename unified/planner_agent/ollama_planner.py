@@ -23,7 +23,9 @@ from .planner_common import (
     MAX_CONTAINERS,
     _print_plan_summary,
     _structural_validate,
+    apply_custom_settings,
     build_default_config,
+    enforce_container_count,
     get_recommended_settings,
 )
 
@@ -69,8 +71,10 @@ def decide_pipeline_config(
     Returns (config_dict, used_fallback_bool).
 
     Mirrors groq_planner.decide_pipeline_config's signature and return shape.
-    num_containers / container_names are used only for the deterministic
-    fallback — the fine-tuned model chooses its own stage count.
+    The fine-tuned model has a fixed contract and picks its own stage count,
+    so when the user requests num_containers / container_names they are
+    enforced afterwards via enforce_container_count (pass-through stages are
+    appended if the model produced fewer, extras trimmed if more).
     """
     rec = get_recommended_settings(schema.get("size_hint", "medium"))
     if custom_settings:
@@ -92,7 +96,10 @@ def decide_pipeline_config(
         "options": {
             "temperature": 0.2,
             "top_p": 0.8,
-            "num_ctx": 2048,
+            # 2048 truncated large schemas + the generated config itself;
+            # the full contract (system + schema + samples + output JSON)
+            # regularly exceeds it, which silently degraded output quality.
+            "num_ctx": 4096,
         },
     }
 
@@ -121,7 +128,14 @@ def decide_pipeline_config(
         if clist:
             config["num_containers"] = min(MAX_CONTAINERS, len(clist))
 
-        config = _structural_validate(config, schema)
+        # The model ignores stage-count requests (fixed contract) — enforce
+        # the user's choice on the produced config.
+        if num_containers:
+            config = enforce_container_count(config, num_containers, container_names, rec)
+        # Explicit user resource settings override whatever the model emitted.
+        config = apply_custom_settings(config, custom_settings)
+
+        config = _structural_validate(config, schema, custom_settings=custom_settings)
         _print_plan_summary(config)
         return config, False
 

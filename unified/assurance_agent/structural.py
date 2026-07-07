@@ -165,6 +165,19 @@ class StructuralValidator:
                 if r not in known:
                     violations.append(f"stage '{sname}' references unknown column '{r}'")
 
+            # An aggregation collapses the frame: only the group_by columns,
+            # the aggregation aliases, and the re-added processed_time survive
+            # into later stages. Without this reset, a downstream stage
+            # referencing a dropped column would pass validation falsely.
+            if isinstance(agg, dict) and (agg.get("group_by") or agg.get("aggregations")):
+                survivors = set(agg.get("group_by") or [])
+                survivors |= {
+                    a["alias"] for a in (agg.get("aggregations") or [])
+                    if isinstance(a, dict) and a.get("alias")
+                }
+                survivors.add("processed_time")
+                known = survivors
+
         if violations:
             return CheckResult(name, label, False, "; ".join(violations), tier)
         return CheckResult(name, label, True,
@@ -241,6 +254,42 @@ class StructuralValidator:
             if exec_order != stage_names:
                 violations.append(
                     f"execution_order {exec_order} does not match stage sequence {stage_names}")
+
+        # 4f. execution_groups (optional concurrency plan): must partition the
+        # stages, and no stage may run in the same group as — or before — a
+        # stage that produces its source container.
+        groups = plan.get("execution_groups")
+        if isinstance(groups, list) and groups:
+            flat = [n for g in groups if isinstance(g, list) for n in g]
+            stage_names = [s.get("name") for s in stages]
+            if sorted(flat) != sorted(stage_names):
+                violations.append(
+                    f"execution_groups {flat} do not partition the stage list {stage_names}")
+            else:
+                def _norm(tok) -> str:
+                    t = str(tok or "").lower().strip()
+                    if t.startswith("ds_"):
+                        t = t[3:]
+                    return t.replace("-", "").replace("_", "")
+
+                by_name = {s.get("name"): s for s in stages}
+                sinks = {}
+                for s in stages:
+                    tok = _norm(s.get("sink_container") or s.get("sink_dataset"))
+                    if tok:
+                        sinks[tok] = s.get("name")
+
+                done = set()   # stages completed in earlier groups
+                for g in groups:
+                    for n in g:
+                        src = _norm(by_name[n].get("source_container")
+                                    or by_name[n].get("source_dataset"))
+                        upstream = sinks.get(src)
+                        if upstream and upstream != n and upstream not in done:
+                            violations.append(
+                                f"stage '{n}' is scheduled with or before its dependency "
+                                f"'{upstream}' — they cannot run concurrently")
+                    done.update(g)
 
         if violations:
             return CheckResult(name, label, False, "; ".join(violations), tier)

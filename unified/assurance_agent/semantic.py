@@ -78,7 +78,9 @@ def check_intent(user_request: str, plan: dict, timeout: int = 120) -> SemanticR
         ],
         "stream": False,
         "format": "json",
-        "options": {"temperature": 0.0, "num_ctx": 4096},
+        # 8192 ctx: request + full plan JSON often exceeds 4096, which silently
+        # truncated the plan the auditor was judging.
+        "options": {"temperature": 0.0, "num_ctx": 8192},
     }
 
     try:
@@ -91,7 +93,12 @@ def check_intent(user_request: str, plan: dict, timeout: int = 120) -> SemanticR
             )
         raw = resp.json()["message"]["content"].strip()
         data = json.loads(raw)
-        flagged = bool(data.get("flagged", False))
+        flagged_val = data.get("flagged", False)
+        if isinstance(flagged_val, str):
+            # models sometimes emit "true"/"false" as strings; bool("false") is True
+            flagged = flagged_val.strip().lower() in ("true", "yes", "1")
+        else:
+            flagged = bool(flagged_val)
         reasoning = str(data.get("reasoning", "")).strip() or "(model returned no reasoning)"
         return SemanticResult(flagged=flagged, reasoning=reasoning, model=model, available=True)
 

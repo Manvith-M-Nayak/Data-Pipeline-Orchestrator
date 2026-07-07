@@ -57,6 +57,10 @@ _ADF_SUBS = [
 
     (r"currentTimestamp\(\s*\)",    "current_timestamp()"),
     (r"currentDate\(\s*\)",         "current_date()"),
+
+    # ADF-DSL name → PySpark name; first arg is wrapped in col() by the
+    # bare-identifier pass that runs after these substitutions.
+    (r"\bregexReplace\s*\(",        "regexp_replace("),
 ]
 
 

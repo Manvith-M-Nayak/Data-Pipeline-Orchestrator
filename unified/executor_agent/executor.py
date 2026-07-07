@@ -19,6 +19,7 @@ import time
 import base64
 import traceback
 import requests
+from concurrent.futures import ThreadPoolExecutor
 
 from config import (
     AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET,
@@ -34,6 +35,7 @@ from .notebook_builder import build_notebook_source
 ADF_API_VERSION       = "2018-06-01"
 COPY_PIPELINE_NAME    = "Orchestrator_Copy_Pipeline"
 LS_BLOB_NAME          = "LS_Blob_Storage"
+MAX_PARALLEL_STAGES   = 3   # matches resource agent MAX_CONCURRENT (student tier)
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -529,6 +531,23 @@ def execute_pipeline(csv_path: str, pipeline_config: dict, schema: dict, progres
 
     run_tag = str(int(time.time()))
 
+    stages          = pipeline_config.get("stages", [])
+    copy_stages     = [s for s in stages if s.get("type") == "copy"]
+    notebook_stages = [s for s in stages if s.get("type") == "notebook"]
+
+    # Validate stage references up front — a malformed config should fail
+    # with a clear message before any cloud resources are touched.
+    if not pipeline_config.get("containers_to_create"):
+        return {"status": "failed", "message": "Config has no containers_to_create"}
+    for s in copy_stages:
+        if not s.get("source_dataset") or not s.get("sink_dataset"):
+            return {"status": "failed",
+                    "message": f"Copy stage '{s.get('name', '?')}' missing source_dataset/sink_dataset"}
+    for s in notebook_stages:
+        if not s.get("source_container") or not s.get("sink_container"):
+            return {"status": "failed",
+                    "message": f"Notebook stage '{s.get('name', '?')}' missing source_container/sink_container"}
+
     _step("Authenticating with Azure")
     token = get_azure_token()
 
@@ -543,10 +562,6 @@ def execute_pipeline(csv_path: str, pipeline_config: dict, schema: dict, progres
     upload_csv(csv_path, raw_container)
     if not check_blob_has_rows(raw_container):
         return {"status": "failed", "message": f"Upload verification failed on '{raw_container}'"}
-
-    stages          = pipeline_config.get("stages", [])
-    copy_stages     = [s for s in stages if s["type"] == "copy"]
-    notebook_stages = [s for s in stages if s["type"] == "notebook"]
 
     notebook_paths: dict = {}
     if notebook_stages:
@@ -565,6 +580,11 @@ def execute_pipeline(csv_path: str, pipeline_config: dict, schema: dict, progres
         create_blob_linked_service(token)
         copy_dataset_names = {stage.get("source_dataset") for stage in copy_stages} | \
                              {stage.get("sink_dataset")   for stage in copy_stages}
+        defined_ds = {ds.get("name") for ds in pipeline_config.get("datasets", [])}
+        missing_ds = copy_dataset_names - defined_ds
+        if missing_ds:
+            return {"status": "failed",
+                    "message": f"Copy stage references datasets not defined in config: {sorted(missing_ds)}"}
         for ds in pipeline_config.get("datasets", []):
             if ds["name"] in copy_dataset_names:
                 r = create_dataset(token, ds)
@@ -592,9 +612,26 @@ def execute_pipeline(csv_path: str, pipeline_config: dict, schema: dict, progres
             }
 
     # ── Databricks Jobs API path (notebook stages, serverless) ───────────────
+    # Stages run group by group per config["execution_groups"]; stages inside
+    # one group run concurrently (independent fan-out branches). Falls back to
+    # fully sequential when the config carries no groups.
     if notebook_stages:
-        for stage in notebook_stages:
-            _step(f"Running notebook stage '{stage['name']}' via Databricks Jobs API")
+        nb_by_name = {s["name"]: s for s in notebook_stages}
+        raw_groups = pipeline_config.get("execution_groups") or [[s["name"]] for s in notebook_stages]
+        groups, seen = [], set()
+        for g in raw_groups:
+            if not isinstance(g, list):
+                g = [g]
+            keep = [n for n in g if n in nb_by_name and n not in seen]
+            seen.update(keep)
+            if keep:
+                groups.append(keep)
+        for s in notebook_stages:                 # anything the groups missed
+            if s["name"] not in seen:
+                groups.append([s["name"]])
+
+        def _run_stage(stage: dict) -> tuple:
+            """Create job, run, poll, delete. Returns (stage_name, poll_result)."""
             nb_path    = notebook_paths[stage["name"]]
             parameters = {
                 "storage_key": AZURE_STORAGE_KEY,
@@ -607,18 +644,30 @@ def execute_pipeline(csv_path: str, pipeline_config: dict, schema: dict, progres
                 dbx_run_id = dbx_run_job(job_id)
                 # Expose the live Databricks run_id so the monitor can track it
                 _step(f"Monitoring Databricks run {dbx_run_id} (stage: {stage['name']})", dbx_run_id=dbx_run_id)
-                poll = dbx_poll_run(dbx_run_id)
+                return stage["name"], dbx_poll_run(dbx_run_id)
             finally:
                 dbx_delete_job(job_id)
 
-            if poll["result_state"] != "SUCCESS":
+        for gi, group in enumerate(groups, 1):
+            tag = " (parallel)" if len(group) > 1 else ""
+            _step(f"Running stage group {gi}/{len(groups)}{tag}: {', '.join(group)}")
+            if len(group) == 1:
+                results = [_run_stage(nb_by_name[group[0]])]
+            else:
+                with ThreadPoolExecutor(max_workers=min(len(group), MAX_PARALLEL_STAGES)) as pool:
+                    results = list(pool.map(_run_stage, [nb_by_name[n] for n in group]))
+
+            failures = [(n, p) for n, p in results if p["result_state"] != "SUCCESS"]
+            if failures:
+                name, poll = failures[0]
+                extra = f" ({len(failures)} stage(s) failed in this group)" if len(failures) > 1 else ""
                 return {
                     "status":  "failed",
                     "run_id":  adf_run_id or f"dbx-{run_tag}",
                     "message": (
-                        f"Stage '{stage['name']}' failed "
+                        f"Stage '{name}' failed "
                         f"(result_state={poll['result_state']}): "
-                        f"{poll['state_message']}"
+                        f"{poll['state_message']}{extra}"
                     ),
                     "result":  poll,
                 }

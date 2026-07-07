@@ -17,11 +17,24 @@ export const schema = {
 
 // ── Planner ─────────────────────────────────────────────────────────────────
 export const planner = {
-  plan: (schemaObj, prompt) =>
+  // opts: { num_containers, custom_settings, container_names } — all optional
+  plan: (schemaObj, prompt, opts = {}) =>
     req("/planner/plan", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ schema: schemaObj, prompt }),
+      body: JSON.stringify({ schema: schemaObj, prompt, ...opts }),
+    }),
+};
+
+// ── Assurance ────────────────────────────────────────────────────────────────
+export const assurance = {
+  // Validates a generated plan: structural checks (deterministic) + semantic
+  // intent check (local LLM). block_on_intent left false — semantic is advisory.
+  validate: (request, plan, schemaObj, runSemantic = true) =>
+    req("/assurance/validate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ request, plan, schema: schemaObj, run_semantic: runSemantic }),
     }),
 };
 

@@ -84,8 +84,19 @@ const EXEC_STEPS = [
   "Uploading your data",
   "Uploading notebooks to Databricks",
   "Running copy pipeline (ADF)",
-  "Running notebook stage (Databricks)",
+  "Running notebook stages (Databricks)",
   "Complete",
+];
+
+// Match a backend step message to its EXEC_STEPS row. Checked in reverse so
+// the most advanced matching phase wins.
+const STEP_MATCHERS = [
+  (t) => t.includes("authenticating"),
+  (t) => t.includes("creating storage"),
+  (t) => t.includes("uploading csv"),
+  (t) => t.includes("notebook(s)"),
+  (t) => t.includes("linked service") || t.includes("copy pipeline"),
+  (t) => t.includes("stage group") || t.includes("monitoring databricks") || t.includes("running notebook"),
 ];
 
 function Spinner({ color = "#f59e0b" }) {
@@ -134,10 +145,10 @@ export default function ExecutorTab() {
         const s = await executor.status(jid);
         setJobState(s);
         if (s.step) {
-          const idx = EXEC_STEPS.findIndex((label) =>
-            s.step.toLowerCase().includes(label.split(" ")[0].toLowerCase())
-          );
-          if (idx >= 0) setExecStep(idx);
+          const st = s.step.toLowerCase();
+          for (let i = STEP_MATCHERS.length - 1; i >= 0; i--) {
+            if (STEP_MATCHERS[i](st)) { setExecStep(i); break; }
+          }
         }
         if (s.status !== "running") {
           clearInterval(pollRef.current);
@@ -234,9 +245,26 @@ export default function ExecutorTab() {
                   <span key={i} style={C.planStage}>{s.name}</span>
                 ))}
               </div>
+              {(savedPlan.config?.execution_groups?.length ?? 0) > 0 && (
+                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>
+                  Flow:{" "}
+                  {savedPlan.config.execution_groups.map((g, i) => (
+                    <span key={i}>
+                      {i > 0 && <span style={{ color: "#475569" }}> → </span>}
+                      <span style={{ color: g.length > 1 ? "#a78bfa" : "#94a3b8", fontWeight: g.length > 1 ? 600 : 400 }}>
+                        [{g.join(" ∥ ")}]
+                      </span>
+                    </span>
+                  ))}
+                  {savedPlan.config.execution_groups.some((g) => g.length > 1) && (
+                    <span style={{ marginLeft: 6, color: "#a78bfa" }}>⚡ parallel</span>
+                  )}
+                </div>
+              )}
               <div style={{ fontSize: 12, color: "#64748b" }}>
                 Cluster: {savedPlan.config?.recommended_settings?.node_type || "auto"} ·
-                Workers: {savedPlan.config?.recommended_settings?.num_workers ?? "auto"}
+                Workers: {savedPlan.config?.recommended_settings?.num_workers ?? "auto"} ·
+                DIU: {savedPlan.config?.recommended_settings?.diu ?? "auto"}
                 {savedPlan.used_fallback && <span style={{ marginLeft: 8, color: "#f59e0b" }}>(fallback config)</span>}
               </div>
             </div>

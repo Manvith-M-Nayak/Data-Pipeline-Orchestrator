@@ -69,8 +69,8 @@ class AssuranceResult:
         """SUMMARY tier — one compact line, always shown."""
         struct = self._glyph(self._structure_ok())
         schema = self._glyph(self._schema_ok())
-        if self.semantic_result and not self.semantic_result.available:
-            intent = "—"     # — unavailable
+        if self.semantic_result is None or not self.semantic_result.available:
+            intent = "—"     # — skipped or unavailable, not actually judged
         else:
             intent = self._glyph(self._intent_ok())
         verb = "passed" if self.overall_status == "pass" else "FAILED"
