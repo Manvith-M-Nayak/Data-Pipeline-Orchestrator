@@ -20,6 +20,8 @@ llama/datasets
 
 *.zip
 
+unified/performance_prediction_agent/models/*.pkl
+
 unified/planner_agent/model/planner_agent_lora/
 
 !unified/frontend/package.json

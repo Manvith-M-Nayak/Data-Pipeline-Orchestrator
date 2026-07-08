@@ -23,6 +23,7 @@ from typing import Dict, List, Optional
 
 import joblib
 import numpy as np
+import pandas as pd
 
 _MODEL_DIR = os.path.join(os.path.dirname(__file__), "models")
 
@@ -94,10 +95,15 @@ class MLPredictor:
         resource_plan: dict,
         predictions: dict,
         plan: dict,
-    ) -> np.ndarray:
+    ) -> "pd.DataFrame":
         """
         Translate the same RunState-derived inputs the formula agent uses
         into the flat feature vector the model was trained on.
+
+        Returned as a named-column DataFrame (not a bare ndarray) so the
+        columns line up with the feature names the estimators were fitted
+        with — otherwise sklearn warns ("X does not have valid feature
+        names") and, on a version mismatch, can reorder/misread columns.
         """
         stages = plan.get("stages", [])
         allocations = resource_plan.get("allocations", [])
@@ -153,7 +159,7 @@ class MLPredictor:
             network_quality,
             complexity_encoded,
         ]
-        return np.array(row, dtype=float).reshape(1, -1)
+        return pd.DataFrame([row], columns=FEATURE_COLS).astype(float)
 
     @classmethod
     def predict(

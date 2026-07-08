@@ -1,10 +1,10 @@
 {
-  "mae_seconds": 221.9,
-  "r2_score": 0.8705,
-  "balanced_accuracy": 0.6592,
+  "mae_seconds": 221.86,
+  "r2_score": 0.8706,
+  "balanced_accuracy": 0.645,
   "spot_check_tiny_file": {
     "file_size_mb": 0.0011,
-    "predicted_s": 217,
+    "predicted_s": 216,
     "actual_was_s": 144
   }
 }
