@@ -202,6 +202,94 @@ def required_containers_for_prompt(user_prompt) -> int:
     return min(MAX_CONTAINERS, len(nums) + 2) if nums else 0
 
 
+def _resolve_column(token: str, cols: list):
+    """Map a prompt word to a schema column: exact match, else unique substring."""
+    t = str(token).lower()
+    for c in cols:
+        if str(c).lower() == t:
+            return c
+    matches = [c for c in cols if t in str(c).lower()]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _extract_filter_from_text(text: str, cols: list):
+    """Parse one numbered-stage sentence into a filter DSL string, or None."""
+    t = str(text).strip()
+    m = re.search(r"(\w+)\s*(=|==|!=|<>|>=|<=|>|<)\s*('[^']*'|\d+(?:\.\d+)?)", t)
+    if m:
+        col = _resolve_column(m.group(1), cols)
+        if col:
+            op = "=" if m.group(2) == "==" else m.group(2)
+            return f"{col} {op} {m.group(3)}"
+    for phrase, fmt in (
+        (r"starts?\s+with", "{col} like '{v}%'"),
+        (r"ends?\s+with",   "{col} like '%{v}'"),
+        (r"contains?",      "{col} like '%{v}%'"),
+    ):
+        m = re.search(rf"(\w+)\s+(?:that\s+|which\s+)?{phrase}\s+(?:the\s+letter\s+)?'?(\w+)'?", t, re.IGNORECASE)
+        if m:
+            col = _resolve_column(m.group(1), cols)
+            if col:
+                return fmt.format(col=col, v=m.group(2))
+    return None
+
+
+def extract_prompt_stage_filters(user_prompt, schema: dict) -> dict:
+    """{stage number -> filter DSL} parsed from a numbered prompt.
+
+    Returns {} unless EVERY numbered stage yields a parseable filter — a
+    partial parse could misalign stages, so all-or-nothing is the safe mode."""
+    if not user_prompt:
+        return {}
+    cols = list((schema or {}).get("columns") or [])
+    parts = re.split(r"\b(?:stage|step)\s*[-#]?\s*(\d+)\s*[:\-–]?\s*",
+                     str(user_prompt), flags=re.IGNORECASE)
+    out = {}
+    for i in range(1, len(parts) - 1, 2):
+        f = _extract_filter_from_text(parts[i + 1], cols)
+        if not f:
+            return {}
+        out[int(parts[i])] = f
+    return out
+
+
+def reconcile_prompt_filters(config: dict, user_prompt, schema: dict) -> dict:
+    """Restore numbered-prompt filters the model lost or garbled.
+
+    The fine-tuned model sometimes drops the first numbered filter (it maps
+    'Stage 1' onto the copy stage its contract forces) or shifts them all by
+    one. When the prompt's numbered stages parse into filters deterministically
+    and any of them is missing from the plan, override the notebook stages'
+    filter_condition positionally — stage number order onto notebook order."""
+    extracted = extract_prompt_stage_filters(user_prompt, schema)
+    if not extracted:
+        return config
+    notebooks = [s for s in config.get("stages", []) if s.get("type") == "notebook"]
+    if len(extracted) > len(notebooks):
+        return config   # not enough stages — count enforcement handles that
+
+    def _norm(f):
+        return re.sub(r"\s+", "", str(f or "").lower())
+    have = {_norm(s.get("filter_condition")) for s in notebooks}
+    wanted = [f for _, f in sorted(extracted.items())]
+    if all(_norm(f) in have for f in wanted):
+        return config
+
+    print(f"   Prompt filters lost by the model — restoring {len(wanted)} numbered filter(s) positionally")
+    # A copy stage cannot filter — if the model parked a numbered filter on
+    # it, remove it there; the positional override re-homes it to a notebook.
+    wanted_norm = {_norm(f) for f in wanted}
+    for s in config.get("stages", []):
+        if s.get("type") == "copy" and _norm(s.get("filter_condition")) in wanted_norm:
+            print(f"   Removing filter from copy stage '{s.get('name')}' (re-homed to a notebook stage)")
+            s.pop("filter_condition", None)
+    for s, f in zip(notebooks, wanted):
+        if _norm(s.get("filter_condition")) != _norm(f):
+            print(f"   [{s.get('name')}] filter := {f}")
+            s["filter_condition"] = f
+    return config
+
+
 def redistribute_operations(config: dict, user_prompt: str = None) -> dict:
     """Spread stacked operations into pass-through stages.
 
@@ -620,6 +708,23 @@ def _structural_validate(config: dict, schema: dict = None, custom_settings: dic
         if custom_settings.get("shuffle_partitions") is not None:
             _max_shuffle = max(_max_shuffle, int(custom_settings["shuffle_partitions"]))
 
+    # A copy stage cannot transform — if the model attached operations to it
+    # (it maps "Stage 1" onto its contract-forced copy stage), convert it to
+    # a notebook so the insertion below gives it a proper ingest stage and no
+    # user operation is silently dropped by the executor.
+    if stages and stages[0].get("type") == "copy" and clist:
+        s0 = stages[0]
+        _s0_ops = [t for t in (s0.get("transformations") or []) if t and "processed_time" not in t]
+        if _s0_ops or s0.get("filter_condition") or (s0.get("aggregation") or {}).get("aggregations"):
+            print(f"   Copy stage '{s0.get('name')}' carries operations — converting to notebook")
+            s0["type"] = "notebook"
+            s0.pop("diu", None)
+            s0.pop("source_dataset", None)
+            s0.pop("sink_dataset", None)
+            s0.setdefault("source_container", clist[0])
+            if len(clist) > 1:
+                s0.setdefault("sink_container", clist[1])
+
     # The model often maps the user's "Stage 1" onto the literal first stage.
     # Coercing that stage to copy would DELETE its operations (off-by-one:
     # every filter shifts up a stage and the first one is lost). Instead,
@@ -652,6 +757,17 @@ def _structural_validate(config: dict, schema: dict = None, custom_settings: dic
         config["containers"] = {f"stage{i}": c for i, c in enumerate(clist)}
         config["datasets"] = _build_datasets(clist)
         config["num_containers"] = len(clist)
+
+    # N containers support N-1 chained stages. When the model emits more
+    # stages than the chain has hops, surplus trailing do-nothing stages are
+    # artifacts — drop them and rewire the last real stage to the final sink.
+    while (clist and len(stages) > max(1, len(clist) - 1)
+           and stages[-1].get("type") == "notebook"
+           and _stage_op_load(stages[-1]) == 0):
+        dropped = stages.pop()
+        print(f"   Dropped surplus trailing pass-through stage '{dropped.get('name')}'")
+        if stages and stages[-1].get("type") == "notebook":
+            stages[-1]["sink_container"] = clist[-1]
 
     for i, s in enumerate(stages):
         if i == 0 and s.get("type") != "copy":

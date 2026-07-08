@@ -28,6 +28,7 @@ from .planner_common import (
     build_default_config,
     enforce_container_count,
     get_recommended_settings,
+    reconcile_prompt_filters,
     redistribute_operations,
     required_containers_for_prompt,
 )
@@ -147,6 +148,8 @@ def decide_pipeline_config(
         # the prompt shows distribution intent (numbered stages, "each stage",
         # "distribute", ...); otherwise the model's grouping is respected.
         config = redistribute_operations(config, user_prompt)
+        # Restore numbered-prompt filters the model dropped or shifted.
+        config = reconcile_prompt_filters(config, user_prompt, schema)
         # Explicit user resource settings override whatever the model emitted.
         config = apply_custom_settings(config, custom_settings)
         # Prompt-referenced stage numbers become the notebook stage names.
