@@ -1,10 +1,77 @@
 {
-  "mae_seconds": 221.86,
-  "r2_score": 0.8706,
-  "balanced_accuracy": 0.645,
+  "duration_regressor": {
+    "mae_seconds": 223.94,
+    "r2_score": 0.8709,
+    "training_time_s": 86.3
+  },
+  "outcome_classifier": {
+    "balanced_accuracy": 0.7294,
+    "macro_f1": 0.682,
+    "cv_balanced_accuracy_mean": 0.7327,
+    "cv_balanced_accuracy_std": 0.0053,
+    "classification_report": {
+      "failure": {
+        "precision": 0.47061310782241017,
+        "recall": 0.7556008146639511,
+        "f1-score": 0.5799895779051589,
+        "support": 1473.0
+      },
+      "slowdown": {
+        "precision": 0.67823571945047,
+        "recall": 0.6487608069164265,
+        "f1-score": 0.6631709185176456,
+        "support": 8675.0
+      },
+      "success": {
+        "precision": 0.8228693044403599,
+        "recall": 0.7838186509399189,
+        "f1-score": 0.8028694133748643,
+        "support": 10852.0
+      },
+      "accuracy": 0.726047619047619,
+      "macro avg": {
+        "precision": 0.6572393772377466,
+        "recall": 0.7293934241734322,
+        "f1-score": 0.6820099699325564,
+        "support": 21000.0
+      },
+      "weighted avg": {
+        "precision": 0.7384136031353343,
+        "recall": 0.726047619047619,
+        "f1-score": 0.7295272019209,
+        "support": 21000.0
+      }
+    },
+    "training_time_s": 12.4
+  },
+  "feature_columns": [
+    "stage_count",
+    "copy_stages",
+    "notebook_stages",
+    "file_size_mb",
+    "row_count",
+    "n_execution_groups",
+    "parallel_ratio",
+    "transform_count",
+    "agg_count",
+    "copy_correction",
+    "notebook_correction",
+    "resource_estimate_s",
+    "baseline_s",
+    "network_quality",
+    "complexity_encoded",
+    "data_complexity_score",
+    "pipeline_risk_index",
+    "correction_uncertainty",
+    "stage_parallelism_efficiency"
+  ],
+  "n_training_samples": 84000,
+  "n_test_samples": 21000,
+  "failure_rate_pct": 7.01,
   "spot_check_tiny_file": {
     "file_size_mb": 0.0011,
-    "predicted_s": 216,
-    "actual_was_s": 144
-  }
+    "predicted_s": 173,
+    "real_runs_s": "126-144"
+  },
+  "total_training_time_s": 114.4
 }

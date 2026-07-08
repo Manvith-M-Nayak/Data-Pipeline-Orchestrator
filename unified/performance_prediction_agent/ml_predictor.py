@@ -1,21 +1,17 @@
 """
 ML-backed Performance Prediction — primary path.
 
-Mirrors the Planner Agent's pattern exactly:
-  - Primary:  trained model (RandomForest classifier + GradientBoosting
-              regressor) loaded locally from .pkl files
-  - Fallback: the original transparent formula (performance_agent.py),
-              used only if the model files are missing or model inference
-              throws an exception
+Primary:  trained models loaded locally from models/
+Fallback: formula in performance_agent.py (if models missing or fail)
 
-This module does NOT replace performance_agent.py — it sits in front of
-it. performance_agent.py remains untouched and fully functional as the
-fallback, exactly the same role Groq plays for the Planner.
+v3 feature set adds 4 derived features:
+  - data_complexity_score      : log(file_size) * log(row_count) / 100
+  - pipeline_risk_index        : pre-computed weighted risk from plan features
+  - correction_uncertainty     : mean absolute deviation of both corrections from 1.0
+  - stage_parallelism_efficiency: 1 - (n_groups / stage_count)
 
-Models trained on a synthetic dataset (5000 simulated runs) because real
-run history (manager_feedback.jsonl) currently has too few rows (<10) to
-train anything meaningful. See training/generate_synthetic_data.py and
-training/train_model.py for how the dataset and models were produced.
+IMPORTANT: always retrain inside the project venv, never copy .pkl files
+across machines. Run python3 run_training.py to regenerate.
 """
 
 import os
@@ -23,7 +19,6 @@ from typing import Dict, List, Optional
 
 import joblib
 import numpy as np
-import pandas as pd
 
 _MODEL_DIR = os.path.join(os.path.dirname(__file__), "models")
 
@@ -40,22 +35,19 @@ FEATURE_COLS = [
     "resource_estimate_s", "baseline_s",
     "network_quality",
     "complexity_encoded",
+    # Derived features added in v3
+    "data_complexity_score",
+    "pipeline_risk_index",
+    "correction_uncertainty",
+    "stage_parallelism_efficiency",
 ]
 
 
 class MLNotAvailable(Exception):
-    """Raised when model files are missing or fail to load — triggers fallback."""
     pass
 
 
 class MLPredictor:
-    """
-    Loads the trained models once (on first use) and exposes a single
-    predict() method that takes the same kind of inputs the formula-based
-    agent already uses, so the caller (performance_agent.py / manager.py)
-    doesn't need to know which path actually ran.
-    """
-
     _duration_model = None
     _outcome_model  = None
     _encoder        = None
@@ -95,16 +87,7 @@ class MLPredictor:
         resource_plan: dict,
         predictions: dict,
         plan: dict,
-    ) -> "pd.DataFrame":
-        """
-        Translate the same RunState-derived inputs the formula agent uses
-        into the flat feature vector the model was trained on.
-
-        Returned as a named-column DataFrame (not a bare ndarray) so the
-        columns line up with the feature names the estimators were fitted
-        with — otherwise sklearn warns ("X does not have valid feature
-        names") and, on a version mismatch, can reorder/misread columns.
-        """
+    ) -> np.ndarray:
         stages = plan.get("stages", [])
         allocations = resource_plan.get("allocations", [])
         execution_groups = resource_plan.get("execution_groups", [])
@@ -115,14 +98,12 @@ class MLPredictor:
         notebook_stages = stage_count - copy_stages
 
         file_size_mb = float(predictions.get("file_size_mb", 0) or 0)
-# Keep full precision — don't round here, the model needs the raw value
         row_count    = int((plan.get("schema") or {}).get("row_count", 0) or 0)
 
         complexity = predictions.get("complexity", "medium")
         try:
             complexity_encoded = int(cls._encoder.transform([complexity])[0])
         except Exception:
-            # Unknown complexity label at inference time — fall back to "medium"
             complexity_encoded = int(cls._encoder.transform(["medium"])[0])
 
         n_groups = len(execution_groups) or 1
@@ -139,15 +120,36 @@ class MLPredictor:
         notebook_correction = float(corr.get("notebook", 1.0))
 
         resource_estimate_s = float(resource_plan.get("estimated_total_s", 0) or 0)
-        baseline_s = resource_estimate_s  # same critical-path number the formula agent computes
+        baseline_s = resource_estimate_s
 
-        # network_quality: the live system doesn't measure real Azure network/
-        # cluster conditions at prediction time (that data doesn't exist yet).
-        # Default to 0.7 — the dataset's mean-ish value — rather than 1.0,
-        # so the model doesn't silently assume "perfect conditions" on every
-        # real prediction. This is an honest placeholder until real telemetry
-        # (e.g. from Monitor Agent) can feed this feature live.
+        # network_quality: no real telemetry yet, default to 0.7 (dataset mean)
         network_quality = float(predictions.get("network_quality", 0.7))
+
+        # ── Derived features (must match run_training.py exactly) ─────────
+        data_complexity_score = (
+            np.log1p(file_size_mb) * np.log1p(row_count) / 100.0
+        )
+
+        copy_share = copy_stages / max(stage_count, 1)
+        correction_blend = (
+            copy_correction * copy_share
+            + notebook_correction * (1 - copy_share)
+        )
+        correction_deviation = np.clip(abs(correction_blend - 1.0) / 0.4, 0, 1)
+
+        pipeline_risk_index = (
+            0.3 * np.clip(file_size_mb / 2000, 0, 1)
+            + 0.2 * np.clip(stage_count / 12, 0, 1)
+            + 0.2 * (1 - parallel_ratio)
+            + 0.15 * correction_deviation
+            + 0.15 * (1 - network_quality)
+        )
+
+        correction_uncertainty = (
+            abs(copy_correction - 1.0) + abs(notebook_correction - 1.0)
+        ) / 2
+
+        stage_parallelism_efficiency = 1 - (n_groups / max(stage_count, 1))
 
         row = [
             stage_count, copy_stages, notebook_stages,
@@ -158,8 +160,12 @@ class MLPredictor:
             resource_estimate_s, baseline_s,
             network_quality,
             complexity_encoded,
+            data_complexity_score,
+            pipeline_risk_index,
+            correction_uncertainty,
+            stage_parallelism_efficiency,
         ]
-        return pd.DataFrame([row], columns=FEATURE_COLS).astype(float)
+        return np.array(row, dtype=float).reshape(1, -1)
 
     @classmethod
     def predict(
@@ -168,26 +174,14 @@ class MLPredictor:
         predictions: dict,
         plan: dict,
     ) -> dict:
-        """
-        Returns the same shape of result the formula agent produces for
-        the fields the model can predict: predicted_total_s, outcome,
-        confidence. Stage-level forecasts and rationale are NOT produced
-        by the model (it predicts the plan as a whole) — the caller is
-        expected to merge this with stage_forecasts from the formula
-        agent's critical-path breakdown.
-
-        Raises MLNotAvailable if models aren't loaded or inference fails.
-        """
         cls._ensure_loaded()
 
         try:
             X = cls._build_feature_row(resource_plan, predictions, plan)
 
-            # Duration: model was trained on log1p(duration), so back-transform
             log_pred = cls._duration_model.predict(X)[0]
             predicted_total_s = max(60, int(np.expm1(log_pred)))
 
-            # Outcome + confidence (max class probability)
             outcome = cls._outcome_model.predict(X)[0]
             proba   = cls._outcome_model.predict_proba(X)[0]
             classes = cls._outcome_model.classes_
