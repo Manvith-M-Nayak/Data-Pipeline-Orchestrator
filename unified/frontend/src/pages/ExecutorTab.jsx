@@ -341,10 +341,13 @@ export default function ExecutorTab() {
             <>
               <div style={{ marginBottom: 14 }}>
                 {EXEC_STEPS.map((label, i) => {
-                  const failed = jobState?.status === "failed";
+                  const failed    = jobState?.status === "failed";
+                  const completed = jobState?.status === "completed";
                   const isLast = i === EXEC_STEPS.length - 1;
                   let state;
-                  if (failed) {
+                  if (completed) {
+                    state = "done";   // finished — every step is done, incl. "Complete"
+                  } else if (failed) {
                     if (isLast) state = "pending";
                     else state = execStep > i ? "done" : execStep === i ? "running" : "pending";
                   } else {

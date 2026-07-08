@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import tempfile
+import time
 
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 
@@ -31,20 +32,37 @@ async def start_managed_run(
     except json.JSONDecodeError as exc:
         raise HTTPException(status_code=422, detail=f"Invalid JSON: {exc}")
 
-    # Write CSV to temp file — executor needs a file path
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".csv")
-    tmp.write(contents)
-    tmp.close()
+    # Write CSV to a temp dir keeping the original filename — it becomes the
+    # blob name in the source container (executor needs a file path).
+    orig_name = os.path.basename(csv_file.filename or "") or "input.csv"
+    if not orig_name.lower().endswith(".csv"):
+        orig_name += ".csv"
+    tmp_dir  = tempfile.mkdtemp(prefix="manager_")
+    tmp_path = os.path.join(tmp_dir, orig_name)
+    with open(tmp_path, "wb") as f:
+        f.write(contents)
 
     # Pre-create the RunState so client gets run_id before async work starts
     run_id = _manager.pre_create(config_dict)
 
     async def _task():
+        start = time.time()
         try:
-            await _manager.execute_run(run_id, tmp.name, schema_dict, csv_size, user_request)
+            await _manager.execute_run(run_id, tmp_path, schema_dict, csv_size, user_request)
+            # Managed runs bypass the executor router — feed the monitor the
+            # same completion record it would have received there.
+            try:
+                state = _manager.get_state_dict(run_id) or {}
+                result = state.get("executor_result")
+                if result:
+                    from executor_agent.router import _notify_monitor
+                    await _notify_monitor(result, int((time.time() - start) * 1000))
+            except Exception as exc:
+                print(f"[manager] monitor notify non-fatal: {exc}")
         finally:
             try:
-                os.unlink(tmp.name)
+                os.unlink(tmp_path)
+                os.rmdir(tmp_dir)
             except OSError:
                 pass
 
