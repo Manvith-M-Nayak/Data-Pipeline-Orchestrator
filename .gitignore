@@ -42,3 +42,4 @@ PLANNER_MODEL_LEARN.md
 AGENTS_PROGRESS_REPORT.md
 
 node_modules/
+unified/performance_prediction_agent/models/*.pkl
