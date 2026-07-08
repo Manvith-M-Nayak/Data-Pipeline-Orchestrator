@@ -15,6 +15,16 @@ router = APIRouter()
 _jobs: Dict[str, Dict] = {}
 
 
+def _manager():
+    """Central Manager singleton — direct executor runs are mirrored into its
+    run registry so they show up alongside managed runs. None if unavailable."""
+    try:
+        from central_manager_agent.router import _manager as mgr
+        return mgr
+    except Exception:
+        return None
+
+
 @router.post("/run")
 async def run_pipeline(
     csv_file:        UploadFile = File(...),
@@ -60,10 +70,30 @@ async def run_pipeline(
     job_id = str(uuid.uuid4())
     _jobs[job_id] = {"status": "running", "step": "Starting…", "result": None, "error": None}
 
+    # Mirror this run into the Central Manager's registry so it appears in
+    # the manager UI next to fully-managed runs.
+    mgr, mgr_state = _manager(), None
+    if mgr:
+        try:
+            mgr_run_id = mgr.pre_create(config_dict)
+            mgr_state = mgr._runs.get(mgr_run_id)
+            mgr_state.status = "executing"
+            mgr_state.phase  = "executing"
+            mgr_state.step   = "Starting…"
+            mgr._log(mgr_state, "DIRECT_RUN",
+                     "Run started from the Executor Agent (not centrally managed)",
+                     f"executor job {job_id}", "info")
+            _jobs[job_id]["manager_run_id"] = mgr_run_id
+        except Exception as exc:
+            print(f"[executor] manager mirror non-fatal: {exc}")
+            mgr_state = None
+
     def _progress(step_name: str, dbx_run_id: int = None):
         _jobs[job_id]["step"] = step_name
         if dbx_run_id is not None:
             _jobs[job_id]["dbx_run_id"] = dbx_run_id
+        if mgr_state is not None:
+            mgr_state.step = step_name
 
     async def _run():
         start = time.time()
@@ -78,9 +108,21 @@ async def run_pipeline(
                 })
             else:
                 _jobs[job_id].update({"status": "completed", "step": "Complete", "result": result})
+            if mgr_state is not None:
+                failed = _jobs[job_id]["status"] == "failed"
+                mgr_state.status = "failed" if failed else "completed"
+                mgr_state.step   = _jobs[job_id]["step"] if not failed else "Failed"
+                mgr_state.error  = _jobs[job_id].get("error")
+                mgr_state.executor_result = result if isinstance(result, dict) else None
+                mgr_state.completed_at = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
             asyncio.create_task(_notify_monitor(result, elapsed_ms))
         except Exception as exc:
             _jobs[job_id].update({"status": "failed", "error": str(exc)})
+            if mgr_state is not None:
+                mgr_state.status = "failed"
+                mgr_state.step   = "Failed"
+                mgr_state.error  = str(exc)
+                mgr_state.completed_at = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
         finally:
             _cleanup()
 

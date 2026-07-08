@@ -574,6 +574,44 @@ export default function ManagerTab() {
     return () => clearInterval(pollRef.current);
   }, []); // eslint-disable-line
 
+  // ── All runs (managed + mirrored executor runs) ────────────────────────────
+  const [allRuns, setAllRuns] = useState([]);
+  const refreshRuns = useCallback(async () => {
+    try { setAllRuns(await manager.listRuns()); } catch { /* backend down — keep last */ }
+  }, []);
+  useEffect(() => {
+    refreshRuns();
+    const iv = setInterval(refreshRuns, 5000);
+    return () => clearInterval(iv);
+  }, [refreshRuns]);
+
+  const isLive = (s) => !["completed", "failed"].includes(s);
+
+  // Attach this tab to a run started elsewhere (Executor tab, another window)
+  // so opening the Manager always shows what is currently executing.
+  useEffect(() => {
+    if (running || (mgrState && isLive(mgrState.status))) return;
+    const live = allRuns.find((r) => isLive(r.status));
+    if (live && live.run_id !== runId) {
+      attachToRun(live.run_id);
+    }
+  }, [allRuns]); // eslint-disable-line
+
+  function attachToRun(rid) {
+    clearInterval(pollRef.current);
+    setError("");
+    setRunId(rid);
+    manager.status(rid).then((s) => {
+      setMgrState(s);
+      if (isLive(s.status)) {
+        setRunning(true);
+        _startPolling(rid);
+      } else {
+        setRunning(false);
+      }
+    }).catch(() => {});
+  }
+
   async function handleRun() {
     if (!csvFile || !savedPlan) return;
     setError(""); setRunning(true); setMgrState(null);
@@ -700,6 +738,45 @@ export default function ManagerTab() {
           </button>
         )}
       </div>
+
+      {/* All runs — managed here or mirrored from the Executor Agent */}
+      {allRuns.length > 0 && (
+        <div style={S.card}>
+          <div style={S.cardHdr}><Clock size={14} color="#94a3b8" />Recent Runs</div>
+          {allRuns.slice(0, 8).map((r) => {
+            const live = isLive(r.status);
+            const selected = r.run_id === runId;
+            const color = r.status === "completed" ? "#4ade80" : r.status === "failed" ? "#f87171" : "#fbbf24";
+            return (
+              <div
+                key={r.run_id}
+                onClick={() => attachToRun(r.run_id)}
+                style={{
+                  display: "flex", alignItems: "center", gap: 10, padding: "8px 10px",
+                  borderRadius: 8, cursor: "pointer", marginBottom: 4,
+                  background: selected ? "#0f172a" : "transparent",
+                  border: `1px solid ${selected ? "#334155" : "transparent"}`,
+                }}
+              >
+                <span style={{
+                  width: 8, height: 8, borderRadius: "50%", flexShrink: 0, background: color,
+                  boxShadow: live ? `0 0 0 3px ${color}33` : "none",
+                }} />
+                <span style={{ fontSize: 12, color: "#cbd5e1", fontFamily: "monospace" }}>
+                  {r.run_id.slice(0, 8)}
+                </span>
+                <span style={{ fontSize: 12, color, fontWeight: 600 }}>{r.status}</span>
+                <span style={{ fontSize: 12, color: "#64748b", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {r.step}
+                </span>
+                <span style={{ fontSize: 11, color: "#475569", flexShrink: 0 }}>
+                  {r.stage_count} stage(s) · {(r.started_at || "").slice(11, 19)}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* Active / completed run */}
       {mgrState && (
