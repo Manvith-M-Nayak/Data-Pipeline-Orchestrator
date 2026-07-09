@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { BrowserRouter, Routes, Route, NavLink } from "react-router-dom";
-import { Home, Brain, Zap, Activity, GitBranch, Cpu, RefreshCw, TrendingUp } from "lucide-react";
+import { Home, Brain, Zap, Activity, GitBranch, Cpu, RefreshCw, TrendingUp, DollarSign } from "lucide-react";
 import { monitor } from "./api.js";
 import { AppProvider } from "./AppContext.jsx";
 import HomePage    from "./pages/HomePage.jsx";
@@ -10,6 +10,7 @@ import MonitorTab  from "./pages/MonitorTab.jsx";
 import ManagerTab  from "./pages/ManagerTab.jsx";
 import ResourceTab from "./pages/ResourceTab.jsx";
 import PerformancePredictionTab from "./pages/PerformancePredictionTab.jsx";
+import CostOptimizationTab from "./pages/CostOptimizationTab.jsx";
 
 const TABS = [
   { to: "/",          label: "Home",              icon: Home,       exact: true  },
@@ -17,6 +18,7 @@ const TABS = [
   { to: "/manager",   label: "Central Manager",   icon: GitBranch,  exact: false },
   { to: "/resource",     label: "Resource Agent",        icon: Cpu,         exact: false },
   { to: "/performance",  label: "Performance Agent",     icon: TrendingUp,  exact: false },
+  { to: "/cost",      label: "Cost Optimization", icon: DollarSign,  exact: false },
   { to: "/executor",  label: "Executor Agent",    icon: Zap,        exact: false },
   { to: "/monitor",   label: "Monitor Agent",     icon: Activity,   exact: false },
 ];
@@ -99,6 +101,7 @@ export default function App() {
             <Route path="/manager"   element={<ManagerTab />} />
             <Route path="/resource"      element={<ResourceTab />} />
             <Route path="/performance"   element={<PerformancePredictionTab />} />
+            <Route path="/cost"      element={<CostOptimizationTab />} />
             <Route path="/executor"  element={<ExecutorTab />} />
             <Route path="/monitor"   element={<MonitorTab />} />
           </Routes>

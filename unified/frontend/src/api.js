@@ -156,4 +156,30 @@ export function connectWS(onMessage) {
   return () => _subs.delete(onMessage);
 }
 
+// ── Cost Optimization Agent ────────────────────────────────────────────────────
+export const cost = {
+  optimize: (plan, performancePrediction, resourcePlan, constraints = {}) =>
+    req("/cost-optimization/optimize", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        plan,
+        performance_prediction: performancePrediction,
+        resource_plan: resourcePlan,
+        constraints,
+      }),
+    }),
+  estimate: (plan, performancePrediction, resourcePlan) =>
+    req("/cost-optimization/estimate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        plan,
+        performance_prediction: performancePrediction,
+        resource_plan: resourcePlan,
+      }),
+    }),
+  nodeRates: () => req("/cost-optimization/node-rates"),
+};
+
 export const health = () => req("/health");
