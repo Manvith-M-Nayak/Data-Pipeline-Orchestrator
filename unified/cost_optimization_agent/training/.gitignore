@@ -1,0 +1,3 @@
+# The generated training CSV is a build artifact — regenerate it, don't commit it.
+cost_training.csv
+*.csv

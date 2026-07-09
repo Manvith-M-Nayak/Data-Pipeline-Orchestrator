@@ -28,7 +28,8 @@ booleans the owners return (feasible / assured / outcome).
 | Plan fits the student-tier hard limits (feasibility) | **Resource Agent** | Manager (hard gate) |
 | Mid-run compute re-allocation from live telemetry | **Resource Agent** (`dynamic_reallocate`) | Manager, Monitor UI |
 | **Total runtime / bottleneck / SLA / success-or-fail outcome** | **Performance Prediction Agent** | Manager (hard gate on `outcome == "failure"`) |
-| $ cost estimate | **Central Manager** (`estimate_cost`) | UI |
+| $ cost estimate | **Central Manager** (`estimate_cost`) | UI, Cost Optimization |
+| Cost optimization suggestions (downsize, off-peak, merge, tune) | **Cost Optimization Agent** | Central Manager, UI |
 | Live run status, anomalies, per-pipeline runtime from *history* | **Monitor Agent** | UI, Resource (`dynamic_reallocate`) |
 | Retry / backoff on execution failure | **Central Manager** (`execute_with_retry`) | — |
 | Post-run assurance (did it actually succeed) | **Central Manager** (`run_assurance`) | UI, feedback log |
@@ -83,10 +84,12 @@ Phase 2 (pre_checks):
   predict_resources()     # Resource Agent: settings + feasibility  (HARD GATE: feasible)
   estimate_cost()         # Manager: $ estimate from settings
   predict_performance()   # Performance Agent: runtime/outcome/SLA  (HARD GATE: outcome!=failure)
+  optimize_cost()         # Cost Optimization Agent: cheaper alternatives (non-blocking)
 ```
 
 The order matters: settings must exist before cost and performance can be derived from them.
 Neither cost nor performance recomputes settings — they read `state.resource_plan`.
+Cost optimization runs last since it needs both cost estimates and performance predictions.
 
 ---
 
@@ -99,5 +102,6 @@ Neither cost nor performance recomputes settings — they read `state.resource_p
 | Central Manager | `central_manager_agent/` |
 | Resource | `resource_agent/` (model: `models/`, training: `training/`, contract: `ml/`) |
 | Performance Prediction | `performance_prediction_agent/` |
+| Cost Optimization | `cost_optimization_agent/` |
 | Monitor | `monitor_agent/` |
 | Executor | `executor_agent/` |

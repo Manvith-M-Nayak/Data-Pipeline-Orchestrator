@@ -1,0 +1,29 @@
+{
+  "sklearn_version": "1.6.1",
+  "rows": 200002,
+  "targets": {
+    "opt_workers": {
+      "mae": 0.0,
+      "r2": 1.0,
+      "exact_acc": 1.0,
+      "within1_acc": 1.0
+    },
+    "opt_diu": {
+      "mae": 0.0,
+      "r2": 1.0,
+      "exact_acc": 1.0,
+      "within1_acc": 1.0
+    },
+    "opt_memory_gb": {
+      "mae": 0.0,
+      "r2": 1.0
+    },
+    "opt_shuffle_partitions": {
+      "mae": 0.229,
+      "r2": 0.9965
+    }
+  },
+  "node_type": {
+    "balanced_accuracy": 1.0
+  }
+}
