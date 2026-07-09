@@ -22,46 +22,48 @@ from performance_prediction_agent.router import router as perf_router
 # ── Bridge config.py → environment before any service reads os.getenv ──────
 try:
     import config as _cfg
+
     _BRIDGE = {
-        "AZURE_TENANT_ID":       getattr(_cfg, "AZURE_TENANT_ID",       ""),
-        "AZURE_CLIENT_ID":       getattr(_cfg, "AZURE_CLIENT_ID",       ""),
-        "AZURE_CLIENT_SECRET":   getattr(_cfg, "AZURE_CLIENT_SECRET",   ""),
+        "AZURE_TENANT_ID": getattr(_cfg, "AZURE_TENANT_ID", ""),
+        "AZURE_CLIENT_ID": getattr(_cfg, "AZURE_CLIENT_ID", ""),
+        "AZURE_CLIENT_SECRET": getattr(_cfg, "AZURE_CLIENT_SECRET", ""),
         "AZURE_SUBSCRIPTION_ID": getattr(_cfg, "AZURE_SUBSCRIPTION_ID", ""),
-        "AZURE_RESOURCE_GROUP":  getattr(_cfg, "AZURE_RESOURCE_GROUP",  ""),
-        "ADF_FACTORY_NAME":      getattr(_cfg, "AZURE_DATA_FACTORY",    ""),
-        "GROQ_API_KEY":          getattr(_cfg, "GROQ_API_KEY",          ""),
-        "PLANNER_BACKEND":       getattr(_cfg, "PLANNER_BACKEND",       "ollama"),
-        "OLLAMA_HOST":           getattr(_cfg, "OLLAMA_HOST",           "http://localhost:11434"),
-        "PLANNER_MODEL":         getattr(_cfg, "PLANNER_MODEL",         "planner-agent"),
+        "AZURE_RESOURCE_GROUP": getattr(_cfg, "AZURE_RESOURCE_GROUP", ""),
+        "ADF_FACTORY_NAME": getattr(_cfg, "AZURE_DATA_FACTORY", ""),
+        "GROQ_API_KEY": getattr(_cfg, "GROQ_API_KEY", ""),
+        "PLANNER_BACKEND": getattr(_cfg, "PLANNER_BACKEND", "ollama"),
+        "OLLAMA_HOST": getattr(_cfg, "OLLAMA_HOST", "http://localhost:11434"),
+        "PLANNER_MODEL": getattr(_cfg, "PLANNER_MODEL", "planner-agent"),
     }
     for k, v in _BRIDGE.items():
         if v:
             os.environ.setdefault(k, str(v))
 except ImportError:
-    pass   # config.py not present — rely on actual environment variables
+    pass  # config.py not present — rely on actual environment variables
 
 # ── Service imports (after env bridge) ─────────────────────────────────────
-from monitor_agent.services.adf_service     import ADFService
-from monitor_agent.services.db_service      import DBService
-from monitor_agent.services.groq_service    import GroqService
+from monitor_agent.services.adf_service import ADFService
+from monitor_agent.services.db_service import DBService
+from monitor_agent.services.groq_service import GroqService
 from monitor_agent.services.monitor_service import MonitorService
 import monitor_agent.deps as _deps
 
 from monitor_agent.routers import pipelines as mon_pipelines
-from monitor_agent.routers import logs      as mon_logs
+from monitor_agent.routers import logs as mon_logs
 from monitor_agent.routers import predictions as mon_predictions
 from monitor_agent.routers import anomalies as mon_anomalies
 
-from planner_agent.router         import router as planner_router
-from executor_agent.router        import router as executor_router
+from planner_agent.router import router as planner_router
+from executor_agent.router import router as executor_router
 from central_manager_agent.router import router as manager_router
-from resource_agent.router        import router as resource_router
-from assurance_agent.router       import router as assurance_router
+from resource_agent.router import router as resource_router
+from assurance_agent.router import router as assurance_router
+from cost_optimization_agent.router import router as cost_optimizer_router
 
 # ── Service singletons ──────────────────────────────────────────────────────
-db_service      = DBService()
-adf_service     = ADFService()
-groq_service    = GroqService()
+db_service = DBService()
+adf_service = ADFService()
+groq_service = GroqService()
 monitor_service = MonitorService(adf_service, db_service, groq_service)
 
 
@@ -84,21 +86,45 @@ app.add_middleware(
 )
 
 # ── Routers ─────────────────────────────────────────────────────────────────
-app.include_router(planner_router,          prefix="/api/planner",                     tags=["planner"])
-app.include_router(executor_router,         prefix="/api/executor",                    tags=["executor"])
-app.include_router(manager_router,          prefix="/api/manager",                     tags=["manager"])
-app.include_router(resource_router,         prefix="/api/resource",                    tags=["resource"])
-app.include_router(assurance_router,        prefix="/api/assurance",                   tags=["assurance"])
-app.include_router(perf_router, prefix="/api/performance-prediction", tags=["performance-prediction"])
-app.include_router(mon_pipelines.router,    prefix="/api/monitor/pipelines",           tags=["monitor-pipelines"])
-app.include_router(mon_logs.router,         prefix="/api/monitor/logs",                tags=["monitor-logs"])
-app.include_router(mon_predictions.router,  prefix="/api/monitor/predictions",         tags=["monitor-predictions"])
-app.include_router(mon_anomalies.router,    prefix="/api/monitor/anomalies",           tags=["monitor-anomalies"])
+app.include_router(planner_router, prefix="/api/planner", tags=["planner"])
+app.include_router(executor_router, prefix="/api/executor", tags=["executor"])
+app.include_router(manager_router, prefix="/api/manager", tags=["manager"])
+app.include_router(resource_router, prefix="/api/resource", tags=["resource"])
+app.include_router(assurance_router, prefix="/api/assurance", tags=["assurance"])
+app.include_router(
+    perf_router, prefix="/api/performance-prediction", tags=["performance-prediction"]
+)
+app.include_router(
+    cost_optimizer_router, prefix="/api/cost-optimization", tags=["cost-optimization"]
+)
+app.include_router(
+    mon_pipelines.router, prefix="/api/monitor/pipelines", tags=["monitor-pipelines"]
+)
+app.include_router(mon_logs.router, prefix="/api/monitor/logs", tags=["monitor-logs"])
+app.include_router(
+    mon_predictions.router,
+    prefix="/api/monitor/predictions",
+    tags=["monitor-predictions"],
+)
+app.include_router(
+    mon_anomalies.router, prefix="/api/monitor/anomalies", tags=["monitor-anomalies"]
+)
 
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "agents": ["planner", "assurance", "executor", "monitor", "central_manager", "resource"]}
+    return {
+        "status": "ok",
+        "agents": [
+            "planner",
+            "assurance",
+            "executor",
+            "monitor",
+            "central_manager",
+            "resource",
+            "cost_optimization",
+        ],
+    }
 
 
 # ── Schema detection ────────────────────────────────────────────────────────
@@ -133,9 +159,9 @@ def _infer_type(values: list) -> str:
 @app.post("/api/schema/detect", tags=["schema"])
 async def detect_schema(csv_file: UploadFile = File(...)):
     contents = await csv_file.read()
-    text     = contents.decode("utf-8", errors="replace")
-    reader   = csv.DictReader(io.StringIO(text))
-    rows     = []
+    text = contents.decode("utf-8", errors="replace")
+    reader = csv.DictReader(io.StringIO(text))
+    rows = []
     for i, row in enumerate(reader):
         if i >= 200:
             break
@@ -149,10 +175,10 @@ async def detect_schema(csv_file: UploadFile = File(...)):
     preview = [{k: r.get(k, "") for k in headers} for r in rows[:6]]
 
     return {
-        "columns":          columns,
-        "preview":          preview,
+        "columns": columns,
+        "preview": preview,
         "row_count_sample": len(rows),
-        "column_count":     len(headers),
+        "column_count": len(headers),
     }
 
 
@@ -169,7 +195,7 @@ async def download_output(container: str):
         f"AccountKey={_cfg.AZURE_STORAGE_KEY};"
         f"EndpointSuffix=core.windows.net"
     )
-    client    = BlobServiceClient.from_connection_string(conn)
+    client = BlobServiceClient.from_connection_string(conn)
     container_client = client.get_container_client(container)
 
     # Find first .csv blob that has content
@@ -181,7 +207,10 @@ async def download_output(container: str):
 
     if not target:
         from fastapi import HTTPException
-        raise HTTPException(status_code=404, detail=f"No output CSV found in '{container}'")
+
+        raise HTTPException(
+            status_code=404, detail=f"No output CSV found in '{container}'"
+        )
 
     blob_client = container_client.get_blob_client(target)
 
