@@ -1,10 +1,9 @@
 """
-Cost Optimization Agent — reduces pipeline cost without breaking correctness or deadlines.
+Cost Optimization Agent — ML-driven cost reduction for data pipelines.
 
-Uses a cost model formula (cluster_size x node_rate x duration) to estimate
-cost from predicted resource usage, then applies rule-based optimization to
-suggest cheaper alternatives. Only safe, constraint-respecting suggestions
-are returned, ranked by best value.
+Uses a trained HistGradientBoosting model (cost_models.pkl) to predict
+cost-optimal resource configurations, with rule-based heuristic fallback
+when the model is unavailable.
 
 Quick use:
     from cost_optimization_agent import CostOptimizationAgent
@@ -24,12 +23,15 @@ from .cost_optimizer import (
     NODE_HOURLY_RATES,
     COST_MODEL_ASSUMPTIONS,
 )
+from .ml_predictor import CostMLPredictor, MLNotAvailable
 
 __all__ = [
     "CostOptimizationAgent",
     "OptimizationResult",
     "OptimizationSuggestion",
     "CostBreakdown",
+    "CostMLPredictor",
+    "MLNotAvailable",
     "NODE_HOURLY_RATES",
     "COST_MODEL_ASSUMPTIONS",
 ]

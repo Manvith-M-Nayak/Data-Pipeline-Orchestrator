@@ -29,6 +29,7 @@ unified/planner_agent/model/planner_agent_lora/
 !unified/metrics.json
 !unified/resource_agent/models/metrics.json
 !unified/performance_prediction_agent/models/metrics.json
+!unified/cost_optimization_agent/models/cost_metrics.json
 
 Datasets/Datasets/Cleaned/job_runs_cleaned.csv
 Datasets/Datasets/Synthetic/synthetic_planner_dataset.json

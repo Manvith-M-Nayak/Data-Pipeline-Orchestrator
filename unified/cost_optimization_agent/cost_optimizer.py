@@ -1,17 +1,22 @@
 """
-Cost Optimization Agent — Core Logic
+Cost Optimization Agent — Core Logic (ML-first, rule fallback).
 
-Phases implemented:
-  1. Cost Model  — formula converting resource-hours to estimated cost
-  2. Optimization Rules — rule-based suggestions (downsize, off-peak, merge, etc.)
+Primary path:  trained ML model (cost_models.pkl) predicts cost-optimal
+               configuration per stage; suggestions are derived by comparing
+               current plan against ML recommendation.
+Fallback path: rule-based heuristics used when model is unavailable.
+
+Phases:
+  1. Cost Model — formula converting resource-hours to estimated cost
+  2. ML Optimization — compare current plan vs ML-recommended config
   3. Constraint Enforcement — safety checks before returning suggestions
-  4. Ranking & Explanation — best-value ordering with plain-language reasons
+  4. Ranking & Explanation — best-value ordering
 
-Design notes:
-  - Cost model is a transparent formula, not ML. Same inputs → same outputs.
-  - Optimization is rule-based. No trained model needed.
-  - Every suggestion includes a quantified trade-off and a reason.
-  - All costs are ESTIMATES. Real billing data is absent. See COST_MODEL_ASSUMPTIONS.
+Design:
+  - ML model is multi-target HistGradientBoosting (same as Resource Agent)
+  - Training labels come from brute-force cost minimization
+  - Rule fallback preserves the original 5 rules from Phase 2
+  - Deterministic: same inputs -> same outputs regardless of path taken
 """
 
 import copy
@@ -19,9 +24,6 @@ import math
 from dataclasses import dataclass, field, asdict
 from typing import Dict, List, Optional, Tuple
 
-# ── Node hourly rates (USD) — approximate Azure public pricing, documented as assumptions
-#    These are the per-node *compute* rate (Databricks markup is separate).
-#    Used to translate cluster_size x duration into a dollar figure.
 NODE_HOURLY_RATES: Dict[str, float] = {
     "Standard_DS2_v2": 0.14,
     "Standard_D4s_v3": 0.28,
@@ -31,6 +33,7 @@ NODE_HOURLY_RATES: Dict[str, float] = {
     "Standard_D8s_v3": 0.56,
 }
 _DEFAULT_NODE_RATE = 0.28
+_DEFAULT_NODE = "Standard_D4s_v3"
 
 COST_MODEL_ASSUMPTIONS = {
     "node_hourly_rates": NODE_HOURLY_RATES,
@@ -39,7 +42,7 @@ COST_MODEL_ASSUMPTIONS = {
     "dbu_price_per_unit": 0.55,
     "adf_activity_price": 0.001,
     "storage_gb_per_month": 0.018,
-    "note": "All costs are approximations. No real billing data was available at build time.",
+    "note": "All costs are estimates. No real billing data was available at build time.",
 }
 
 UTILIZATION_LOW_THRESHOLD = 0.40
@@ -57,21 +60,17 @@ class CostBreakdown:
     total_usd: float
     currency: str = "USD"
 
-    def pct_of(self, other: "CostBreakdown") -> float:
-        if other.total_usd <= 0:
-            return 0.0
-        return round(self.total_usd / other.total_usd, 3)
-
 
 @dataclass
 class OptimizationSuggestion:
     change: str
-    estimated_saving_pct: str
+    estimated_saving: str
     trade_off: str
     reason: str
     new_cost: CostBreakdown
     risk_level: str
     value_score: float = 0.0
+    source: str = "ml"  # "ml" or "rule"
 
 
 @dataclass
@@ -79,6 +78,7 @@ class OptimizationResult:
     estimated_cost: CostBreakdown
     recommendations: List[OptimizationSuggestion]
     chosen_option: Optional[int]
+    optimization_source: str = "ml_model"  # "ml_model" or "heuristic"
 
 
 class CostOptimizationAgent:
@@ -89,57 +89,182 @@ class CostOptimizationAgent:
         resource_plan: dict,
         constraints: Optional[dict] = None,
     ) -> dict:
-        """
-        Main entry point.
-
-        Args:
-            plan: Planner's pipeline plan (stages, recommended_settings, etc.)
-            performance_prediction: PerformancePredictionAgent's output dict
-            resource_plan: ResourceAgent.analyze() output
-            constraints: dict with keys like {"deadline_s": 900, "priority": "normal"}
-
-        Returns:
-            Serialized OptimizationResult dict.
-        """
         constraints = constraints or {}
 
-        # ── 1. Build the current cost estimate ──────────────────────────
         current_cost = self._estimate_cost(plan, performance_prediction, resource_plan)
 
-        # ── 2. Generate candidate suggestions ───────────────────────────
         suggestions: List[OptimizationSuggestion] = []
-        self._suggest_cluster_downsize(
-            plan, performance_prediction, resource_plan, current_cost, suggestions
-        )
-        self._suggest_node_downgrade(
-            plan, performance_prediction, resource_plan, current_cost, suggestions
-        )
-        self._suggest_off_peak(
-            performance_prediction, constraints, current_cost, suggestions
-        )
-        self._suggest_merge_stages(
-            plan, performance_prediction, resource_plan, current_cost, suggestions
-        )
-        self._suggest_shuffle_tuning(
-            plan, performance_prediction, resource_plan, current_cost, suggestions
+
+        # ── Primary path: ML model ──────────────────────────────────────
+        ml_used = self._try_ml_suggestions(
+            plan,
+            performance_prediction,
+            resource_plan,
+            current_cost,
+            suggestions,
+            constraints,
         )
 
-        # ── 3. Enforce constraints — filter unsafe suggestions ──────────
+        # ── Fallback: rule-based heuristics ─────────────────────────────
+        if not ml_used:
+            self._suggest_cluster_downsize(
+                plan, performance_prediction, resource_plan, current_cost, suggestions
+            )
+            self._suggest_node_downgrade(
+                plan, performance_prediction, resource_plan, current_cost, suggestions
+            )
+            self._suggest_off_peak(
+                performance_prediction, constraints, current_cost, suggestions
+            )
+            self._suggest_merge_stages(
+                plan, performance_prediction, resource_plan, current_cost, suggestions
+            )
+            self._suggest_shuffle_tuning(
+                plan, performance_prediction, resource_plan, current_cost, suggestions
+            )
+
         safe = self._enforce_constraints(
             suggestions, constraints, performance_prediction
         )
-
-        # ── 4. Rank by value score ──────────────────────────────────────
         ranked = self._rank_suggestions(safe)
 
         result = OptimizationResult(
             estimated_cost=current_cost,
             recommendations=ranked,
             chosen_option=0 if ranked else None,
+            optimization_source="ml_model" if ml_used else "heuristic",
         )
         return asdict(result)
 
-    # ── Phase 1: Cost Model ──────────────────────────────────────────────────
+    # ── ML Primary Path ──────────────────────────────────────────────────────
+
+    def _try_ml_suggestions(
+        self,
+        plan: dict,
+        perf: dict,
+        resource_plan: dict,
+        current_cost: CostBreakdown,
+        suggestions: List[OptimizationSuggestion],
+        constraints: dict,
+    ) -> bool:
+        """Try ML predictions. Returns True if ML was used."""
+        try:
+            from cost_optimization_agent.ml_predictor import (
+                CostMLPredictor,
+                MLNotAvailable,
+            )
+
+            if not CostMLPredictor.is_available():
+                return False
+        except Exception:
+            return False
+
+        stages = plan.get("stages", [])
+        allocations = resource_plan.get("allocations", [])
+        alloc_map = {a.get("stage_name"): a for a in allocations}
+        schema = plan.get("schema", {})
+        csv_size_bytes = int(plan.get("csv_size_bytes", 0))
+        n_stages = len(stages)
+
+        ml_allocations = copy.deepcopy(allocations)
+        total_saving = 0.0
+
+        for i, stage in enumerate(stages):
+            name = stage.get("name", "")
+            current_alloc = alloc_map.get(name)
+            if not current_alloc:
+                continue
+
+            try:
+                opt = CostMLPredictor.predict_optimal_config(
+                    stage, schema, csv_size_bytes, stage_index=i, n_stages=n_stages
+                )
+            except MLNotAvailable:
+                continue
+
+            for ml_alloc in ml_allocations:
+                if ml_alloc.get("stage_name") == name:
+                    old_workers = ml_alloc.get("workers", 0)
+                    old_node = ml_alloc.get("node_type", _DEFAULT_NODE)
+                    new_workers = opt["workers"]
+                    new_node = opt["node_type"]
+
+                    if ml_alloc.get("stage_type") == "copy":
+                        old_diu = ml_alloc.get("diu", 2)
+                        new_diu = opt["diu"]
+                        if new_diu < old_diu:
+                            ml_alloc["diu"] = new_diu
+                            ml_alloc["memory_gb"] = opt["memory_gb"]
+                    elif new_workers < old_workers or new_node != old_node:
+                        ml_alloc["workers"] = new_workers
+                        ml_alloc["node_type"] = new_node
+                        ml_alloc["shuffle_partitions"] = opt["shuffle_partitions"]
+                        ml_alloc["memory_gb"] = opt["memory_gb"]
+                    break
+
+        new_cost = self._estimate_cost(
+            plan,
+            perf,
+            resource_plan,
+            override_cluster={
+                "allocations": ml_allocations,
+                "peak_concurrent_workers": max(
+                    a.get("workers", 0) for a in ml_allocations
+                ),
+            },
+        )
+        saving_pct = (
+            round((1 - new_cost.total_usd / current_cost.total_usd) * 100, 1)
+            if current_cost.total_usd > 0
+            else 0
+        )
+
+        if saving_pct >= 3:
+            changes = []
+            for i, stage in enumerate(stages):
+                name = stage.get("name", "")
+                old_a = alloc_map.get(name)
+                new_a = next(
+                    (a for a in ml_allocations if a.get("stage_name") == name), None
+                )
+                if not old_a or not new_a:
+                    continue
+                if old_a.get("workers", 0) != new_a.get("workers", 0):
+                    changes.append(
+                        f"{name}: {old_a.get('workers', 0)}w->{new_a.get('workers', 0)}w"
+                    )
+                if old_a.get("diu", 0) != new_a.get("diu", 0):
+                    changes.append(
+                        f"{name}: {old_a.get('diu', 0)}DIU->{new_a.get('diu', 0)}DIU"
+                    )
+                if old_a.get("node_type") != new_a.get("node_type"):
+                    changes.append(
+                        f"{name}: {old_a.get('node_type', '?')}->{new_a.get('node_type', '?')}"
+                    )
+
+            reason = "ML model predicted cost-optimal config: " + "; ".join(changes[:3])
+            if len(changes) > 3:
+                reason += f" (+{len(changes) - 3} more)"
+
+            suggestions.append(
+                OptimizationSuggestion(
+                    change="; ".join(changes[:2])
+                    if changes
+                    else "apply ML-recommended resource adjustments",
+                    estimated_saving=f"~{saving_pct}%",
+                    trade_off="negligible runtime impact — model optimizes for cost within feasible configs",
+                    reason=reason,
+                    new_cost=new_cost,
+                    risk_level="low",
+                    value_score=0.0,
+                    source="ml",
+                )
+            )
+            return True
+
+        return False
+
+    # ── Cost Model ───────────────────────────────────────────────────────────
 
     def _estimate_cost(
         self,
@@ -149,16 +274,6 @@ class CostOptimizationAgent:
         override_cluster: Optional[dict] = None,
         override_duration_s: Optional[float] = None,
     ) -> CostBreakdown:
-        """
-        Cost model formula.
-
-        estimated_cost = compute_cost + databricks_dbu_cost + adf_cost + storage_cost
-
-        compute_cost       = num_workers × node_hourly_rate × duration_hours
-        databricks_dbu_cost = num_workers × dbu_per_worker_per_hour × dbu_price × duration_hours
-        adf_cost           = num_copy_stages × 0.001
-        storage_cost       = (file_size_mb / 1024) × $0.018/GB/month (prorated)
-        """
         stages = plan.get("stages", [])
         recommended = plan.get("recommended_settings", {})
         allocations = (
@@ -176,7 +291,6 @@ class CostOptimizationAgent:
         )
         duration_h = max(predicted_duration_s / 3600.0, 1 / 3600.0)
 
-        # Count notebook workers for compute/DBU cost
         notebook_workers = 0
         total_workers = resource_plan.get("peak_concurrent_workers", 0)
         if override_cluster:
@@ -189,8 +303,7 @@ class CostOptimizationAgent:
                 notebook_workers = max(notebook_workers, alloc.get("workers", 0))
         notebook_workers = max(notebook_workers, total_workers, 1)
 
-        # Node type and rate
-        node_type = recommended.get("node_type", "Standard_D4s_v3")
+        node_type = recommended.get("node_type", _DEFAULT_NODE)
         if override_cluster and override_cluster.get("node_type"):
             node_type = override_cluster["node_type"]
         node_rate = NODE_HOURLY_RATES.get(node_type, _DEFAULT_NODE_RATE)
@@ -217,37 +330,17 @@ class CostOptimizationAgent:
             total_usd=total,
         )
 
-    # ── Phase 2: Optimization Rules ──────────────────────────────────────────
+    # ── Rule-based Fallback Suggestions ──────────────────────────────────────
 
     def _suggest_cluster_downsize(
-        self,
-        plan: dict,
-        perf: dict,
-        resource_plan: dict,
-        current_cost: CostBreakdown,
-        suggestions: List[OptimizationSuggestion],
+        self, plan, perf, resource_plan, current_cost, suggestions
     ):
-        """
-        Rule: if predicted utilization is low (<40%), suggest fewer workers.
-        Uses predicted_duration_s increase to quantify trade-off.
-        """
         allocations = resource_plan.get("allocations", [])
         if not allocations:
             return
 
-        # Assess utilization: look at duration ratio vs resource estimate
-        perf_total = perf.get("predicted_total_s", 0)
-        resource_est = perf.get("adjustment_factor", 1.0)
-        utilization = 1.0
-        if perf_total > 0 and resource_est > 0:
-            baseline = perf_total / resource_est
-            utilization = 1.0 / max(resource_est, 1.1)
-
         utilization_from_history = perf.get("adjustment_factor", 1.0)
-        if utilization_from_history < 1.0:
-            utilization = utilization_from_history
-
-        if utilization > UTILIZATION_LOW_THRESHOLD:
+        if utilization_from_history > UTILIZATION_LOW_THRESHOLD:
             return
 
         notebook_allocs = [
@@ -258,17 +351,15 @@ class CostOptimizationAgent:
         if not notebook_allocs:
             return
 
-        # Try reducing by 1 worker per stage
         reduced_allocations = copy.deepcopy(allocations)
-        for i, alloc in enumerate(reduced_allocations):
+        for alloc in reduced_allocations:
             if alloc.get("stage_type") == "notebook":
                 current_w = alloc.get("workers", 0)
                 if current_w >= 2:
                     alloc["workers"] = current_w - 1
 
         reduced_peak = max(
-            (a.get("workers", 0) for a in reduced_allocations),
-            default=0,
+            (a.get("workers", 0) for a in reduced_allocations), default=0
         )
         override = {
             "allocations": reduced_allocations,
@@ -314,51 +405,41 @@ class CostOptimizationAgent:
         suggestions.append(
             OptimizationSuggestion(
                 change=f"reduce cluster from {worker_diff + reduced_peak} to {reduced_peak} nodes",
-                estimated_saving_pct=f"~{saving_pct}%",
+                estimated_saving=f"~{saving_pct}%",
                 trade_off=trade_off,
-                reason=f"predicted utilization is low ({utilization:.0%}) — fewer workers suffice",
+                reason=f"predicted utilization is low ({utilization_from_history:.0%}) — fewer workers suffice",
                 new_cost=new_cost,
                 risk_level="low",
                 value_score=0.0,
+                source="rule",
             )
         )
 
     def _suggest_node_downgrade(
-        self,
-        plan: dict,
-        perf: dict,
-        resource_plan: dict,
-        current_cost: CostBreakdown,
-        suggestions: List[OptimizationSuggestion],
+        self, plan, perf, resource_plan, current_cost, suggestions
     ):
-        """
-        Rule: if using an expensive node type but predicted memory/cpu needs are modest,
-        suggest a cheaper node.
-        """
         recommended = plan.get("recommended_settings", {})
-        current_node = recommended.get("node_type", "Standard_D4s_v3")
+        current_node = recommended.get("node_type", _DEFAULT_NODE)
         current_rate = NODE_HOURLY_RATES.get(current_node, _DEFAULT_NODE_RATE)
-
         allocations = resource_plan.get("allocations", [])
         peak_mem = max((a.get("memory_gb", 0) for a in allocations), default=0)
-
         cheaper_options = [n for n, r in NODE_HOURLY_RATES.items() if r < current_rate]
         if not cheaper_options:
             return
 
-        # Find best cheaper node that still has enough memory
         best_node = None
         best_rate = current_rate
+        node_specs_map = {
+            "Standard_DS2_v2": {"memory_gb": 7.0, "cpu": 2},
+            "Standard_D4s_v3": {"memory_gb": 16.0, "cpu": 4},
+            "Standard_D4_v3": {"memory_gb": 16.0, "cpu": 4},
+            "Standard_DS3_v2": {"memory_gb": 14.0, "cpu": 4},
+            "Standard_DS4_v2": {"memory_gb": 28.0, "cpu": 8},
+            "Standard_D8s_v3": {"memory_gb": 32.0, "cpu": 8},
+        }
         for node in sorted(cheaper_options, key=lambda n: NODE_HOURLY_RATES[n]):
-            node_spec = {
-                "Standard_DS2_v2": {"memory_gb": 7.0, "cpu": 2},
-                "Standard_D4s_v3": {"memory_gb": 16.0, "cpu": 4},
-                "Standard_D4_v3": {"memory_gb": 16.0, "cpu": 4},
-                "Standard_DS3_v2": {"memory_gb": 14.0, "cpu": 4},
-                "Standard_DS4_v2": {"memory_gb": 28.0, "cpu": 8},
-                "Standard_D8s_v3": {"memory_gb": 32.0, "cpu": 8},
-            }.get(node, {"memory_gb": 16.0, "cpu": 4})
-            if node_spec["memory_gb"] >= peak_mem * 0.8:
+            spec = node_specs_map.get(node, {"memory_gb": 16.0, "cpu": 4})
+            if spec["memory_gb"] >= peak_mem * 0.8:
                 best_node = node
                 best_rate = NODE_HOURLY_RATES[node]
                 break
@@ -366,8 +447,8 @@ class CostOptimizationAgent:
         if best_node is None or best_node == current_node:
             return
 
-        saving_pct = round((1 - best_rate / current_rate) * 100, 1)
-        if saving_pct < 5:
+        saving_pct_estimate = round((1 - best_rate / current_rate) * 100, 1)
+        if saving_pct_estimate < 5:
             return
 
         override = {
@@ -378,46 +459,34 @@ class CostOptimizationAgent:
         new_cost = self._estimate_cost(
             plan, perf, resource_plan, override_cluster=override
         )
-        saving_pct_actual = (
+        saving_pct = (
             round((1 - new_cost.total_usd / current_cost.total_usd) * 100, 1)
             if current_cost.total_usd > 0
-            else saving_pct
+            else saving_pct_estimate
         )
 
         suggestions.append(
             OptimizationSuggestion(
                 change=f"downgrade node type from {current_node} to {best_node}",
-                estimated_saving_pct=f"~{saving_pct_actual}%",
+                estimated_saving=f"~{saving_pct}%",
                 trade_off="minimal performance impact — memory capacity still adequate",
                 reason=f"predicted peak memory ({peak_mem:.0f} GB) fits {best_node} — current node is over-provisioned",
                 new_cost=new_cost,
                 risk_level="low",
                 value_score=0.0,
+                source="rule",
             )
         )
 
-    def _suggest_off_peak(
-        self,
-        perf: dict,
-        constraints: dict,
-        current_cost: CostBreakdown,
-        suggestions: List[OptimizationSuggestion],
-    ):
-        """
-        Rule: if the job is non-urgent (no tight deadline), suggest off-peak scheduling
-        which typically costs ~30% less on serverless tiers.
-        """
+    def _suggest_off_peak(self, perf, constraints, current_cost, suggestions):
         deadline_s = constraints.get("deadline_s", 0)
         priority = constraints.get("priority", "normal")
         predicted_s = perf.get("predicted_total_s", 0)
-
         if priority == "critical":
             return
         if deadline_s > 0 and deadline_s < predicted_s * 3:
             return
 
-        new_cost_value = current_cost.total_usd * (1 - OFF_PEAK_DISCOUNT)
-        saving = OFF_PEAK_DISCOUNT * 100
         new_cost = CostBreakdown(
             compute_usd=round(current_cost.compute_usd * (1 - OFF_PEAK_DISCOUNT), 6),
             databricks_dbu_usd=round(
@@ -425,35 +494,25 @@ class CostOptimizationAgent:
             ),
             adf_usd=current_cost.adf_usd,
             storage_usd=current_cost.storage_usd,
-            total_usd=round(new_cost_value, 6),
+            total_usd=round(current_cost.total_usd * (1 - OFF_PEAK_DISCOUNT), 6),
         )
 
         suggestions.append(
             OptimizationSuggestion(
-                change="schedule during off-peak hours (e.g., 8 PM – 6 AM)",
-                estimated_saving_pct=f"~{saving:.0f}%",
+                change="schedule during off-peak hours (e.g., 8 PM - 6 AM)",
+                estimated_saving=f"~{OFF_PEAK_DISCOUNT * 100:.0f}%",
                 trade_off="no runtime impact — only execution time shifts",
-                reason="job priority is '{}' with no tight deadline — off-peak pricing applies".format(
-                    priority
-                ),
+                reason=f"job priority is '{priority}' with no tight deadline — off-peak pricing applies",
                 new_cost=new_cost,
                 risk_level="low",
                 value_score=0.0,
+                source="rule",
             )
         )
 
     def _suggest_merge_stages(
-        self,
-        plan: dict,
-        perf: dict,
-        resource_plan: dict,
-        current_cost: CostBreakdown,
-        suggestions: List[OptimizationSuggestion],
+        self, plan, perf, resource_plan, current_cost, suggestions
     ):
-        """
-        Rule: if there are many tiny stages (each < 60s), suggest merging contiguous
-        stages to reduce overhead.
-        """
         stages = plan.get("stages", [])
         allocations = resource_plan.get("allocations", [])
         alloc_map = {a.get("stage_name"): a for a in allocations}
@@ -469,12 +528,8 @@ class CostOptimizationAgent:
         if len(tiny_stages) < 2:
             return
 
-        # Estimate saving: merging removes per-stage overhead (~15%)
-        merge_saving = (
-            len(tiny_stages) * MERGE_SAVING_FACTOR * 0.01
-        )  # fraction of total
+        merge_saving = len(tiny_stages) * MERGE_SAVING_FACTOR * 0.01
         saving_pct = round(min(merge_saving * 100, 20), 1)
-
         if saving_pct < 2:
             return
 
@@ -492,31 +547,22 @@ class CostOptimizationAgent:
         suggestions.append(
             OptimizationSuggestion(
                 change=f"merge {len(tiny_stages)} tiny stages (<60s each) into fewer stages",
-                estimated_saving_pct=f"~{saving_pct}%",
+                estimated_saving=f"~{saving_pct}%",
                 trade_off="reduced observability at per-stage granularity, same total work",
                 reason=f"stages {tiny_stages} are each predicted to finish in <60s — startup overhead dominates",
                 new_cost=new_cost,
                 risk_level="medium",
                 value_score=0.0,
+                source="rule",
             )
         )
 
     def _suggest_shuffle_tuning(
-        self,
-        plan: dict,
-        perf: dict,
-        resource_plan: dict,
-        current_cost: CostBreakdown,
-        suggestions: List[OptimizationSuggestion],
+        self, plan, perf, resource_plan, current_cost, suggestions
     ):
-        """
-        Rule: if shuffle partitions are set high (>200) and row count is modest (<1M),
-        suggest reducing to 8-12 per worker to avoid excess task scheduling overhead.
-        """
         recommended = plan.get("recommended_settings", {})
         current_shuffle = recommended.get("shuffle_partitions", 200)
         allocations = resource_plan.get("allocations", [])
-
         notebook_allocs = [a for a in allocations if a.get("stage_type") == "notebook"]
         if not notebook_allocs:
             return
@@ -546,29 +592,19 @@ class CostOptimizationAgent:
         suggestions.append(
             OptimizationSuggestion(
                 change=f"reduce shuffle partitions from {current_shuffle} to {optimal_shuffle}",
-                estimated_saving_pct=f"~{saving_pct}%",
+                estimated_saving=f"~{saving_pct}%",
                 trade_off="minor shuffle tuning risk — data skew may cause OOM in extreme cases",
-                reason=f"{current_shuffle} partitions with {max_workers} workers → ~{current_shuffle // max_workers} tasks/worker; optimal is ~12/worker",
+                reason=f"{current_shuffle} partitions with {max_workers} workers -> ~{current_shuffle // max_workers} tasks/worker; optimal is ~12/worker",
                 new_cost=new_cost,
                 risk_level="medium",
                 value_score=0.0,
+                source="rule",
             )
         )
 
-    # ── Phase 3: Constraint Enforcement ──────────────────────────────────────
+    # ── Constraint Enforcement ──────────────────────────────────────────────
 
-    def _enforce_constraints(
-        self,
-        suggestions: List[OptimizationSuggestion],
-        constraints: dict,
-        perf: dict,
-    ) -> List[OptimizationSuggestion]:
-        """
-        Filter out suggestions that would break constraints:
-          - Deadline breach (predicted > deadline)
-          - Critical priority (no scheduling changes allowed)
-          - Correctness risk (stage merging for stages with dependencies)
-        """
+    def _enforce_constraints(self, suggestions, constraints, perf):
         deadline_s = constraints.get("deadline_s", 0)
         priority = constraints.get("priority", "normal")
         predicted_s = perf.get("predicted_total_s", 0)
@@ -577,37 +613,25 @@ class CostOptimizationAgent:
         for s in suggestions:
             if priority == "critical" and "off-peak" in s.change.lower():
                 continue
-
             if deadline_s > 0 and predicted_s > 0:
                 if "cluster" in s.change.lower() or "node" in s.change.lower():
                     new_duration = predicted_s * (1 + 0.20)
                     if new_duration > deadline_s:
                         continue
-
             safe.append(s)
 
         if not safe and suggestions:
             safe.append(suggestions[0])
-
         return safe
 
-    # ── Phase 4: Ranking ─────────────────────────────────────────────────────
+    # ── Ranking ─────────────────────────────────────────────────────────────
 
-    def _rank_suggestions(
-        self,
-        suggestions: List[OptimizationSuggestion],
-    ) -> List[OptimizationSuggestion]:
-        """
-        Rank by value score: biggest saving with least risk and trade-off.
-        Score formula: saving_pct / (risk_penalty × trade_off_penalty)
-        """
+    def _rank_suggestions(self, suggestions):
         risk_penalties = {"low": 1.0, "medium": 1.5, "high": 3.0}
-
         for s in suggestions:
-            saving = float(s.estimated_saving_pct.replace("~", "").replace("%", ""))
+            saving = float(s.estimated_saving.replace("~", "").replace("%", ""))
             risk = risk_penalties.get(s.risk_level, 2.0)
             trade_off_len = len(s.trade_off)
             trade_off_penalty = 1.0 + (trade_off_len / 200.0)
             s.value_score = round(saving / (risk * trade_off_penalty), 4)
-
         return sorted(suggestions, key=lambda x: x.value_score, reverse=True)
