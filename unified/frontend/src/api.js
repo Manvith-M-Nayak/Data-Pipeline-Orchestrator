@@ -182,4 +182,32 @@ export const cost = {
   nodeRates: () => req("/cost-optimization/node-rates"),
 };
 
+// ── Learning & Policy Update Agent ──────────────────────────────────────────
+export const learning = {
+  status:  () => req("/learning/status"),
+  metrics: () => req("/learning/metrics"),
+  policies:() => req("/learning/policies"),
+  log:     (limit = 100) => req(`/learning/log?limit=${limit}`),
+  versions:() => req("/learning/versions"),
+  resourceDrift: () => req("/learning/resource-drift"),
+  cycle: (backgroundRetrain = true) =>
+    req("/learning/cycle", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ background_retrain: backgroundRetrain }),
+    }),
+  retrain: (sync = false) =>
+    req("/learning/retrain", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sync }),
+    }),
+  rollback: (versionId) =>
+    req("/learning/rollback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ version_id: versionId }),
+    }),
+};
+
 export const health = () => req("/health");

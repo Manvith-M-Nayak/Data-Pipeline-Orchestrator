@@ -18,6 +18,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from performance_prediction_agent.router import router as perf_router
+from learning_policy_agent.router import router as learning_router
+
+
+
+
 
 # ── Bridge config.py → environment before any service reads os.getenv ──────
 try:
@@ -109,7 +114,7 @@ app.include_router(
 app.include_router(
     mon_anomalies.router, prefix="/api/monitor/anomalies", tags=["monitor-anomalies"]
 )
-
+app.include_router(learning_router, prefix="/api/learning", tags=["learning"])
 
 @app.get("/api/health")
 async def health():

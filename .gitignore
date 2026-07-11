@@ -44,3 +44,7 @@ AGENTS_PROGRESS_REPORT.md
 
 node_modules/
 unified/performance_prediction_agent/models/*.pkl
+
+learning_policy_agent/versions/
+performance_prediction_agent/models/*.pkl
+*.pkl

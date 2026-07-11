@@ -1,22 +1,50 @@
 """
-Performance Prediction Model — Training Script v3
+Performance Prediction Model — Training Script v4 (correct real-run blending)
 
-What's improved vs v2:
-  1. 100,000 rows (was 22,000) — more coverage, especially for edge cases
-  2. 5,000 dedicated tiny-file rows (was 2,000) — better small-file predictions
-  3. Failure threshold lowered (risk >= 0.48, was 0.58) — failures now ~5% of
-     data instead of 1.4%, giving the model ~5,000 failure examples to learn
-     from instead of ~286. This is the main driver of better failure recall.
-  4. Richer feature set — added 4 new derived features that give the model
-     more signal: data_complexity_score, pipeline_risk_index,
-     correction_uncertainty, stage_parallelism_efficiency
-  5. 1,000 estimators (was 300) — more trees = better ensemble, slower training
-  6. 5-fold cross-validation on the classifier — proper evaluation, adds time,
-     gives confidence intervals on balanced accuracy
-  7. GradientBoostingRegressor with 500 estimators (was 300) for duration
+What's improved vs v3:
+  1. Oversample weight is now DYNAMIC, not a fixed magic number. v3 used a
+     flat 20x regardless of how much real data existed or how large the
+     synthetic set was — with ~20 real rows against 105,000 synthetic rows,
+     that put real data at under 0.4% of the training set, too dilute to
+     move the model (this is why MAE barely moved: 223.94 -> 223.12 after
+     blending 18 real runs). Now the multiplier is computed to target a
+     fixed fraction of the FINAL training set (TARGET_REAL_FRACTION, default
+     10%), capped at MAX_OVERSAMPLE to avoid the opposite failure mode —
+     duplicating a handful of rows thousands of times, which would let the
+     model memorize a few specific runs instead of learning anything
+     general.
+  2. FIXED A REAL TRAIN/TEST LEAKAGE BUG. v3 oversampled real rows BEFORE
+     the train/test split, so identical duplicate copies of the same real
+     run could land in both train and test — meaning "held-out" evaluation
+     on those rows wasn't testing generalization, it was testing recall of
+     rows the model had already seen verbatim. Now: synthetic data is split
+     first, real rows are split independently (80/20) BEFORE oversampling,
+     oversampling only touches the real-train portion, and real-test is
+     added to the held-out set exactly once, unweighted. Evaluation is now
+     honest.
+  3. Requires MIN_REAL_ROWS_FOR_BLEND unique real rows before blending kicks
+     in at all (default 15) — below that, a handful of noisy real rows at
+     high oversample weight would let the model overfit to their specific
+     quirks rather than learn anything generalizable. Below the minimum,
+     training falls back to synthetic-only, same as before real data existed.
+
+Carried over from v3:
+  - 100,000 main synthetic rows + 5,000 dedicated tiny-file rows
+  - Failure threshold at risk >= 0.48 (~5% failure rate, was 1.4%)
+  - Richer derived feature set (data_complexity_score, pipeline_risk_index,
+    correction_uncertainty, stage_parallelism_efficiency)
+  - GradientBoostingRegressor (500 trees) + RandomForestClassifier (1000
+    trees) + 5-fold CV on the classifier
+
+Honest limitation, unchanged from v3: manager_feedback.jsonl only logs a
+handful of coarse fields (stage_count, complexity, actual_duration_s, the
+perf forecast) — not row_count, transform_count, agg_count, network_quality,
+or the correction factors the synthetic generator uses. Real rows still get
+those fields imputed from synthetic medians (see _build_real_feature_rows).
+Once the Manager logs the full feature set, delete the imputation block and
+pass those fields through directly.
 
 Expected training time: 3-6 minutes on a Mac M-series.
-Expected metrics improvement: failure recall ~0.60-0.70 (was 0.43)
 
 Run from inside performance_prediction_agent/:
     python3 run_training.py
@@ -57,6 +85,26 @@ FEATURE_COLS = [
     "correction_uncertainty",
     "stage_parallelism_efficiency",
 ]
+
+# Real-run CSV exported by the Learning & Policy Update Agent before a
+# retrain (see learning_policy_agent/retraining_manager.py: export_real_runs).
+REAL_RUNS_CSV = os.path.join("data", "real_runs.csv")
+
+# ── Dynamic real-data blending knobs ─────────────────────────────────────
+# Below this many usable real rows, skip blending entirely — too few rows
+# at any oversample weight risks memorizing their specific quirks instead
+# of learning something general.
+MIN_REAL_ROWS_FOR_BLEND = 15
+# Target fraction of the FINAL training set that should be real-derived.
+# 10% is enough to meaningfully pull the model without letting a small,
+# lower-fidelity (imputed) sample dominate training.
+TARGET_REAL_FRACTION = 0.10
+# Hard ceiling on the oversample multiplier regardless of how few real rows
+# exist, so a tiny real-train split (e.g. 12 rows) can't get duplicated into
+# thousands of copies of the same few runs.
+MAX_OVERSAMPLE = 500
+# Fraction of real rows held out for testing, split BEFORE oversampling.
+REAL_TEST_FRACTION = 0.2
 
 
 def _make_row(file_size_mb: float, stage_max: int = 13) -> dict:
@@ -180,28 +228,96 @@ def generate_dataset() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _build_real_feature_rows(synthetic_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Map real_runs.csv (exported by the Learning Agent from
+    manager_feedback.jsonl) onto FEATURE_COLS + actual_duration_s + outcome.
+
+    real_runs.csv columns actually available:
+        run_id, timestamp, pipeline_signature, stage_count, complexity,
+        success, actual_duration_s, predicted_duration_s, prediction_source
+
+    Everything else in FEATURE_COLS is imputed from synthetic_df's medians,
+    grouped by complexity where possible (better than a single global
+    median — a "high" complexity real run gets high-complexity synthetic
+    medians for the fields we don't have, not low-complexity ones).
+
+    Returns the RAW (not yet split, not yet oversampled) set of usable real
+    rows — splitting and oversampling happen later, after the synthetic
+    train/test split, to avoid leaking duplicate rows across the boundary.
+    """
+    if not os.path.exists(REAL_RUNS_CSV):
+        return pd.DataFrame(columns=list(synthetic_df.columns))
+
+    real = pd.read_csv(REAL_RUNS_CSV)
+    real = real.dropna(subset=["actual_duration_s"])
+    if real.empty:
+        return pd.DataFrame(columns=list(synthetic_df.columns))
+
+    # Fields we actually have from real runs
+    KNOWN = {"stage_count", "complexity", "actual_duration_s"}
+    IMPUTE_COLS = [c for c in FEATURE_COLS if c not in KNOWN and c != "complexity_encoded"]
+
+    medians_by_complexity = synthetic_df.groupby("complexity")[IMPUTE_COLS].median()
+    global_medians = synthetic_df[IMPUTE_COLS].median()
+
+    built_rows = []
+    for _, r in real.iterrows():
+        complexity = r.get("complexity") if r.get("complexity") in ("low", "medium", "high") else "low"
+        base = (
+            medians_by_complexity.loc[complexity]
+            if complexity in medians_by_complexity.index
+            else global_medians
+        ).to_dict()
+
+        row = dict(base)
+        row["complexity"] = complexity
+        row["stage_count"] = int(r["stage_count"]) if not pd.isna(r.get("stage_count")) else int(base.get("stage_count", 2))
+        row["actual_duration_s"] = float(r["actual_duration_s"])
+
+        # copy/notebook split unknown for real rows — assume an even split,
+        # consistent with how most 2-stage student pipelines are shaped.
+        row["copy_stages"] = max(1, row["stage_count"] // 2)
+        row["notebook_stages"] = max(0, row["stage_count"] - row["copy_stages"])
+
+        # outcome: prefer the Manager's own success flag over a re-derived
+        # risk score, since we don't have the fields the risk score needs.
+        if "success" in r and not pd.isna(r["success"]):
+            success = bool(r["success"]) if not isinstance(r["success"], str) else r["success"].lower() in ("true", "1")
+            row["outcome"] = "success" if success else "failure"
+        else:
+            row["outcome"] = "success"
+
+        built_rows.append(row)
+
+    real_df = pd.DataFrame(built_rows)
+    # column order must match synthetic_df for a clean concat
+    return real_df.reindex(columns=synthetic_df.columns)
+
+
 t_start = time.time()
 print("\n" + "="*60)
 print("STEP 1: Generating synthetic dataset (105,000 rows)...")
 print("="*60)
-df = generate_dataset()
-print(f"\nTotal rows: {len(df)}")
+synthetic_df = generate_dataset()
+print(f"\nTotal rows: {len(synthetic_df)}")
 print("\nOutcome distribution:")
-print(df["outcome"].value_counts())
-print(f"\nFailure rate: {(df.outcome=='failure').mean()*100:.1f}%  (target: ~5%)")
+print(synthetic_df["outcome"].value_counts())
+print(f"\nFailure rate: {(synthetic_df.outcome=='failure').mean()*100:.1f}%  (target: ~5%)")
 print("\nFile size coverage:")
-print(f"  < 0.01 MB:  {(df.file_size_mb < 0.01).sum():,} rows")
-print(f"  < 0.1 MB:   {(df.file_size_mb < 0.1).sum():,} rows")
-print(f"  0.1-10 MB:  {((df.file_size_mb >= 0.1) & (df.file_size_mb < 10)).sum():,} rows")
-print(f"  > 10 MB:    {(df.file_size_mb >= 10).sum():,} rows")
+print(f"  < 0.01 MB:  {(synthetic_df.file_size_mb < 0.01).sum():,} rows")
+print(f"  < 0.1 MB:   {(synthetic_df.file_size_mb < 0.1).sum():,} rows")
+print(f"  0.1-10 MB:  {((synthetic_df.file_size_mb >= 0.1) & (synthetic_df.file_size_mb < 10)).sum():,} rows")
+print(f"  > 10 MB:    {(synthetic_df.file_size_mb >= 10).sum():,} rows")
 
 print("\n" + "="*60)
-print("STEP 2: Verifying logical correctness...")
+print("STEP 2: Verifying logical correctness (synthetic data only)...")
 print("="*60)
-df["is_risky"] = (df["outcome"] != "success").astype(int)
-df["correction_deviation_check"] = (
-    (df["copy_correction"] * df["copy_stages"] + df["notebook_correction"] * df["notebook_stages"])
-    / df["stage_count"].clip(lower=1)
+synthetic_df["is_risky"] = (synthetic_df["outcome"] != "success").astype(int)
+synthetic_df["correction_deviation_check"] = (
+    (synthetic_df["copy_correction"] * synthetic_df["copy_stages"]
+     + synthetic_df["notebook_correction"] * synthetic_df["notebook_stages"])
+    / synthetic_df["stage_count"].clip(lower=1)
 ).sub(1.0).abs()
 
 print("\nCorrelation of features with risk (all should match expected sign):")
@@ -212,31 +328,112 @@ checks = {
 }
 all_pass = True
 for col, expected in checks.items():
-    corr = df[col].corr(df["is_risky"])
+    corr = synthetic_df[col].corr(synthetic_df["is_risky"])
     actual_sign = "+" if corr > 0 else "-"
     status = "OK" if actual_sign == expected else "FAIL"
     if actual_sign != expected:
         all_pass = False
     print(f"  {col:30s}: {corr:+.3f}  {status}")
 print(f"\nAll correctness checks passed: {all_pass}")
-df.drop(columns=["is_risky", "correction_deviation_check"], inplace=True)
+synthetic_df.drop(columns=["is_risky", "correction_deviation_check"], inplace=True)
 
 print("\n" + "="*60)
-print("STEP 3: Preparing features and train/test split...")
+print("STEP 3: Encoding + splitting synthetic data...")
 print("="*60)
 encoder = LabelEncoder()
-df["complexity_encoded"] = encoder.fit_transform(df["complexity"])
+synthetic_df["complexity_encoded"] = encoder.fit_transform(synthetic_df["complexity"])
 
-X = df[FEATURE_COLS]
-y_dur = df["actual_duration_s"]
-y_dur_log = np.log1p(y_dur)
-y_out = df["outcome"]
+X_syn = synthetic_df[FEATURE_COLS]
+yd_syn = synthetic_df["actual_duration_s"]
+ydl_syn = np.log1p(yd_syn)
+yo_syn = synthetic_df["outcome"]
 
 X_train, X_test, yd_train, yd_test, ydl_train, ydl_test, yo_train, yo_test = train_test_split(
-    X, y_dur, y_dur_log, y_out,
-    test_size=0.2, random_state=42, stratify=y_out,
+    X_syn, yd_syn, ydl_syn, yo_syn,
+    test_size=0.2, random_state=42, stratify=yo_syn,
 )
-print(f"Train: {len(X_train):,} rows | Test: {len(X_test):,} rows")
+print(f"Synthetic train: {len(X_train):,} rows | Synthetic test: {len(X_test):,} rows")
+
+print("\n" + "="*60)
+print("STEP 3.5: Blending real runs (Learning & Policy Update Agent)...")
+print("="*60)
+real_feature_df = _build_real_feature_rows(synthetic_df)
+n_real = len(real_feature_df)
+real_blend_info = {
+    "real_rows_available": n_real,
+    "real_rows_blended_train": 0,
+    "real_rows_held_out_test": 0,
+    "oversample_weight_used": 0,
+    "skipped_reason": None,
+}
+
+if n_real == 0:
+    real_blend_info["skipped_reason"] = f"no usable rows found at {REAL_RUNS_CSV}"
+    print(f"  No usable real runs found at {REAL_RUNS_CSV} — training on synthetic data only "
+          "(this is normal before the Learning Agent's first retrain trigger).")
+elif n_real < MIN_REAL_ROWS_FOR_BLEND:
+    real_blend_info["skipped_reason"] = (
+        f"only {n_real} real row(s), need {MIN_REAL_ROWS_FOR_BLEND} minimum to blend safely"
+    )
+    print(f"  Found {n_real} real run(s), but need at least {MIN_REAL_ROWS_FOR_BLEND} before "
+          "blending — too few rows would let the model overfit to their specific quirks "
+          "instead of learning something general. Training on synthetic data only for now.")
+else:
+    # Encode complexity on the real rows using the SAME encoder fit on
+    # synthetic data (never re-fit it — that would shift the label mapping).
+    real_feature_df["complexity_encoded"] = encoder.transform(real_feature_df["complexity"])
+
+    # Split real rows BEFORE oversampling — this is the fix for the v3 leak.
+    # Duplicating first and splitting after let identical copies of the same
+    # real run land in both train and test.
+    real_train_df, real_test_df = train_test_split(
+        real_feature_df, test_size=REAL_TEST_FRACTION, random_state=42,
+    )
+
+    # Dynamic oversample weight: solve for the multiplier that makes
+    # real_train represent TARGET_REAL_FRACTION of the FINAL training set
+    # (synthetic train + oversampled real train), capped at MAX_OVERSAMPLE.
+    #   target = (w * n_real_train) / (n_synthetic_train + w * n_real_train)
+    #   =>  w = target * n_synthetic_train / (n_real_train * (1 - target))
+    n_real_train = len(real_train_df)
+    n_syn_train = len(X_train)
+    ideal_weight = (
+        TARGET_REAL_FRACTION * n_syn_train
+        / (n_real_train * (1 - TARGET_REAL_FRACTION))
+    )
+    oversample_weight = int(round(min(max(ideal_weight, 1), MAX_OVERSAMPLE)))
+
+    real_train_oversampled = pd.concat(
+        [real_train_df] * oversample_weight, ignore_index=True
+    )
+
+    # Fold the (oversampled) real train rows into the synthetic train split,
+    # and the (unweighted, exactly-once) real test rows into the synthetic
+    # test split.
+    X_train = pd.concat([X_train, real_train_oversampled[FEATURE_COLS]], ignore_index=True)
+    yd_train = pd.concat([yd_train, real_train_oversampled["actual_duration_s"]], ignore_index=True)
+    ydl_train = pd.concat([ydl_train, np.log1p(real_train_oversampled["actual_duration_s"])], ignore_index=True)
+    yo_train = pd.concat([yo_train, real_train_oversampled["outcome"]], ignore_index=True)
+
+    X_test = pd.concat([X_test, real_test_df[FEATURE_COLS]], ignore_index=True)
+    yd_test = pd.concat([yd_test, real_test_df["actual_duration_s"]], ignore_index=True)
+    ydl_test = pd.concat([ydl_test, np.log1p(real_test_df["actual_duration_s"])], ignore_index=True)
+    yo_test = pd.concat([yo_test, real_test_df["outcome"]], ignore_index=True)
+
+    real_blend_info.update({
+        "real_rows_blended_train": n_real_train,
+        "real_rows_held_out_test": len(real_test_df),
+        "oversample_weight_used": oversample_weight,
+    })
+    final_real_frac = (oversample_weight * n_real_train) / (n_syn_train + oversample_weight * n_real_train)
+    print(f"  Found {n_real} real run(s): {n_real_train} for training, {len(real_test_df)} held out for testing")
+    print(f"  Oversample weight: {oversample_weight}x -> real rows are ~{final_real_frac:.1%} of the final training set")
+    print(f"  NOTE: real rows are feature-imputed (see _build_real_feature_rows "
+          "docstring) — row_count/transform_count/agg_count/network_quality/"
+          "correction factors are NOT from real telemetry, only stage_count, "
+          "complexity, and actual_duration_s are.")
+
+print(f"\nFinal train: {len(X_train):,} rows | Final test: {len(X_test):,} rows")
 print(f"Failure examples in train: {(yo_train=='failure').sum():,}")
 print(f"Failure examples in test:  {(yo_test=='failure').sum():,}")
 
@@ -341,8 +538,9 @@ metrics = {
     "feature_columns": FEATURE_COLS,
     "n_training_samples": len(X_train),
     "n_test_samples": len(X_test),
-    "failure_rate_pct": round((df.outcome=="failure").mean()*100, 2),
+    "failure_rate_pct": round((yo_train == "failure").mean() * 100, 2),
     "spot_check_tiny_file": {"file_size_mb": 0.0011, "predicted_s": pred_s, "real_runs_s": "126-144"},
+    "real_data_blend": real_blend_info,
     "total_training_time_s": round(time.time() - t_start, 1),
 }
 with open("models/metrics.json", "w") as f:
