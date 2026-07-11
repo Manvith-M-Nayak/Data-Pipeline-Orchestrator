@@ -164,26 +164,43 @@ def _infer_type(values: list) -> str:
 @app.post("/api/schema/detect", tags=["schema"])
 async def detect_schema(csv_file: UploadFile = File(...)):
     contents = await csv_file.read()
+    size = len(contents)
+    size_hint = (
+        "small (< 5MB)"    if size < 5_242_880   else
+        "medium (5–50MB)"  if size < 52_428_800  else
+        "large (50–200MB)" if size < 209_715_200 else
+        "xlarge (> 200MB)"
+    )
     text = contents.decode("utf-8", errors="replace")
     reader = csv.DictReader(io.StringIO(text))
-    rows = []
-    for i, row in enumerate(reader):
-        if i >= 200:
-            break
-        rows.append(row)
+    # Count every row; keep only the first 200 in memory for type inference.
+    sample, row_count = [], 0
+    for row in reader:
+        row_count += 1
+        if len(sample) < 200:
+            sample.append(row)
 
-    if not rows:
-        return {"columns": {}, "preview": [], "row_count_sample": 0}
+    if not sample:
+        return {
+            "columns": {},
+            "preview": [],
+            "row_count": 0,
+            "row_count_sample": 0,
+            "column_count": 0,
+            "size_hint": size_hint,
+        }
 
-    headers = list(rows[0].keys())
-    columns = {col: _infer_type([r.get(col, "") for r in rows]) for col in headers}
-    preview = [{k: r.get(k, "") for k in headers} for r in rows[:6]]
+    headers = list(sample[0].keys())
+    columns = {col: _infer_type([r.get(col, "") for r in sample]) for col in headers}
+    preview = [{k: r.get(k, "") for k in headers} for r in sample[:6]]
 
     return {
         "columns": columns,
         "preview": preview,
-        "row_count_sample": len(rows),
+        "row_count": row_count,
+        "row_count_sample": len(sample),
         "column_count": len(headers),
+        "size_hint": size_hint,
     }
 
 

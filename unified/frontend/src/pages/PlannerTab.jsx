@@ -171,7 +171,12 @@ export default function PlannerTab() {
   function onDrop(e) { e.preventDefault(); setDragging(false); handleFile(e.dataTransfer.files[0]); }
 
   function buildSchemaPayload() {
-    return { columns: detected.columns, row_count: detected.row_count_sample, size_hint: "auto-detected", preview: detected.preview };
+    return {
+      columns: detected.columns,
+      row_count: detected.row_count ?? detected.row_count_sample,
+      size_hint: detected.size_hint || "medium",
+      preview: detected.preview,
+    };
   }
 
   async function handlePlan(extraInstructions = "") {
@@ -285,7 +290,7 @@ export default function PlannerTab() {
           ) : csvFile ? (
             <div style={{ fontSize: 14, color: "#4ade80", fontWeight: 600 }}>
               <CheckCircle size={14} style={{ verticalAlign: "middle", marginRight: 6 }} />
-              {csvFile.name} · {detected?.column_count} columns · {detected?.row_count_sample} rows
+              {csvFile.name} · {detected?.column_count} columns · {(detected?.row_count ?? detected?.row_count_sample)?.toLocaleString()} rows
               <span style={{ marginLeft: 10, fontSize: 12, color: "#64748b", cursor: "pointer" }}
                 onClick={(e) => { e.stopPropagation(); reset(); }}>
                 Change
