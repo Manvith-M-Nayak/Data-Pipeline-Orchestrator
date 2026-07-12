@@ -1,0 +1,13 @@
+{
+  "_comment": "Stage ordering rules. Each stage type has a rank; stages must appear in non-decreasing rank order (no transform before load, no write before read). 'copy' = ADF ingest (load), 'notebook' = Databricks transform.",
+
+  "stage_types": {
+    "copy":     { "rank": 0, "role": "ingest" },
+    "notebook": { "rank": 1, "role": "transform" }
+  },
+
+  "first_stage_type": "copy",
+  "single_copy_only": true,
+  "require_non_decreasing_rank": true,
+  "require_execution_order_match": true
+}

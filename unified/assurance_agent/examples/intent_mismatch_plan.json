@@ -1,0 +1,31 @@
+{
+  "_note": "Structurally VALID, but it only timestamps rows — it does NOT compute revenue per category. Paired with the request 'total revenue per category', the semantic layer should flag a mismatch.",
+  "containers": { "stage0": "raw", "stage1": "bronze" },
+  "containers_to_create": ["raw", "bronze"],
+  "datasets": [
+    { "name": "DSRaw",    "container": "raw",    "role": "source" },
+    { "name": "DSBronze", "container": "bronze", "role": "sink" }
+  ],
+  "stages": [
+    {
+      "name": "Ingest_Raw_To_Bronze",
+      "type": "copy",
+      "source_dataset": "DSRaw",
+      "sink_dataset": "DSBronze",
+      "diu": 4
+    },
+    {
+      "name": "Stamp_Bronze",
+      "type": "notebook",
+      "source_container": "bronze",
+      "sink_container": "bronze",
+      "transformations": ["processed_time = currentTimestamp()"],
+      "filter_condition": null,
+      "num_workers": 0,
+      "shuffle_partitions": 8
+    }
+  ],
+  "execution_order": ["Ingest_Raw_To_Bronze", "Stamp_Bronze"],
+  "num_containers": 2,
+  "reasoning": "Passthrough ingest plus a processed_time stamp. No aggregation."
+}

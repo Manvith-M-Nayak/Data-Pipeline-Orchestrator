@@ -1,0 +1,9 @@
+{
+  "containers": { "stage0": "raw", "stage1": "bronze" },
+  "containers_to_create": ["raw", "bronze"],
+  "datasets": [],
+  "stages": [
+    { "name": "Ingest", "type": "copy", },
+  ],
+  "execution_order": ["Ingest"]
+}

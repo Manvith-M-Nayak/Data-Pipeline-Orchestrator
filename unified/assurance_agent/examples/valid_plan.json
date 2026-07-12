@@ -1,0 +1,42 @@
+{
+  "containers": { "stage0": "raw", "stage1": "bronze", "stage2": "gold" },
+  "containers_to_create": ["raw", "bronze", "gold"],
+  "datasets": [
+    { "name": "DSRaw",    "container": "raw",    "role": "source" },
+    { "name": "DSBronze", "container": "bronze", "role": "intermediate" },
+    { "name": "DSGold",   "container": "gold",   "role": "sink" }
+  ],
+  "stages": [
+    {
+      "name": "Ingest_Raw_To_Bronze",
+      "type": "copy",
+      "source_dataset": "DSRaw",
+      "sink_dataset": "DSBronze",
+      "diu": 4
+    },
+    {
+      "name": "Aggregate_Bronze_To_Gold",
+      "type": "notebook",
+      "source_container": "bronze",
+      "sink_container": "gold",
+      "transformations": [
+        "processed_time = currentTimestamp()",
+        "revenue = price * quantity"
+      ],
+      "filter_condition": "price > 0 AND quantity > 0",
+      "aggregation": {
+        "group_by": ["category", "region"],
+        "aggregations": [
+          { "op": "sum",   "column": "price",    "alias": "total_price" },
+          { "op": "avg",   "column": "quantity", "alias": "avg_quantity" },
+          { "op": "count", "column": "*",        "alias": "order_count" }
+        ]
+      },
+      "num_workers": 0,
+      "shuffle_partitions": 8
+    }
+  ],
+  "execution_order": ["Ingest_Raw_To_Bronze", "Aggregate_Bronze_To_Gold"],
+  "num_containers": 3,
+  "reasoning": "Ingest raw orders, then compute revenue per category and region."
+}

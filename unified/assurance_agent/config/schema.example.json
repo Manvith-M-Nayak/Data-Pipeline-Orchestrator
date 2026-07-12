@@ -1,0 +1,20 @@
+{
+  "_comment": "Target data schema template. The column_references check verifies every column a plan touches exists in 'columns'. This mirrors the shape the Planner consumes (columns + inferred_types). Replace with your real dataset's schema, or load it dynamically.",
+
+  "columns": [
+    "order_id", "customer_id", "product", "category",
+    "price", "quantity", "order_date", "region"
+  ],
+  "inferred_types": {
+    "order_id":    "integer",
+    "customer_id": "integer",
+    "product":     "string",
+    "category":    "string",
+    "price":       "double",
+    "quantity":    "integer",
+    "order_date":  "string",
+    "region":      "string"
+  },
+  "row_count": 120000,
+  "size_hint": "medium"
+}

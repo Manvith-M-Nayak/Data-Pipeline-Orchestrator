@@ -1,0 +1,36 @@
+{
+  "containers": { "stage0": "raw", "stage1": "gold" },
+  "containers_to_create": ["raw", "gold"],
+  "datasets": [
+    { "name": "DSRaw",  "container": "raw",  "role": "source" },
+    { "name": "DSGold", "container": "gold", "role": "sink" }
+  ],
+  "stages": [
+    {
+      "name": "Ingest_Raw_To_Gold",
+      "type": "copy",
+      "source_dataset": "DSRaw",
+      "sink_dataset": "DSGold",
+      "diu": 4
+    },
+    {
+      "name": "Median_Raw_To_Gold",
+      "type": "notebook",
+      "source_container": "raw",
+      "sink_container": "gold",
+      "transformations": ["processed_time = currentTimestamp()"],
+      "filter_condition": null,
+      "aggregation": {
+        "group_by": ["category"],
+        "aggregations": [
+          { "op": "median", "column": "price", "alias": "median_price" }
+        ]
+      },
+      "num_workers": 0,
+      "shuffle_partitions": 8
+    }
+  ],
+  "execution_order": ["Ingest_Raw_To_Gold", "Median_Raw_To_Gold"],
+  "num_containers": 2,
+  "reasoning": "Uses aggregation op 'median', which is not in the allowed-operations whitelist."
+}

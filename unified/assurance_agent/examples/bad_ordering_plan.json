@@ -1,0 +1,31 @@
+{
+  "containers": { "stage0": "raw", "stage1": "bronze", "stage2": "gold" },
+  "containers_to_create": ["raw", "bronze", "gold"],
+  "datasets": [
+    { "name": "DSRaw",    "container": "raw",    "role": "source" },
+    { "name": "DSBronze", "container": "bronze", "role": "intermediate" },
+    { "name": "DSGold",   "container": "gold",   "role": "sink" }
+  ],
+  "stages": [
+    {
+      "name": "Transform_Raw_To_Bronze",
+      "type": "notebook",
+      "source_container": "raw",
+      "sink_container": "bronze",
+      "transformations": ["processed_time = currentTimestamp()"],
+      "filter_condition": null,
+      "num_workers": 0,
+      "shuffle_partitions": 8
+    },
+    {
+      "name": "Ingest_Bronze_To_Gold",
+      "type": "copy",
+      "source_dataset": "DSBronze",
+      "sink_dataset": "DSGold",
+      "diu": 4
+    }
+  ],
+  "execution_order": ["Transform_Raw_To_Bronze", "Ingest_Bronze_To_Gold"],
+  "num_containers": 3,
+  "reasoning": "Transform (notebook) runs before the copy ingest — load-before-transform ordering is violated."
+}

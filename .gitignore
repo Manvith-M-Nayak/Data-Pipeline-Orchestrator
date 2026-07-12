@@ -15,21 +15,20 @@ planner.xml
 
 llama/datasets
 
-*.json
+# Generated/large JSON only — do not blanket-ignore *.json
 *.jsonl
+synthetic_planner_dataset.json
+synthetic_resource_dataset.json
+.claude/settings.local.json
+planner_finetune/planner_adapter/
+planner_finetune/mlx_data/
 
 *.zip
 
 unified/performance_prediction_agent/models/*.pkl
 
 unified/planner_agent/model/planner_agent_lora/
-
-!unified/frontend/package.json
-!unified/frontend/package-lock.json
-!unified/metrics.json
-!unified/resource_agent/models/metrics.json
-!unified/performance_prediction_agent/models/metrics.json
-!unified/cost_optimization_agent/models/cost_metrics.json
+unified/planner_agent/model/adapter/
 
 Datasets/Datasets/Cleaned/job_runs_cleaned.csv
 Datasets/Datasets/Synthetic/synthetic_planner_dataset.json

@@ -1,0 +1,18 @@
+{
+  "_comment": "Whitelist of operations the Assurance Agent will accept in a plan. Anything not listed here fails the allowed_operations check. sql_functions/sql_keywords are tokens that the column_references check treats as NON-columns when scanning expressions.",
+
+  "stage_types": ["copy", "notebook"],
+
+  "aggregation_ops": ["avg", "sum", "min", "max", "count"],
+
+  "sql_functions": [
+    "currentTimestamp", "current_timestamp", "now", "date", "to_date",
+    "year", "month", "day", "hour", "concat", "upper", "lower", "trim",
+    "coalesce", "cast", "round", "abs", "length", "substring", "when", "lit"
+  ],
+
+  "sql_keywords": [
+    "and", "or", "not", "null", "is", "in", "like", "between",
+    "true", "false", "as", "asc", "desc", "case", "then", "else", "end"
+  ]
+}

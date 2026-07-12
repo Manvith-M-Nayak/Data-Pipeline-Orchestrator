@@ -1,0 +1,33 @@
+{
+  "containers": { "stage0": "raw", "stage1": "gold" },
+  "containers_to_create": ["raw", "gold"],
+  "datasets": [
+    { "name": "DSRaw",  "container": "raw",  "role": "source" },
+    { "name": "DSGold", "container": "gold", "role": "sink" }
+  ],
+  "stages": [
+    {
+      "name": "Ingest_Raw_To_Gold",
+      "type": "copy",
+      "source_dataset": "DSRaw",
+      "sink_dataset": "DSGold",
+      "diu": 4
+    },
+    {
+      "name": "Discount_Raw_To_Gold",
+      "type": "notebook",
+      "source_container": "raw",
+      "sink_container": "gold",
+      "transformations": [
+        "processed_time = currentTimestamp()",
+        "net = price - discount"
+      ],
+      "filter_condition": "shipping_status = 'shipped'",
+      "num_workers": 0,
+      "shuffle_partitions": 8
+    }
+  ],
+  "execution_order": ["Ingest_Raw_To_Gold", "Discount_Raw_To_Gold"],
+  "num_containers": 2,
+  "reasoning": "References columns 'discount' and 'shipping_status' that do not exist in the schema."
+}
