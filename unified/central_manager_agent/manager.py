@@ -437,6 +437,41 @@ class CentralManager:
             plan=state.plan,
             sla_target_s=sla_target_s,
         )
+
+        # ── Learning & Policy Update Agent: apply the learned duration ──────
+        # correction factor (patch 3c).
+        #
+        # Why: the Performance Prediction Agent's own history adjustment only
+        # applies to its formula fallback path (see its README §5) — the ML
+        # path's predictions are frozen at training time. This closes that
+        # gap for BOTH paths, between retrains, using a factor the Learning
+        # Agent walks gradually toward the real actual/predicted ratio it
+        # observes in manager_feedback.jsonl. Starts at 1.0 (no effect) until
+        # enough runs accumulate. Never raises — a learning-agent problem
+        # must never break a live prediction.
+        try:
+            from learning_policy_agent import get_learning_agent
+
+            factor = (
+                get_learning_agent()
+                .policies.load()
+                .get("duration_correction_factor", 1.0)
+            )
+            if factor != 1.0 and result.get("predicted_total_s"):
+                result["uncorrected_total_s"] = result["predicted_total_s"]
+                result["predicted_total_s"] = max(
+                    1, round(result["predicted_total_s"] * factor)
+                )
+                result["learning_correction_applied"] = factor
+        except Exception as exc:
+            self._log(
+                state,
+                "LEARNING CORRECTION WARN",
+                str(exc)[:200],
+                "skipping correction (fail-open)",
+                "warn",
+            )
+
         state.performance_prediction = result
 
         outcome = result.get("outcome", "unknown")
@@ -800,6 +835,18 @@ class CentralManager:
     # ────────────────────────────────────────────────────────────────────────
     async def record_feedback(self, state: RunState, actual_duration_s: float):
         self._enter(state, "feedback", "Recording outcome to feedback log")
+
+        # Cost recomputed with actual runtime (not real Azure billing —
+        # node rates, worker counts, and DIU are still plan assumptions).
+        from cost_optimization_agent import CostOptimizationAgent
+
+        actual_cost = CostOptimizationAgent().estimate_actual_cost(
+            state.plan,
+            state.performance_prediction,
+            state.resource_plan,
+            actual_duration_s,
+        )
+
         try:
             os.makedirs(_DATA_DIR, exist_ok=True)
             log_path = os.path.join(_DATA_DIR, "manager_feedback.jsonl")
@@ -820,6 +867,26 @@ class CentralManager:
                 "used_fallback": state.plan.get("used_fallback", False),
                 "complexity": state.predictions.get("complexity"),
                 "validation_issues": state.validation.get("issues", []),
+                # ── Learning & Policy Update Agent (patch 3a) ────────────────
+                # Logs the Performance Prediction Agent's own forecast (as
+                # opposed to predicted_duration_s above, which is the
+                # Resource Agent's baseline) so its real-world error is
+                # actually measurable. Also records which path produced it
+                # (ml_model vs formula) and whether the learned correction
+                # factor (3c) was applied to it.
+                "perf_predicted_total_s": state.performance_prediction.get(
+                    "predicted_total_s"
+                ),
+                "perf_uncorrected_total_s": state.performance_prediction.get(
+                    "uncorrected_total_s"
+                ),
+                "prediction_source": state.performance_prediction.get(
+                    "prediction_source"
+                ),
+                "learning_correction_applied": state.performance_prediction.get(
+                    "learning_correction_applied"
+                ),
+                "actual_cost_usd": actual_cost["total_usd"],
             }
             with open(log_path, "a") as f:
                 f.write(json.dumps(record) + "\n")
