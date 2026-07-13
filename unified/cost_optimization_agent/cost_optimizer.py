@@ -330,6 +330,31 @@ class CostOptimizationAgent:
             total_usd=total,
         )
 
+    # ── Actual-cost tracking ──────────────────────────────────────────────────
+
+    def estimate_actual_cost(
+        self,
+        plan: dict,
+        performance_prediction: dict,
+        resource_plan: dict,
+        actual_duration_s: float,
+    ) -> dict:
+        """Recompute the cost formula using actual elapsed runtime.
+
+        This is NOT real Azure billing.  Node rates, worker counts, and DIU
+        are still plan assumptions — only the duration is replaced with the
+        measured wall-clock time.  Labeled in the feedback log as
+        "cost recomputed with actual runtime".
+        """
+        return asdict(
+            self._estimate_cost(
+                plan,
+                performance_prediction,
+                resource_plan,
+                override_duration_s=actual_duration_s,
+            )
+        )
+
     # ── Rule-based Fallback Suggestions ──────────────────────────────────────
 
     def _suggest_cluster_downsize(
