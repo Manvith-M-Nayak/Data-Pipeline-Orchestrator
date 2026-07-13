@@ -841,19 +841,23 @@ class CentralManager:
     # ────────────────────────────────────────────────────────────────────────
     async def record_feedback(self, state: RunState, actual_duration_s: float):
         self._enter(state, "feedback", "Recording outcome to feedback log")
-
-        # Cost recomputed with actual runtime (not real Azure billing —
-        # node rates, worker counts, and DIU are still plan assumptions).
-        from cost_optimization_agent import CostOptimizationAgent
-
-        actual_cost = CostOptimizationAgent().estimate_actual_cost(
-            state.plan,
-            state.performance_prediction,
-            state.resource_plan,
-            actual_duration_s,
-        )
-
         try:
+            # ── Cost Optimization Agent — actual-cost tracking ────────────
+            # Recompute cost formula with actual runtime (NOT real Azure
+            # billing; node rates, worker counts, DIU are still plan
+            # assumptions).
+            try:
+                from cost_optimization_agent.cost_optimizer import CostOptimizationAgent
+
+                actual_cost = CostOptimizationAgent().estimate_actual_cost(
+                    plan=state.plan,
+                    performance_prediction=state.performance_prediction,
+                    resource_plan=state.resource_plan,
+                    actual_duration_s=actual_duration_s,
+                )
+            except Exception:
+                actual_cost = None
+
             os.makedirs(_DATA_DIR, exist_ok=True)
             log_path = os.path.join(_DATA_DIR, "manager_feedback.jsonl")
             record = {
@@ -892,7 +896,9 @@ class CentralManager:
                 "learning_correction_applied": state.performance_prediction.get(
                     "learning_correction_applied"
                 ),
-                "actual_cost_usd": actual_cost["total_usd"],
+                # ── Cost Optimization Agent — actual-cost tracking ─────────
+                # Cost recomputed with actual runtime (not real Azure billing)
+                "actual_cost_usd": actual_cost["total_usd"] if actual_cost else None,
             }
             with open(log_path, "a") as f:
                 f.write(json.dumps(record) + "\n")
