@@ -408,8 +408,6 @@ class CentralManager:
             )
         return result
 
-    # PASTE THIS METHOD:
-
     # ────────────────────────────────────────────────────────────────────────
     # Phase 2b.5 — Performance prediction (via Performance Prediction Agent)
     # ────────────────────────────────────────────────────────────────────────
@@ -486,11 +484,19 @@ class CentralManager:
         elif outcome == "slowdown" or sla_risk:
             level = "warn"
 
+        correction_note = ""
+        if result.get("learning_correction_applied"):
+            correction_note = (
+                f" · learned correction ×{result['learning_correction_applied']:.3f} "
+                f"applied (raw was {result.get('uncorrected_total_s')}s)"
+            )
+
         self._log(
             state,
             "PERF PREDICT",
             f"outcome={outcome} · total={total_s}s · bottleneck='{bottleneck}' · "
-            f"confidence={confidence:.0%}{'  ⚠ SLA BREACH RISK' if sla_risk else ''}",
+            f"confidence={confidence:.0%}{'  ⚠ SLA BREACH RISK' if sla_risk else ''}"
+            f"{correction_note}",
             f"history_runs_used={result.get('history_runs_used', 0)} · "
             f"adj_factor={result.get('adjustment_factor', 1.0):.3f}",
             level,
@@ -899,6 +905,20 @@ class CentralManager:
             )
         except Exception as exc:
             self._log(state, "FEEDBACK WARN", str(exc), "non-fatal", "warn")
+
+        # ── Learning & Policy Update Agent hook (patch 3b) ──────────────────
+        # Bumps the Learning Agent's run counter; every 5 runs it triggers a
+        # full learning cycle (error measurement → policy updates → maybe
+        # retrain). Retraining runs in a background thread — this call
+        # itself is cheap and never blocks the live run. Wrapped separately
+        # from the try/except above so a learning-agent problem is logged on
+        # its own line and can never mask a real feedback-logging failure.
+        try:
+            from learning_policy_agent import get_learning_agent
+
+            get_learning_agent().on_run_recorded()
+        except Exception as exc:
+            self._log(state, "LEARNING WARN", str(exc)[:200], "non-fatal", "warn")
 
     def _record_resource_feedback(self, state: RunState, actual_duration_s: float):
         """Apportion actual duration proportionally across stage types for Resource Agent learning."""
