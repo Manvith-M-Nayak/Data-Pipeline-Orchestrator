@@ -74,6 +74,8 @@ class RunState:
     assurance: dict = field(default_factory=dict)
     performance_prediction: dict = field(default_factory=dict)
     cost_optimization: dict = field(default_factory=dict)
+    # Actual-cost tracking (cost recomputed with actual runtime, not Azure billing)
+    actual_cost: dict = field(default_factory=dict)
 
 
 # ── CentralManager ───────────────────────────────────────────────────────────
@@ -857,6 +859,10 @@ class CentralManager:
                 )
             except Exception:
                 actual_cost = None
+
+            # Store on state so the UI can display it during polling
+            if actual_cost:
+                state.actual_cost = actual_cost
 
             os.makedirs(_DATA_DIR, exist_ok=True)
             log_path = os.path.join(_DATA_DIR, "manager_feedback.jsonl")
