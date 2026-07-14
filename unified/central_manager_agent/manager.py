@@ -74,8 +74,6 @@ class RunState:
     assurance: dict = field(default_factory=dict)
     performance_prediction: dict = field(default_factory=dict)
     cost_optimization: dict = field(default_factory=dict)
-    # Actual-cost tracking (cost recomputed with actual runtime, not Azure billing)
-    actual_cost: dict = field(default_factory=dict)
 
 
 # ── CentralManager ───────────────────────────────────────────────────────────
@@ -450,19 +448,18 @@ class CentralManager:
         # enough runs accumulate. Never raises — a learning-agent problem
         # must never break a live prediction.
         try:
-            from learning_policy_agent import get_learning_agent
+            if result.get("prediction_source") == "ml_model":
+                from learning_policy_agent import get_learning_agent
 
-            factor = (
-                get_learning_agent()
-                .policies.load()
-                .get("duration_correction_factor", 1.0)
-            )
-            if factor != 1.0 and result.get("predicted_total_s"):
-                result["uncorrected_total_s"] = result["predicted_total_s"]
-                result["predicted_total_s"] = max(
-                    1, round(result["predicted_total_s"] * factor)
+                factor = get_learning_agent().policies.load().get(
+                    "duration_correction_factor", 1.0
                 )
-                result["learning_correction_applied"] = factor
+                if factor != 1.0 and result.get("predicted_total_s"):
+                    result["uncorrected_total_s"] = result["predicted_total_s"]
+                    result["predicted_total_s"] = max(
+                        1, round(result["predicted_total_s"] * factor)
+                    )
+                    result["learning_correction_applied"] = factor
         except Exception as exc:
             self._log(
                 state,
@@ -645,6 +642,36 @@ class CentralManager:
             resource_plan=state.resource_plan,
             constraints=constraints,
         )
+
+        # ── Learning & Policy Update Agent: apply the learned cost ──────────
+        # correction factor. Mirrors predict_performance()'s duration
+        # correction exactly, with one difference: cost doesn't need a
+        # prediction_source gate, since CostOptimizationAgent._estimate_cost()
+        # is a single formula regardless of whether the ML or heuristic path
+        # produced the recommendations — the correction always applies when
+        # a learned factor exists. Never raises — a learning-agent problem
+        # must never break a live cost estimate.
+        try:
+            cost_block = result.get("estimated_cost")
+            if cost_block and cost_block.get("total_usd") is not None:
+                from learning_policy_agent import get_learning_agent
+
+                factor = get_learning_agent().policies.load().get(
+                    "cost_correction_factor", 1.0
+                )
+                if factor != 1.0:
+                    cost_block["uncorrected_total_usd"] = cost_block["total_usd"]
+                    cost_block["total_usd"] = round(cost_block["total_usd"] * factor, 6)
+                    result["cost_correction_applied"] = factor
+        except Exception as exc:
+            self._log(
+                state,
+                "COST LEARNING CORRECTION WARN",
+                str(exc)[:200],
+                "skipping correction (fail-open)",
+                "warn",
+            )
+
         state.cost_optimization = result
 
         cost = result.get("estimated_cost", {})
@@ -653,10 +680,17 @@ class CentralManager:
         n_recs = len(recs)
         top_saving = recs[0].get("estimated_saving", "0%") if recs else "0%"
 
+        correction_note = ""
+        if result.get("cost_correction_applied"):
+            correction_note = (
+                f" · learned correction ×{result['cost_correction_applied']:.3f} "
+                f"applied (raw was ${cost.get('uncorrected_total_usd', 0):.6f})"
+            )
+
         self._log(
             state,
             "COST OPTIMIZATION",
-            f"estimated ${total_usd:.6f} · {n_recs} recommendation(s)",
+            f"estimated ${total_usd:.6f} · {n_recs} recommendation(s){correction_note}",
             f"best saving: {top_saving}",
             "ok" if recs else "info",
         )
@@ -844,28 +878,36 @@ class CentralManager:
     async def record_feedback(self, state: RunState, actual_duration_s: float):
         self._enter(state, "feedback", "Recording outcome to feedback log")
         try:
-            # ── Cost Optimization Agent — actual-cost tracking ────────────
-            # Recompute cost formula with actual runtime (NOT real Azure
-            # billing; node rates, worker counts, DIU are still plan
-            # assumptions).
-            try:
-                from cost_optimization_agent.cost_optimizer import CostOptimizationAgent
+            os.makedirs(_DATA_DIR, exist_ok=True)
+            log_path = os.path.join(_DATA_DIR, "manager_feedback.jsonl")
 
-                actual_cost = CostOptimizationAgent().estimate_actual_cost(
+            # ── Cost Optimization Agent: actual cost (patch) ─────────────
+            # Same allocations/workers as the pre-execution plan — only the
+            # real observed duration is swapped in. This is the only honest
+            # "actual cost" available: the Executor doesn't surface actual
+            # worker/allocation usage (execute_with_retry only returns
+            # status/run_id/stages/sink_container). Fail-open: a cost-estimate
+            # bug must never break feedback logging.
+            actual_cost_usd = None
+            try:
+                from cost_optimization_agent import CostOptimizationAgent
+
+                actual_cost_breakdown = CostOptimizationAgent().estimate_actual_cost(
                     plan=state.plan,
                     performance_prediction=state.performance_prediction,
                     resource_plan=state.resource_plan,
                     actual_duration_s=actual_duration_s,
                 )
-            except Exception:
-                actual_cost = None
+                actual_cost_usd = actual_cost_breakdown.get("total_usd")
+            except Exception as exc:
+                self._log(
+                    state,
+                    "ACTUAL COST WARN",
+                    str(exc)[:200],
+                    "skipping (fail-open)",
+                    "warn",
+                )
 
-            # Store on state so the UI can display it during polling
-            if actual_cost:
-                state.actual_cost = actual_cost
-
-            os.makedirs(_DATA_DIR, exist_ok=True)
-            log_path = os.path.join(_DATA_DIR, "manager_feedback.jsonl")
             record = {
                 "ts": _utcnow(),
                 "run_id": state.run_id,
@@ -875,6 +917,25 @@ class CentralManager:
                 "actual_duration_s": round(actual_duration_s, 1),
                 "predicted_duration_s": state.predictions.get("estimated_duration_s"),
                 "cost_estimate_usd": state.cost_estimate.get("total_usd"),
+                # ── Cost Optimization Agent's own pre-execution estimate ──
+                # (patch: cost learning). This is the field name
+                # error_analyzer.py's per_run_errors() actually reads
+                # (record.get("estimated_cost_usd")) — cost_estimate_usd
+                # above is the Manager's separate, cheaper Phase 2b formula
+                # and was never the comparable pair for actual_cost_usd.
+                # Both estimated_cost_usd and actual_cost_usd come from the
+                # same CostOptimizationAgent._estimate_cost() formula, so
+                # they're an honest before/after pair for cost_correction_factor.
+                "estimated_cost_usd": state.cost_optimization.get(
+                    "estimated_cost", {}
+                ).get("total_usd"),
+                "cost_uncorrected_estimated_usd": state.cost_optimization.get(
+                    "estimated_cost", {}
+                ).get("uncorrected_total_usd"),
+                "cost_correction_applied": state.cost_optimization.get(
+                    "cost_correction_applied"
+                ),
+                "actual_cost_usd": actual_cost_usd,
                 "assurance_passed": state.assurance.get("passed"),
                 "plan_assurance_passed": state.plan_assurance.get("overall_status")
                 == "pass"
@@ -902,9 +963,6 @@ class CentralManager:
                 "learning_correction_applied": state.performance_prediction.get(
                     "learning_correction_applied"
                 ),
-                # ── Cost Optimization Agent — actual-cost tracking ─────────
-                # Cost recomputed with actual runtime (not Azure billing)
-                "actual_cost_usd": actual_cost["total_usd"] if actual_cost else None,
             }
             with open(log_path, "a") as f:
                 f.write(json.dumps(record) + "\n")

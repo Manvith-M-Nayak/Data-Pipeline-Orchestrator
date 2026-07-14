@@ -330,7 +330,7 @@ class CostOptimizationAgent:
             total_usd=total,
         )
 
-    # ── Actual-cost tracking ──────────────────────────────────────────────────
+    # ── Actual Cost (post-execution) ────────────────────────────────────────
 
     def estimate_actual_cost(
         self,
@@ -339,21 +339,31 @@ class CostOptimizationAgent:
         resource_plan: dict,
         actual_duration_s: float,
     ) -> dict:
-        """Recompute the cost formula using actual elapsed runtime.
-
-        This is NOT real Azure billing.  Node rates, worker counts, and DIU
-        are still plan assumptions — only the duration is replaced with the
-        measured wall-clock time.  Labeled in the feedback log as
-        "cost recomputed with actual runtime".
         """
-        return asdict(
-            self._estimate_cost(
-                plan,
-                performance_prediction,
-                resource_plan,
-                override_duration_s=actual_duration_s,
-            )
+        Estimate the real cost of a completed run, using the same allocations
+        (workers/node_type/DIU) that were planned pre-execution, but with the
+        actual observed duration substituted for the predicted one.
+
+        This is intentionally duration-only: the Executor Agent does not
+        surface actual worker/allocation usage (execute_with_retry only
+        returns status/run_id/stages/sink_container), so allocations can't be
+        corrected here without fabricating data. Swapping in the real
+        duration is the only honest signal available post-execution.
+
+        Called from CentralManager.record_feedback() to populate
+        actual_cost_usd in manager_feedback.jsonl, alongside the pre-execution
+        cost_estimate_usd, so the Learning Agent can measure real cost error.
+
+        Returns the CostBreakdown as a dict (compute_usd, databricks_dbu_usd,
+        adf_usd, storage_usd, total_usd, currency).
+        """
+        breakdown = self._estimate_cost(
+            plan,
+            performance_prediction,
+            resource_plan,
+            override_duration_s=actual_duration_s,
         )
+        return asdict(breakdown)
 
     # ── Rule-based Fallback Suggestions ──────────────────────────────────────
 
@@ -593,6 +603,7 @@ class CostOptimizationAgent:
             return
 
         max_workers = max((a.get("workers", 1) for a in notebook_allocs), default=1)
+        max_workers = max(max_workers, 1)
         optimal_shuffle = max(8, min(current_shuffle, max_workers * 12))
 
         if optimal_shuffle >= current_shuffle or current_shuffle <= 100:

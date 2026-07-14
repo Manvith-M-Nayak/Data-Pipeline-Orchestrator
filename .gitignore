@@ -47,3 +47,7 @@ unified/performance_prediction_agent/models/*.pkl
 learning_policy_agent/versions/
 performance_prediction_agent/models/*.pkl
 *.pkl
+
+backup_before_reset/
+*.bak
+unified/learning_policy_agent/versions/
