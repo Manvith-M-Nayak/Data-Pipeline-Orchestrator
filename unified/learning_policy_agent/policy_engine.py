@@ -76,11 +76,32 @@ whether the Resource Agent's OWN correction factor is actually converging
 heuristic constants (ADF_MB_PER_DIU_PER_S, DBX_ROWS_PER_S, etc.) may need
 re-tuning, which damped correction alone can't fix.
 
-── cost_correction_factor is currently inactive by design, not a bug ────────
-It requires actual_cost_usd, which nothing in the system populates yet (no
-real Azure billing integration exists) — cost_mape will read as null and
-no cost-related policy will ever fire until that data source exists. This
-is expected, not something the Learning Agent can fix on its own.
+── cost_correction_factor is now active (patch: cost learning) ─────────────
+Previously inactive because nothing populated actual_cost_usd — that gap is
+closed (CostOptimizationAgent.estimate_actual_cost(), called from manager.py
+record_feedback()). Unlike duration, cost does NOT need a by_source split:
+CostOptimizationAgent._estimate_cost() is a single formula used for both the
+pre-execution estimate (state.cost_optimization["estimated_cost"]) and the
+post-execution actual (estimate_actual_cost(), same formula, actual duration
+substituted in) — the ML-vs-heuristic distinction only affects which
+*recommendations* get suggested, never which formula prices the current
+plan. So one evidence bucket (gated on cost_runs, i.e. how many logged
+records have both estimated_cost_usd and actual_cost_usd), not two.
+
+cost_correction_factor deliberately uses its OWN learning_rate/factor_bounds
+(cost_learning_rate / cost_factor_bounds) rather than reusing duration's.
+duration's bounds (0.3 floor especially) were tuned against real observed
+duration ratios; we have no equivalent cost-ratio data yet, so reusing an
+untested bound risks exactly the kind of miscalibration this module warns
+against elsewhere (see "blending X and Y" notes above). Same default values
+as duration's for now, but independently tunable once real cost data comes
+in and reveals its own regime.
+
+Applied in manager.py's optimize_cost(), the same way duration_correction_
+factor is applied in predict_performance() — multiplies the Cost
+Optimization Agent's estimated_cost.total_usd, preserves the uncorrected
+value alongside it, and is auto-reviewed/rolled back next cycle exactly
+like duration (see _review_pending_changes()).
 
 Current policies and what consumes them:
 
@@ -92,7 +113,12 @@ Current policies and what consumes them:
                                 next batch of predictions worse.
   resource_headroom_factors     {signature: factor} — diagnostic only for
                                 now (see note above); not yet consumed.
-  cost_correction_factor        Inactive until real billing data exists.
+  cost_correction_factor        Multiplier the Manager applies to the Cost
+                                Optimization Agent's estimated_cost.total_usd.
+                                Learned from records with both
+                                estimated_cost_usd and actual_cost_usd
+                                present. Auto-reviewed and rolled back like
+                                duration_correction_factor.
   retrain_error_threshold       ml_model-path duration_mape above which
                                 retraining triggers.
   failure_flag_threshold        failure_rate (or assurance failure rate)
@@ -114,12 +140,17 @@ _DEFAULT_POLICY_PATH = os.path.join(_AGENT_DIR, "data", "policies.json")
 _DEFAULT_LOG_PATH = os.path.join(_AGENT_DIR, "data", "learning_log.jsonl")
 
 DEFAULT_POLICIES: Dict = {
-    "version": 3,   # bumped: resource_headroom_factors is now a dict,
-                    # added rollback-review + assurance-pattern tracking
+    "version": 4,   # bumped: cost_correction_factor is now a real,
+                    # evidence-gated, gradually-applied, rollback-reviewed
+                    # policy (previously a docstring-only placeholder) —
+                    # see module docstring, "cost_correction_factor is now
+                    # active"
     "updated": None,
     # -- learned correction factors (all start neutral) --
     "duration_correction_factor": 1.0,       # applied to ML path only
-    "cost_correction_factor": 1.0,           # inactive — see module docstring
+    "cost_correction_factor": 1.0,           # applied to Cost Optimization
+                                              # Agent's estimated_cost.total_usd
+                                              # — see module docstring
     "resource_headroom_factors": {},         # {signature: factor} — diagnostic only
     # -- thresholds / knobs --
     "retrain_error_threshold": 0.20,   # 20% mean duration error (ML path) → retrain
@@ -127,8 +158,9 @@ DEFAULT_POLICIES: Dict = {
     "min_runs_for_update": 10,         # FR5: pattern, not one bad run
                                        # (applies to the RELEVANT bucket —
                                        # e.g. ml_model run count for
-                                       # duration_correction_factor — not
-                                       # the total window size)
+                                       # duration_correction_factor, or
+                                       # cost_runs for cost_correction_factor
+                                       # — not the total window size)
     "learning_rate": 0.30,             # gradual: move 30% toward observed
     # Bounds intentionally wide on the low end: real ml_model runs have
     # shown ratios as low as 0.39 (the model can be ~2.5x too high in this
@@ -136,6 +168,13 @@ DEFAULT_POLICIES: Dict = {
     # legitimate correction. 2.0 ceiling unchanged — no observed case yet
     # of underestimation this severe.
     "factor_bounds": {"min": 0.3, "max": 2.0},
+    # -- cost_correction_factor's OWN knobs — intentionally separate from
+    # the duration ones above. duration's bounds were tuned against real
+    # observed duration ratios; there's no equivalent cost-ratio data yet,
+    # so this starts at the same default values but can be tuned
+    # independently once real cost data reveals its own regime.
+    "cost_learning_rate": 0.30,
+    "cost_factor_bounds": {"min": 0.3, "max": 2.0},
     # -- rollback review --
     "rollback_review_min_runs": 5,     # runs needed post-change before judging it
     "rollback_tolerance": 0.05,        # only roll back if it's >5% worse, not noise
@@ -273,6 +312,53 @@ class PolicyEngine:
                 # else: couldn't compute either metric — drop the pending
                 # review silently rather than block future updates forever.
 
+            elif policy_name == "cost_correction_factor":
+                # No prediction_source filter here (unlike duration): cost
+                # has one formula regardless of which path produced the
+                # optimizer's recommendations, so every record with both
+                # fields present is valid evidence.
+                post_change = [
+                    r for r in records
+                    if (r.get("timestamp") or 0) > changed_at
+                    and r.get("actual_cost_usd")
+                    and r.get("estimated_cost_usd")
+                ]
+                if len(post_change) < review_min:
+                    still_pending[policy_name] = review  # not enough evidence yet
+                    continue
+
+                apes = [
+                    abs(r["actual_cost_usd"] - r["estimated_cost_usd"]) / r["actual_cost_usd"]
+                    for r in post_change if r["actual_cost_usd"] > 0
+                ]
+                post_change_mape = sum(apes) / len(apes) if apes else None
+                pre_change_mape = review.get("pre_change_mape")
+
+                if post_change_mape is not None and pre_change_mape is not None:
+                    if post_change_mape > pre_change_mape * (1 + tolerance):
+                        old_value = review["old_value"]
+                        policies[policy_name] = old_value
+                        events.append({
+                            "policy": policy_name,
+                            "action": "rolled_back",
+                            "reverted_to": old_value,
+                            "reverted_from": review["new_value"],
+                            "reason": f"post-change cost_mape ({post_change_mape:.1%} over "
+                                      f"{len(post_change)} runs) was worse than pre-change "
+                                      f"({pre_change_mape:.1%}) — automatic rollback per Phase 5",
+                        })
+                    else:
+                        events.append({
+                            "policy": policy_name,
+                            "action": "confirmed",
+                            "value": review["new_value"],
+                            "reason": f"post-change cost_mape ({post_change_mape:.1%} over "
+                                      f"{len(post_change)} runs) held or improved vs pre-change "
+                                      f"({pre_change_mape:.1%}) — keeping the update",
+                        })
+                # else: couldn't compute either metric — drop the pending
+                # review silently rather than block future updates forever.
+
         policies["_pending_reviews"] = still_pending
         return events
 
@@ -379,6 +465,7 @@ class PolicyEngine:
 
         pending = policies.get("_pending_reviews") or {}
         duration_change_in_flight = "duration_correction_factor" in pending
+        cost_change_in_flight = "cost_correction_factor" in pending
 
         # A rollback just happened THIS cycle for duration_correction_factor —
         # don't immediately propose a fresh change on top of the reverted
@@ -389,6 +476,7 @@ class PolicyEngine:
             e["policy"] for e in review_events if e.get("action") == "rolled_back"
         }
         duration_just_rolled_back = "duration_correction_factor" in just_rolled_back
+        cost_just_rolled_back = "cost_correction_factor" in just_rolled_back
 
         # ── duration_correction_factor: ML-path-only, gated on ML run count ──
         if duration_just_rolled_back:
@@ -446,18 +534,45 @@ class PolicyEngine:
                           f"only {n} runs in window; need {min_runs} (FR5: pattern, not one bad run)",
             }
 
-        # --- cost correction: intentionally inactive — see module docstring.
-        # cost_mape will be null until actual_cost_usd is populated by a real
-        # billing integration; nothing to compute or gate here yet.
+        # ── cost_correction_factor: gated on cost_runs (records with both
+        # estimated_cost_usd and actual_cost_usd present), not total window
+        # size — same FR5 spirit as duration_correction_factor's ml_runs
+        # gate, just without a source split (see module docstring for why
+        # cost doesn't need one). Uses its OWN learning_rate/factor_bounds.
+        cost_ratio = metrics.get("cost_ratio")
         cost_mape = metrics.get("cost_mape")
-        if cost_mape is not None and cost_mape > 0.15:
-            changes.append({
-                "policy": "cost_estimate_accuracy_flag",
-                "old": None, "new": round(cost_mape, 4),
-                "reason": f"cost estimates off by {cost_mape:.0%} on average over last {n} runs "
-                          f"— review COST_MODEL_ASSUMPTIONS in cost_optimizer.py "
-                          f"(informational only — no correction factor is applied)",
-            })
+        cost_runs = metrics.get("cost_runs", 0)
+        cost_lr = policies.get("cost_learning_rate", lr)
+        cost_bounds = policies.get("cost_factor_bounds", policies["factor_bounds"])
+        cost_lo, cost_hi = cost_bounds["min"], cost_bounds["max"]
+
+        if cost_just_rolled_back:
+            pass  # resting at reverted value for at least one more cycle
+        elif cost_change_in_flight:
+            pass  # a previous change is still awaiting review
+        elif cost_runs < min_runs:
+            pass  # not enough evidence yet (FR5)
+        else:
+            if cost_ratio is not None and abs(cost_ratio - policies["cost_correction_factor"]) > 0.05:
+                old = policies["cost_correction_factor"]
+                new = self._gradual(old, cost_ratio, cost_lr, cost_lo, cost_hi)
+                if new != old:
+                    policies["cost_correction_factor"] = new
+                    policies["_pending_reviews"]["cost_correction_factor"] = {
+                        "changed_at": time.time(),
+                        "old_value": old,
+                        "new_value": new,
+                        "pre_change_mape": cost_mape,
+                    }
+                    changes.append({
+                        "policy": "cost_correction_factor",
+                        "old": old, "new": new,
+                        "reason": f"mean actual/estimated cost ratio over last {cost_runs} "
+                                  f"run(s) with both fields present = {cost_ratio} (cost "
+                                  f"estimates {'under' if cost_ratio > 1 else 'over'}state real "
+                                  f"cost). Will be auto-reviewed next cycle and rolled back if "
+                                  f"it makes things worse.",
+                    })
 
         # --- per-signature: resource under-provisioning, failure, and
         # plan-correctness patterns
