@@ -58,6 +58,23 @@ _ADF_SUBS = [
     (r"currentTimestamp\(\s*\)",    "current_timestamp()"),
     (r"currentDate\(\s*\)",         "current_date()"),
 
+    # 3-arg replace(col, 'find', 'replacement') — e.g. replace(name, ' ', '_').
+    # Rewritten to regexp_replace() directly (with col() wrapping baked in
+    # for the first arg) so it never reaches the bare-identifier wrapper —
+    # that pass has no notion of quoted string arguments and would mangle
+    # them. Verified against a real PySpark session: "Omar Chen" -> "Omar_Chen".
+    # Caveat: the 2nd arg is used as a regex pattern (PySpark's
+    # regexp_replace has no plain-substring variant), so a find string
+    # containing regex metacharacters (e.g. ".", "*") won't behave like a
+    # literal replace. Fine for the common case (spaces, punctuation);
+    # revisit if that ever matters.
+    (
+        r"\breplace\(\s*(\w+)\s*,\s*"
+        r"('(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\")\s*,\s*"
+        r"('(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\")\s*\)",
+        r'regexp_replace(col("\1"), \2, \3)',
+    ),
+
     # ADF-DSL name → PySpark name; first arg is wrapped in col() by the
     # bare-identifier pass that runs after these substitutions.
     (r"\bregexReplace\s*\(",        "regexp_replace("),
@@ -77,10 +94,49 @@ _PYSPARK_KEEP_BARE = {
     "and", "or", "not", "in", "is",
 }
 
+# ── Method-chain normalizer ──────────────────────────────────────────────────
+# The fine-tuned Planner sometimes emits transforms in method-chain style
+# (`name.trim()`, `name.trim().upper()`) instead of the ADF-DSL prefix-call
+# style the substitution list above expects (`trim(name)`). Left unhandled,
+# the bare-identifier wrapper below turns `name.trim()` into
+# `col("name").trim()` — which doesn't raise an error at build time, because
+# PySpark's Column.__getattr__ is overloaded for nested struct-field access,
+# so `.trim` silently returns another Column instead of failing fast. The
+# job only blows up two minutes later inside a real Databricks run with a
+# cryptic `TypeError: 'Column' object is not callable`.
+#
+# This pre-pass rewrites method-chain calls into prefix-call form BEFORE
+# _ADF_SUBS and the bare-identifier wrapper run, so the existing pipeline
+# handles them correctly without a second implementation. Runs to a fixed
+# point so multi-hop chains fully flatten in the correct left-to-right
+# order: `name.trim().upper()` -> `upper(trim(name))`, not the reverse.
+#
+# Known limitation: only handles zero-argument method calls (`.trim()`,
+# `.upper()`, `.lower()`, etc.) — a chained call with arguments
+# (`name.substring(0, 5)`) will not be flattened and will fall through to
+# the unknown-function guard below instead of silently producing garbage.
+_METHOD_CHAIN_RE = re.compile(r'(\w+(?:\([^()]*\))?)\.(\w+)\(\s*\)')
+
+
+def _flatten_method_chains(expr: str) -> str:
+    prev = None
+    while prev != expr:
+        prev = expr
+        expr = _METHOD_CHAIN_RE.sub(r'\2(\1)', expr)
+    return expr
+
+
+class UnsupportedTransformError(ValueError):
+    """Raised when a transform uses a function name the converter doesn't
+    recognize, instead of silently emitting PySpark that only fails once a
+    real Databricks job is already running."""
+    pass
+
 
 def _convert_expr(expr: str) -> str:
     """Convert an ADF-DSL RHS expression to PySpark. Bare column names → col('...')."""
     expr = expr.strip()
+    expr = _flatten_method_chains(expr)
     for pattern, replacement in _ADF_SUBS:
         expr = re.sub(pattern, replacement, expr)
 
@@ -91,6 +147,21 @@ def _convert_expr(expr: str) -> str:
             return token
         if re.match(r'^\d', token):
             return token
+        # An identifier immediately followed by '(' is being used as a
+        # function call the converter doesn't recognize (not in _ADF_SUBS,
+        # not in _PYSPARK_KEEP_BARE). Fail loudly here — at plan-build time,
+        # before any Databricks job is created — rather than silently emit
+        # col("funcname")(...) which looks like valid Python but raises
+        # 'Column' object is not callable only once real cloud compute is
+        # already spinning.
+        rest = match.string[match.end():]
+        if re.match(r'^\s*\(', rest):
+            raise UnsupportedTransformError(
+                f"Unsupported transform function '{token}(...)' — not in the "
+                f"recognized ADF-DSL vocabulary. Add it to _ADF_SUBS in "
+                f"notebook_builder.py, or have the Planner use a supported "
+                f"function name instead."
+            )
         # Already inside col("...") → marker-based skip: if followed by " (or preceded by col(") leave it.
         return f'col("{token}")'
 

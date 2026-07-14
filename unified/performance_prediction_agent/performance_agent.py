@@ -438,13 +438,25 @@ class PerformancePredictionAgent:
             if resource_estimate_s > 0 else 1.0
         )
 
-        # Historical failure signal
+        # Historical failure signal.
+        # IMPORTANT: use `r.get("assurance_passed") is False` — NOT
+        # `not r.get("assurance_passed", True)`. The latter's default only
+        # applies when the key is ABSENT; records logged while the Assurance
+        # Agent is unavailable carry an explicit JSON null for this field
+        # (key present, value None), so `.get(key, True)` returns None, and
+        # `not None` evaluates True — silently counting every "we don't know"
+        # record as a failure. With Assurance down, that drove failure_rate
+        # to 100% and force-classified every run as "failure" regardless of
+        # actual predicted duration, aborting runs before execution even
+        # started. Only an explicit False (a real, confirmed assurance
+        # rejection) should count here; missing or null means "unknown",
+        # not "failed".
         recent_history = history[-10:] if history else []
         failure_rate = 0.0
         if recent_history:
             failures = sum(
                 1 for r in recent_history
-                if not r.get("assurance_passed", True)
+                if r.get("assurance_passed") is False
             )
             failure_rate = failures / len(recent_history)
 

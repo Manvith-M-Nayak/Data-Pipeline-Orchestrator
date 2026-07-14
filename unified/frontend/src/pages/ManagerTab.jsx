@@ -178,7 +178,7 @@ function DecisionLog({ decisions }) {
   );
 }
 
-function PredictionsCard({ predictions, cost, resourcePlan, actualCost }) {
+function PredictionsCard({ predictions, cost, resourcePlan }) {
   if (!predictions?.stage_count) return null;
   const allocs    = resourcePlan?.allocations || [];
   const feasible  = resourcePlan?.feasible ?? true;
@@ -265,25 +265,6 @@ function PredictionsCard({ predictions, cost, resourcePlan, actualCost }) {
               <span style={{ fontWeight: 700, color: "#f1f5f9" }}>Total</span>
               <span style={{ ...S.kvVal, color: cost.budget_ok ? "#4ade80" : "#f59e0b" }}>
                 ${cost.total_usd} {cost.budget_ok ? "✔" : "⚠ >$1"}
-              </span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {actualCost?.total_usd !== undefined && (
-        <div style={{ marginTop: 12, padding: "8px 12px", borderRadius: 8, background: "#0c1a12", border: "1px solid #16432a" }}>
-          <div style={{ fontSize: 12, color: "#4ade80", marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
-            <DollarSign size={12} /> Actual cost <span style={{ fontSize: 10, color: "#64748b" }}>(with actual runtime)</span>
-          </div>
-          <div style={S.kv}>
-            <div style={S.kvRow}><span>ADF activities</span><span style={S.kvVal}>${actualCost.adf_activity_usd}</span></div>
-            <div style={S.kvRow}><span>Databricks</span><span style={S.kvVal}>${actualCost.databricks_usd}</span></div>
-            <div style={S.kvRow}><span>Blob storage</span><span style={S.kvVal}>${actualCost.storage_usd}</span></div>
-            <div style={{ ...S.kvRow, borderBottom: "none" }}>
-              <span style={{ fontWeight: 700, color: "#f1f5f9" }}>Total</span>
-              <span style={{ ...S.kvVal, color: "#4ade80" }}>
-                ${actualCost.total_usd}
               </span>
             </div>
           </div>
@@ -862,7 +843,6 @@ export default function ManagerTab() {
                 predictions={mgrState.predictions}
                 cost={mgrState.cost_estimate}
                 resourcePlan={mgrState.resource_plan}
-                actualCost={mgrState.actual_cost}
               />
               <ParallelismCard parallelism={mgrState.parallelism} />
             </div>
