@@ -107,8 +107,18 @@ class FeedbackCollector:
         perf_predicted_s = _to_float(raw.get("perf_predicted_total_s"))
         baseline_predicted_s = _to_float(raw.get("predicted_duration_s"))
 
+        # estimated_cost_usd (Cost Optimization Agent's own pre-execution
+        # estimate) MUST take priority — it's computed with the same
+        # _estimate_cost() formula as actual_cost_usd, making them a valid
+        # before/after pair. cost_estimate_usd (Manager's separate, cheaper
+        # Phase 2b formula) is only a fallback for older records that
+        # predate estimated_cost_usd being logged at all. Getting this
+        # order backwards silently corrupts cost_correction_factor: since
+        # cost_estimate_usd is always present, `cost_estimate_usd or
+        # estimated_cost_usd` would always pick it, comparing actual_cost_usd
+        # against the wrong, unrelated formula on every single record.
         est_cost = _to_float(
-            raw.get("cost_estimate_usd") or raw.get("estimated_cost_usd")
+            raw.get("estimated_cost_usd") or raw.get("cost_estimate_usd")
         )
         actual_cost = _to_float(raw.get("actual_cost_usd"))
 
