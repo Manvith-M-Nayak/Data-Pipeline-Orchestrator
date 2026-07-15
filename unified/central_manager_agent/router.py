@@ -32,6 +32,15 @@ async def start_managed_run(
     except json.JSONDecodeError as exc:
         raise HTTPException(status_code=422, detail=f"Invalid JSON: {exc}")
 
+    # The UI lets users edit execution_groups by hand — repair any data-flow
+    # violations (a stage grouped with its dependency) before spending cloud
+    # resources on a run that would read an empty container.
+    try:
+        from planner_agent.planner_common import sanitize_execution_groups
+        config_dict = sanitize_execution_groups(config_dict)
+    except Exception as exc:
+        print(f"[manager] execution_groups sanitize skipped: {exc}")
+
     # Write CSV to a temp dir keeping the original filename — it becomes the
     # blob name in the source container (executor needs a file path).
     orig_name = os.path.basename(csv_file.filename or "") or "input.csv"

@@ -1,133 +1,30 @@
 import asyncio
 import datetime
-import json
-import os
-import tempfile
-import time
-import uuid
 from typing import Dict
 
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
-from fastapi.concurrency import run_in_threadpool
+from fastapi import APIRouter, HTTPException
 
 router = APIRouter()
 
+# Legacy direct-run registry. Kept so /status and /jobs stay valid endpoints
+# for old clients, but no new entries are created — all runs now flow through
+# the Central Manager, which invokes the executor itself.
 _jobs: Dict[str, Dict] = {}
 
 
-def _manager():
-    """Central Manager singleton — direct executor runs are mirrored into its
-    run registry so they show up alongside managed runs. None if unavailable."""
-    try:
-        from central_manager_agent.router import _manager as mgr
-        return mgr
-    except Exception:
-        return None
-
-
 @router.post("/run")
-async def run_pipeline(
-    csv_file:        UploadFile = File(...),
-    pipeline_config: str        = Form(...),
-    schema:          str        = Form(...),
-):
-    from .executor import execute_pipeline
+async def run_pipeline():
+    """Direct executor runs are disabled.
 
-    contents = await csv_file.read()
-    # Keep the user's original filename — it becomes the blob name in the
-    # source container (a NamedTemporaryFile would upload as "tmpXXXX.csv").
-    orig_name = os.path.basename(csv_file.filename or "") or "input.csv"
-    if not orig_name.lower().endswith(".csv"):
-        orig_name += ".csv"
-    tmp_dir  = tempfile.mkdtemp(prefix="orchestrator_")
-    tmp_path = os.path.join(tmp_dir, orig_name)
-    with open(tmp_path, "wb") as f:
-        f.write(contents)
-
-    def _cleanup():
-        try:
-            os.unlink(tmp_path)
-            os.rmdir(tmp_dir)
-        except OSError:
-            pass
-
-    try:
-        config_dict = json.loads(pipeline_config)
-        schema_dict = json.loads(schema)
-    except json.JSONDecodeError as e:
-        _cleanup()
-        raise HTTPException(status_code=422, detail=f"Invalid JSON: {e}")
-
-    # The UI lets users edit execution_groups by hand — repair any data-flow
-    # violations (a stage grouped with its dependency) before spending cloud
-    # resources on a run that would read an empty container.
-    try:
-        from planner_agent.planner_common import sanitize_execution_groups
-        config_dict = sanitize_execution_groups(config_dict)
-    except Exception as e:
-        print(f"[executor] execution_groups sanitize skipped: {e}")
-
-    job_id = str(uuid.uuid4())
-    _jobs[job_id] = {"status": "running", "step": "Starting…", "result": None, "error": None}
-
-    # Mirror this run into the Central Manager's registry so it appears in
-    # the manager UI next to fully-managed runs.
-    mgr, mgr_state = _manager(), None
-    if mgr:
-        try:
-            mgr_run_id = mgr.pre_create(config_dict)
-            mgr_state = mgr._runs.get(mgr_run_id)
-            mgr_state.status = "executing"
-            mgr_state.phase  = "executing"
-            mgr_state.step   = "Starting…"
-            mgr._log(mgr_state, "DIRECT_RUN",
-                     "Run started from the Executor Agent (not centrally managed)",
-                     f"executor job {job_id}", "info")
-            _jobs[job_id]["manager_run_id"] = mgr_run_id
-        except Exception as exc:
-            print(f"[executor] manager mirror non-fatal: {exc}")
-            mgr_state = None
-
-    def _progress(step_name: str, dbx_run_id: int = None):
-        _jobs[job_id]["step"] = step_name
-        if dbx_run_id is not None:
-            _jobs[job_id]["dbx_run_id"] = dbx_run_id
-        if mgr_state is not None:
-            mgr_state.step = step_name
-
-    async def _run():
-        start = time.time()
-        try:
-            result = await run_in_threadpool(execute_pipeline, tmp_path, config_dict, schema_dict, _progress)
-            elapsed_ms = int((time.time() - start) * 1000)
-            if isinstance(result, dict) and result.get("status") in ("failed", "error"):
-                _jobs[job_id].update({
-                    "status": "failed",
-                    "error":  result.get("message", "Pipeline failed"),
-                    "result": result,
-                })
-            else:
-                _jobs[job_id].update({"status": "completed", "step": "Complete", "result": result})
-            if mgr_state is not None:
-                failed = _jobs[job_id]["status"] == "failed"
-                mgr_state.status = "failed" if failed else "completed"
-                mgr_state.step   = _jobs[job_id]["step"] if not failed else "Failed"
-                mgr_state.error  = _jobs[job_id].get("error")
-                mgr_state.executor_result = result if isinstance(result, dict) else None
-                mgr_state.completed_at = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
-            asyncio.create_task(_notify_monitor(result, elapsed_ms))
-        except Exception as exc:
-            _jobs[job_id].update({"status": "failed", "error": str(exc)})
-            if mgr_state is not None:
-                mgr_state.status = "failed"
-                mgr_state.step   = "Failed"
-                mgr_state.error  = str(exc)
-                mgr_state.completed_at = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
-        finally:
-            _cleanup()
-
-    asyncio.create_task(_run())
-    return {"job_id": job_id, "status": "running"}
+    Every pipeline run must go through the Central Manager
+    (POST /api/manager/run), which validates the plan, runs assurance and
+    resource/cost pre-checks, and then hands off to the executor.
+    """
+    raise HTTPException(
+        status_code=410,
+        detail="Direct executor runs are disabled — start runs via POST /api/manager/run "
+               "(the Central Manager invokes the executor).",
+    )
 
 
 async def _notify_monitor(result: dict, elapsed_ms: int):

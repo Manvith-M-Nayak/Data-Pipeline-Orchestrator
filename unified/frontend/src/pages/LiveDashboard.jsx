@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from "react";
-import { connectWS, monitor, executor } from "../api.js";
+import { connectWS, monitor, manager } from "../api.js";
 import { AlertTriangle, CheckCircle, Clock, XCircle, Zap } from "lucide-react";
 
 const S = {
@@ -51,11 +51,13 @@ export default function LiveDashboard() {
     }
   }, []);
 
-  // Poll executor jobs every 5s for live Databricks run visibility
+  // Poll managed runs every 5s for live run visibility (manager drives the executor)
   useEffect(() => {
     function refreshJobs() {
-      executor.listJobs().then((jobs) =>
-        setExecJobs(jobs.filter((j) => j.status === "running"))
+      manager.listRuns().then((rs) =>
+        setExecJobs(rs
+          .filter((r) => !["completed", "failed"].includes(r.status))
+          .map((r) => ({ job_id: r.run_id, step: r.step, status: r.status })))
       ).catch(() => {});
     }
     refreshJobs();
@@ -93,7 +95,7 @@ export default function LiveDashboard() {
       {execJobs.length > 0 && (
         <div style={{ marginBottom: 20 }}>
           <div style={{ fontSize: 12, color: "#64748b", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 10 }}>
-            Active executor jobs
+            Active managed runs
           </div>
           <div style={S.grid}>
             {execJobs.map((j) => (

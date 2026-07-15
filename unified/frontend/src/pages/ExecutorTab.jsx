@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { executor, monitor, connectWS } from "../api.js";
+import { executor, manager, monitor, connectWS } from "../api.js";
 import { useAppContext } from "../AppContext.jsx";
 import {
   Zap, Upload, CheckCircle, XCircle, RotateCcw, Brain, AlertTriangle, Activity, Clock, Download,
@@ -79,6 +79,7 @@ const C = {
 // Step labels are now driven by backend progress (jobState.step).
 // These are fallback labels shown when no backend step is available yet.
 const EXEC_STEPS = [
+  "Central Manager pre-flight (validate · predict · optimize)",
   "Authenticating with Azure",
   "Creating storage containers",
   "Uploading your data",
@@ -91,6 +92,7 @@ const EXEC_STEPS = [
 // Match a backend step message to its EXEC_STEPS row. Checked in reverse so
 // the most advanced matching phase wins.
 const STEP_MATCHERS = [
+  (t) => t.includes("validating plan") || t.includes("assurance agent") || t.includes("resource prediction") || t.includes("handing off"),
   (t) => t.includes("authenticating"),
   (t) => t.includes("creating storage"),
   (t) => t.includes("uploading csv"),
@@ -98,6 +100,20 @@ const STEP_MATCHERS = [
   (t) => t.includes("linked service") || t.includes("copy pipeline"),
   (t) => t.includes("stage group") || t.includes("monitoring databricks") || t.includes("running notebook"),
 ];
+
+// The tab runs pipelines through the Central Manager (/api/manager/run) so
+// every run gets validation, assurance, resource/cost pre-checks, and retry
+// handling before the Executor Agent is invoked. Manager state is mapped to
+// the executor-style job shape this tab renders.
+const MGR_TERMINAL = ["completed", "failed"];
+function mapManagerState(s) {
+  return {
+    status: MGR_TERMINAL.includes(s.status) ? s.status : "running",
+    step:   s.step,
+    result: s.executor_result,
+    error:  s.error,
+  };
+}
 
 function Spinner({ color = "#f59e0b" }) {
   return (
@@ -114,6 +130,7 @@ export default function ExecutorTab() {
   const {
     csvFile, setCsvFile,
     planResult:      savedPlan,
+    plannerPrompt,
     executorJobId:   jobId,    setExecutorJobId:    setJobId,
     executorJobState:jobState, setExecutorJobState: setJobState,
     executorStep:    execStep, setExecutorStep:     setExecStep,
@@ -142,7 +159,7 @@ export default function ExecutorTab() {
     clearInterval(pollRef.current);
     pollRef.current = setInterval(async () => {
       try {
-        const s = await executor.status(jid);
+        const s = mapManagerState(await manager.status(jid));
         setJobState(s);
         if (s.step) {
           const st = s.step.toLowerCase();
@@ -195,11 +212,11 @@ export default function ExecutorTab() {
     setError(""); setRunning(true); setExecStep(0); setJobState(null);
 
     try {
-      const res = await executor.run(csvFile, savedPlan.config, savedSchema || {});
-      const jid = res.job_id;
+      const res = await manager.run(csvFile, savedPlan.config, savedSchema || {}, plannerPrompt || "");
+      const jid = res.run_id;
       setJobId(jid);
       setJobState({ status: "running", step: "Starting…" });
-      // Start polling immediately with explicit job ID — no effect/closure dependency
+      // Start polling immediately with explicit run ID — no effect/closure dependency
       _startPolling(jid);
     } catch (e) {
       setRunning(false);
@@ -224,7 +241,7 @@ export default function ExecutorTab() {
           <span style={C.agentBadge}><Zap size={13} /> Executor Agent</span>
         </div>
         <h1 style={C.title}>Run your pipeline</h1>
-        <p style={C.sub}>Deploys your plan to Azure Data Factory and Databricks, then monitors execution.</p>
+        <p style={C.sub}>Runs go through the Central Manager (validation, resource &amp; cost pre-checks, retries), which hands off to the Executor for ADF + Databricks deployment.</p>
       </div>
 
       {error && (

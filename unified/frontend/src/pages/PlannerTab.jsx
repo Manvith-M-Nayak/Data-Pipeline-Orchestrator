@@ -638,8 +638,8 @@ export default function PlannerTab() {
           })()}
 
           <div style={C.btnRow}>
-            <button style={C.btnPrimary(false)} onClick={() => navigate("/executor")}>
-              <Zap size={13} /> Send to Executor <ArrowRight size={13} />
+            <button style={C.btnPrimary(false)} onClick={() => navigate("/manager")}>
+              <Zap size={13} /> Send to Manager <ArrowRight size={13} />
             </button>
             <button style={{ ...C.btnSecondary, color: "#4ade80", borderColor: "#166534" }} disabled={assuring} onClick={handleValidate}>
               <ShieldCheck size={13} />{assuring ? <><Spinner /> Validating…</> : "Validate Plan"}

@@ -39,14 +39,9 @@ export const assurance = {
 };
 
 // ── Executor ─────────────────────────────────────────────────────────────────
+// No direct run API — pipeline runs go through the Central Manager
+// (manager.run below), which invokes the executor after its pre-checks.
 export const executor = {
-  run: (csvFile, pipelineConfig, schemaObj) => {
-    const fd = new FormData();
-    fd.append("csv_file", csvFile);
-    fd.append("pipeline_config", JSON.stringify(pipelineConfig));
-    fd.append("schema", JSON.stringify(schemaObj));
-    return req("/executor/run", { method: "POST", body: fd });
-  },
   status:      (jobId)     => req(`/executor/status/${jobId}`),
   listJobs:    ()          => req("/executor/jobs"),
   downloadUrl: (container) => `${BASE}/executor/download/${encodeURIComponent(container)}`,

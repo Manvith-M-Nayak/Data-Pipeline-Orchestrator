@@ -295,7 +295,7 @@ export default function HomePage() {
               </div>
               <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
                 <button onClick={() => navigate("/planner")} style={S.ctaBtn(false)}>New plan <ArrowRight size={11} /></button>
-                <button onClick={() => navigate("/executor")} style={S.ctaBtn(true)}><Zap size={12} /> Run this plan</button>
+                <button onClick={() => navigate("/manager")} style={S.ctaBtn(true)}><Zap size={12} /> Run this plan</button>
               </div>
             </>
           ) : (
@@ -325,7 +325,7 @@ export default function HomePage() {
                   DIU: {savedPlan.config?.recommended_settings?.diu ?? "auto"}
                 </div>
               </div>
-              <button onClick={() => navigate("/executor")} style={{ ...S.ctaBtn(true), marginTop: 12 }}>
+              <button onClick={() => navigate("/manager")} style={{ ...S.ctaBtn(true), marginTop: 12 }}>
                 <Zap size={12} /> Run pipeline now
               </button>
             </>
