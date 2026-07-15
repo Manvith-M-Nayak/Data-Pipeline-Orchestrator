@@ -136,6 +136,234 @@ class CostOptimizationAgent:
         )
         return asdict(result)
 
+    # ── Auto-apply: returns a modified resource_plan with best recommendation applied ──
+
+    def apply_optimization(
+        self,
+        plan: dict,
+        performance_prediction: dict,
+        resource_plan: dict,
+        constraints: Optional[dict] = None,
+    ) -> dict:
+        """
+        Run optimization and return a modified *resource_plan* dict with the
+        best recommendation applied.  The original dicts are not mutated.
+
+        ML path:  per-stage workers/DIU/node_type/shuffle are updated inline.
+        Rule path: the best-ranked rule-based change is applied.
+
+        Returns the modified resource_plan (or an unmodified deep copy if no
+        valid recommendation exists).
+        """
+        constraints = constraints or {}
+        rp = copy.deepcopy(resource_plan)
+
+        # ── Try ML path ────────────────────────────────────────────────────
+        if self._apply_ml_to_resource_plan(plan, performance_prediction, rp):
+            return rp
+
+        # ── Rule path — try each rule on the original resource_plan, keep
+        #    the best one (first that survives constraint enforcement) ────────
+        current_cost = self._estimate_cost(plan, performance_prediction, resource_plan)
+
+        for rule_fn, rule_name in [
+            (self._apply_cluster_downsize, "cluster_downsize"),
+            (self._apply_node_downgrade, "node_downgrade"),
+            (self._apply_shuffle_tuning, "shuffle_tuning"),
+        ]:
+            modified = copy.deepcopy(resource_plan)
+            applied = rule_fn(plan, performance_prediction, modified, constraints)
+            if not applied:
+                continue
+
+            new_cost = self._estimate_cost(plan, performance_prediction, modified)
+            saving_pct = (
+                (1 - new_cost.total_usd / current_cost.total_usd) * 100
+                if current_cost.total_usd > 0
+                else 0
+            )
+            if saving_pct < 3:
+                continue
+
+            safe = self._enforce_constraints_single(
+                rule_name, modified, constraints, performance_prediction
+            )
+            if safe:
+                return modified
+
+        return rp
+
+    def _apply_ml_to_resource_plan(
+        self,
+        plan: dict,
+        perf: dict,
+        rp: dict,
+    ) -> bool:
+        """
+        Run ML predictions and apply optimal configs directly to *rp* (mutated
+        in place).  Returns True if ML was used and at least one allocation
+        changed.
+        """
+        try:
+            from cost_optimization_agent.ml_predictor import (
+                CostMLPredictor,
+                MLNotAvailable,
+            )
+
+            if not CostMLPredictor.is_available():
+                return False
+        except Exception:
+            return False
+
+        stages = plan.get("stages", [])
+        allocations = rp.get("allocations", [])
+        alloc_map = {a.get("stage_name"): a for a in allocations}
+        schema = plan.get("schema", {})
+        csv_size_bytes = int(plan.get("csv_size_bytes", 0))
+        n_stages = len(stages)
+
+        any_change = False
+        for i, stage in enumerate(stages):
+            name = stage.get("name", "")
+            current_alloc = alloc_map.get(name)
+            if not current_alloc:
+                continue
+            try:
+                opt = CostMLPredictor.predict_optimal_config(
+                    stage, schema, csv_size_bytes, stage_index=i, n_stages=n_stages
+                )
+            except MLNotAvailable:
+                continue
+
+            for alloc in allocations:
+                if alloc.get("stage_name") == name:
+                    old_workers = alloc.get("workers", 0)
+                    old_node = alloc.get("node_type", _DEFAULT_NODE)
+                    new_workers = opt["workers"]
+                    new_node = opt["node_type"]
+
+                    if alloc.get("stage_type") == "copy":
+                        old_diu = alloc.get("diu", 2)
+                        new_diu = opt["diu"]
+                        if new_diu < old_diu:
+                            alloc["diu"] = new_diu
+                            alloc["memory_gb"] = opt["memory_gb"]
+                            any_change = True
+                    elif new_workers < old_workers or new_node != old_node:
+                        alloc["workers"] = new_workers
+                        alloc["node_type"] = new_node
+                        alloc["shuffle_partitions"] = opt["shuffle_partitions"]
+                        alloc["memory_gb"] = opt["memory_gb"]
+                        any_change = True
+                    break
+
+        if any_change:
+            peak = max((a.get("workers", 0) for a in allocations), default=0)
+            rp["peak_concurrent_workers"] = peak
+
+        return any_change
+
+    def _apply_cluster_downsize(self, plan, perf, rp, constraints) -> bool:
+        allocations = rp.get("allocations", [])
+        if not allocations:
+            return False
+
+        utilization = perf.get("adjustment_factor", 1.0)
+        if utilization > UTILIZATION_LOW_THRESHOLD:
+            return False
+
+        notebook_allocs = [
+            a
+            for a in allocations
+            if a.get("stage_type") == "notebook" and a.get("workers", 0) > 0
+        ]
+        if not notebook_allocs:
+            return False
+
+        for alloc in allocations:
+            if alloc.get("stage_type") == "notebook":
+                w = alloc.get("workers", 0)
+                if w >= 2:
+                    alloc["workers"] = w - 1
+
+        rp["peak_concurrent_workers"] = max(
+            (a.get("workers", 0) for a in allocations), default=0
+        )
+        return True
+
+    def _apply_node_downgrade(self, plan, perf, rp, constraints) -> bool:
+        recommended = plan.get("recommended_settings", {})
+        current_node = recommended.get("node_type", _DEFAULT_NODE)
+        current_rate = NODE_HOURLY_RATES.get(current_node, _DEFAULT_NODE_RATE)
+        allocations = rp.get("allocations", [])
+        peak_mem = max((a.get("memory_gb", 0) for a in allocations), default=0)
+        cheaper_options = [n for n, r in NODE_HOURLY_RATES.items() if r < current_rate]
+        if not cheaper_options:
+            return False
+
+        node_specs = {
+            "Standard_DS2_v2": {"memory_gb": 7.0, "cpu": 2},
+            "Standard_D4s_v3": {"memory_gb": 16.0, "cpu": 4},
+            "Standard_D4_v3": {"memory_gb": 16.0, "cpu": 4},
+            "Standard_DS3_v2": {"memory_gb": 14.0, "cpu": 4},
+            "Standard_DS4_v2": {"memory_gb": 28.0, "cpu": 8},
+            "Standard_D8s_v3": {"memory_gb": 32.0, "cpu": 8},
+        }
+        best_node = None
+        for node in sorted(cheaper_options, key=lambda n: NODE_HOURLY_RATES[n]):
+            spec = node_specs.get(node, {"memory_gb": 16.0, "cpu": 4})
+            if spec["memory_gb"] >= peak_mem * 0.8:
+                best_node = node
+                break
+
+        if best_node is None or best_node == current_node:
+            return False
+
+        saving_pct = round((1 - NODE_HOURLY_RATES[best_node] / current_rate) * 100, 1)
+        if saving_pct < 5:
+            return False
+
+        for alloc in allocations:
+            alloc["node_type"] = best_node
+        rp["node_type"] = best_node
+        return True
+
+    def _apply_shuffle_tuning(self, plan, perf, rp, constraints) -> bool:
+        recommended = plan.get("recommended_settings", {})
+        current_shuffle = recommended.get("shuffle_partitions", 200)
+        allocations = rp.get("allocations", [])
+        notebook_allocs = [a for a in allocations if a.get("stage_type") == "notebook"]
+        if not notebook_allocs:
+            return False
+
+        max_workers = max((a.get("workers", 1) for a in notebook_allocs), default=1)
+        optimal_shuffle = max(8, min(current_shuffle, max_workers * 12))
+
+        if optimal_shuffle >= current_shuffle or current_shuffle <= 100:
+            return False
+
+        for alloc in allocations:
+            if alloc.get("stage_type") == "notebook":
+                alloc["shuffle_partitions"] = optimal_shuffle
+        return True
+
+    def _enforce_constraints_single(
+        self, rule_name: str, modified_rp: dict, constraints: dict, perf: dict
+    ) -> bool:
+        deadline_s = constraints.get("deadline_s", 0)
+        priority = constraints.get("priority", "normal")
+        predicted_s = perf.get("predicted_total_s", 0)
+
+        if priority == "critical":
+            return True
+
+        if deadline_s > 0 and predicted_s > 0:
+            if "downsize" in rule_name or "downgrade" in rule_name:
+                new_duration = predicted_s * (1 + 0.20)
+                if new_duration > deadline_s:
+                    return False
+        return True
+
     # ── ML Primary Path ──────────────────────────────────────────────────────
 
     def _try_ml_suggestions(

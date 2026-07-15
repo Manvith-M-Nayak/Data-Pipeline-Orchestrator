@@ -1,25 +1,25 @@
 {
-  "sklearn_version": "1.9.0",
+  "sklearn_version": "1.6.1",
   "rows": 200001,
   "targets": {
     "opt_workers": {
-      "train_mae": 0.38,
-      "train_r2": 0.2636,
-      "test_mae": 0.386,
-      "test_r2": 0.248,
-      "r2_gap": 0.0156,
+      "train_mae": 0.381,
+      "train_r2": 0.2551,
+      "test_mae": 0.385,
+      "test_r2": 0.2471,
+      "r2_gap": 0.008,
       "overfitting_flag": false,
       "train_exact": 0.0439,
-      "test_exact": 0.0427,
-      "train_within1": 0.9285,
-      "test_within1": 0.9262
+      "test_exact": 0.0426,
+      "train_within1": 0.9284,
+      "test_within1": 0.9275
     },
     "opt_diu": {
       "train_mae": 0.217,
-      "train_r2": 0.3581,
+      "train_r2": 0.3582,
       "test_mae": 0.218,
-      "test_r2": 0.3662,
-      "r2_gap": 0.008,
+      "test_r2": 0.3664,
+      "r2_gap": 0.0082,
       "overfitting_flag": false,
       "train_exact": 0.4709,
       "test_exact": 0.4749,
@@ -27,17 +27,17 @@
       "test_within1": 0.987
     },
     "opt_memory_gb": {
-      "train_mae": 3.934,
-      "train_r2": 0.7638,
+      "train_mae": 3.936,
+      "train_r2": 0.7635,
       "test_mae": 3.994,
       "test_r2": 0.7604,
-      "r2_gap": 0.0034,
+      "r2_gap": 0.0031,
       "overfitting_flag": false
     },
     "opt_shuffle_partitions": {
-      "train_mae": 2.953,
+      "train_mae": 2.952,
       "train_r2": 0.9835,
-      "test_mae": 2.991,
+      "test_mae": 2.993,
       "test_r2": 0.9824,
       "r2_gap": 0.0011,
       "overfitting_flag": false
@@ -45,8 +45,8 @@
   },
   "node_type": {
     "train_balanced_accuracy": 0.9956,
-    "test_balanced_accuracy": 0.9925,
-    "r2_gap": 0.0031,
+    "test_balanced_accuracy": 0.9922,
+    "r2_gap": 0.0033,
     "overfitting_flag": false
   }
 }

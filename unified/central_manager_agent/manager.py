@@ -15,6 +15,7 @@ The Planner is the "brain"; the Manager is the "nervous system".
 """
 
 import asyncio
+import copy
 import datetime
 import json
 import os
@@ -451,8 +452,10 @@ class CentralManager:
             if result.get("prediction_source") == "ml_model":
                 from learning_policy_agent import get_learning_agent
 
-                factor = get_learning_agent().policies.load().get(
-                    "duration_correction_factor", 1.0
+                factor = (
+                    get_learning_agent()
+                    .policies.load()
+                    .get("duration_correction_factor", 1.0)
                 )
                 if factor != 1.0 and result.get("predicted_total_s"):
                     result["uncorrected_total_s"] = result["predicted_total_s"]
@@ -656,8 +659,10 @@ class CentralManager:
             if cost_block and cost_block.get("total_usd") is not None:
                 from learning_policy_agent import get_learning_agent
 
-                factor = get_learning_agent().policies.load().get(
-                    "cost_correction_factor", 1.0
+                factor = (
+                    get_learning_agent()
+                    .policies.load()
+                    .get("cost_correction_factor", 1.0)
                 )
                 if factor != 1.0:
                     cost_block["uncorrected_total_usd"] = cost_block["total_usd"]
@@ -695,6 +700,92 @@ class CentralManager:
             "ok" if recs else "info",
         )
         return result
+
+    # ────────────────────────────────────────────────────────────────────────
+    # Phase 2d — Auto-apply cost optimization (modifies resource_plan in-place)
+    # ────────────────────────────────────────────────────────────────────────
+    def auto_apply_cost_optimization(
+        self,
+        state: "RunState",
+        constraints: Optional[dict] = None,
+    ) -> bool:
+        """
+        Calls CostOptimizationAgent.apply_optimization() and updates
+        state.resource_plan with the cost-optimized version.
+
+        Must be called AFTER optimize_cost() in Phase 2.
+
+        Returns True if the resource_plan was modified.
+        """
+        constraints = constraints or {}
+        if not constraints.get("auto_apply_cost", True):
+            self._log(
+                state, "COST AUTO-APPLY", "disabled by constraint", "skipped", "info"
+            )
+            return False
+
+        from cost_optimization_agent import CostOptimizationAgent
+
+        original_peak = state.resource_plan.get("peak_concurrent_workers", 0)
+        original_alloc = copy.deepcopy(state.resource_plan.get("allocations", []))
+
+        modified_rp = CostOptimizationAgent().apply_optimization(
+            plan=state.plan,
+            performance_prediction=state.performance_prediction,
+            resource_plan=state.resource_plan,
+            constraints=constraints,
+        )
+
+        state.resource_plan = modified_rp
+
+        new_peak = modified_rp.get("peak_concurrent_workers", 0)
+        changed = (
+            new_peak != original_peak
+            or modified_rp.get("allocations", []) != original_alloc
+        )
+
+        if changed:
+            changes = []
+            old_map = {a.get("stage_name"): a for a in original_alloc}
+            new_map = {
+                a.get("stage_name"): a for a in modified_rp.get("allocations", [])
+            }
+            for name, old_a in old_map.items():
+                new_a = new_map.get(name)
+                if not new_a:
+                    continue
+                if old_a.get("workers", 0) != new_a.get("workers", 0):
+                    changes.append(
+                        f"{name}: {old_a.get('workers', 0)}w→{new_a.get('workers', 0)}w"
+                    )
+                if old_a.get("diu", 0) != new_a.get("diu", 0):
+                    changes.append(
+                        f"{name}: {old_a.get('diu', 0)}DIU→{new_a.get('diu', 0)}DIU"
+                    )
+                if old_a.get("node_type") != new_a.get("node_type"):
+                    changes.append(
+                        f"{name}: {old_a.get('node_type', '?')}→{new_a.get('node_type', '?')}"
+                    )
+            if new_peak != original_peak:
+                changes.append(f"peak_workers: {original_peak}→{new_peak}")
+
+            self._log(
+                state,
+                "COST AUTO-APPLY",
+                f"resource_plan updated ({len(changes)} change(s))",
+                "; ".join(changes[:5]) if changes else "internal adjustments",
+                "ok",
+            )
+        else:
+            self._log(
+                state,
+                "COST AUTO-APPLY",
+                "no cost-optimization changes applied",
+                "resource_plan unchanged",
+                "info",
+            )
+
+        return changed
 
     # ────────────────────────────────────────────────────────────────────────
     # Phase 3 — Execute with retry + backoff
@@ -1117,6 +1208,9 @@ class CentralManager:
 
             # ── Phase 2c: Cost optimization (non-blocking) ──────────────
             self.optimize_cost(state)
+
+            # ── Phase 2d: Auto-apply cost optimization to resource_plan ──
+            self.auto_apply_cost_optimization(state)
 
             # ── Phase 3: Execute ─────────────────────────────────────────
             state.status = "executing"
