@@ -842,6 +842,22 @@ class ResourceAgent:
         corr_notebook = self.get_correction_factor("notebook")
         correction_factors = {"copy": corr_copy, "notebook": corr_notebook}
 
+        # Log the Resource Agent's own self-correction state. Unlike the
+        # Learning & Policy Update Agent's duration_correction_factor /
+        # cost_correction_factor (which persist an old→new value across
+        # cycles), get_correction_factor() recomputes fresh from
+        # resource_feedback.jsonl on every call — so there's no "old value"
+        # to report here, only the current factor and how much evidence
+        # backs it. Printed every analyze() call to mirror the Manager's
+        # PERF PREDICT / COST OPTIMIZATION log style.
+        copy_n = len(self._load_feedback("copy"))
+        notebook_n = len(self._load_feedback("notebook"))
+        print(
+            f"[Learning Agent] Resource Agent — "
+            f"copy factor={corr_copy:.3f} ({copy_n} record(s)) · "
+            f"notebook factor={corr_notebook:.3f} ({notebook_n} record(s))"
+        )
+
         # 1 + 2 — Predict per stage (ML recommender first, heuristic fallback)
         n_stages = len(stages)
         requirements: List[StageRequirements] = []
