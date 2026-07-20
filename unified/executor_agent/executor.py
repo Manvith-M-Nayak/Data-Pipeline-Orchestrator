@@ -412,14 +412,27 @@ def create_blob_linked_service(token: str) -> requests.Response:
     return adf_put(token, "linkedservices", LS_BLOB_NAME, body)
 
 
-def create_dataset(token: str, ds_config: dict) -> requests.Response:
+def create_dataset(token: str, ds_config: dict, file_format: str = "csv") -> requests.Response:
     role     = ds_config.get("role", "source")
-    filename = "output.csv" if role == "sink" else ""
+    ext      = "json" if file_format == "json" else "csv"
+    filename = f"output.{ext}" if role == "sink" else ""
     location = {"type": "AzureBlobStorageLocation", "container": ds_config["container"]}
     if filename:
         location["fileName"] = filename
-    body = {
-        "properties": {
+    if file_format == "json":
+        properties = {
+            "type": "Json",
+            "linkedServiceName": {
+                "referenceName": LS_BLOB_NAME,
+                "type":          "LinkedServiceReference",
+            },
+            "typeProperties": {
+                "location":     location,
+                "encodingName": "UTF-8",
+            },
+        }
+    else:
+        properties = {
             "type": "DelimitedText",
             "linkedServiceName": {
                 "referenceName": LS_BLOB_NAME,
@@ -433,38 +446,63 @@ def create_dataset(token: str, ds_config: dict) -> requests.Response:
                 "encodingName":     "UTF-8",
             },
         }
-    }
-    return adf_put(token, "datasets", ds_config["name"], body)
+    return adf_put(token, "datasets", ds_config["name"], {"properties": properties})
 
 
-def _copy_activity(stage: dict, prev_activity_name: str = None) -> dict:
+def _copy_activity(stage: dict, prev_activity_name: str = None, file_format: str = "csv") -> dict:
+    if file_format == "json":
+        # *.json* also matches .jsonl / .ndjson uploads
+        source = {
+            "type": "JsonSource",
+            "storeSettings": {
+                "type":             "AzureBlobStorageReadSettings",
+                "wildcardFileName": "*.json*",
+                "recursive":        True,
+            },
+            "formatSettings": {"type": "JsonReadSettings"},
+        }
+        sink = {
+            "type": "JsonSink",
+            "storeSettings": {
+                "type":     "AzureBlobStorageWriteSettings",
+                "fileName": "staged.json",
+            },
+            "formatSettings": {
+                "type":        "JsonWriteSettings",
+                "filePattern": "arrayOfObjects",
+            },
+            "copyBehavior": "MergeFiles",
+        }
+    else:
+        source = {
+            "type":               "DelimitedTextSource",
+            "wildcardFolderPath": "",
+            "wildcardFileName":   "*.csv",
+            "recursive":          True,
+            "formatSettings": {
+                "type":       "DelimitedTextReadSettings",
+                "quoteChar":  '"',
+                "escapeChar": '"',
+            },
+        }
+        sink = {
+            "type": "DelimitedTextSink",
+            "storeSettings": {
+                "type":     "AzureBlobStorageWriteSettings",
+                "fileName": "staged.csv",
+            },
+            "formatSettings": {
+                "type":          "DelimitedTextWriteSettings",
+                "fileExtension": ".csv",
+            },
+            "copyBehavior": "MergeFiles",
+        }
     act = {
         "name": stage["name"],
         "type": "Copy",
         "typeProperties": {
-            "source": {
-                "type":               "DelimitedTextSource",
-                "wildcardFolderPath": "",
-                "wildcardFileName":   "*.csv",
-                "recursive":          True,
-                "formatSettings": {
-                    "type":       "DelimitedTextReadSettings",
-                    "quoteChar":  '"',
-                    "escapeChar": '"',
-                },
-            },
-            "sink": {
-                "type": "DelimitedTextSink",
-                "storeSettings": {
-                    "type":     "AzureBlobStorageWriteSettings",
-                    "fileName": "staged.csv",
-                },
-                "formatSettings": {
-                    "type":          "DelimitedTextWriteSettings",
-                    "fileExtension": ".csv",
-                },
-                "copyBehavior": "MergeFiles",
-            },
+            "source":               source,
+            "sink":                 sink,
             "enableStaging":        False,
             "dataIntegrationUnits": int(stage.get("diu", 2)),
         },
@@ -476,10 +514,10 @@ def _copy_activity(stage: dict, prev_activity_name: str = None) -> dict:
     return act
 
 
-def create_copy_pipeline(token: str, copy_stages: list) -> requests.Response:
+def create_copy_pipeline(token: str, copy_stages: list, file_format: str = "csv") -> requests.Response:
     activities, prev = [], None
     for stage in copy_stages:
-        activities.append(_copy_activity(stage, prev))
+        activities.append(_copy_activity(stage, prev, file_format))
         prev = stage["name"]
     body = {"properties": {"activities": activities}}
     return adf_put(token, "pipelines", COPY_PIPELINE_NAME, body)
@@ -568,6 +606,7 @@ def execute_pipeline(csv_path: str, pipeline_config: dict, schema: dict, progres
 
     raw_container = pipeline_config["containers_to_create"][0]
     input_ext = os.path.splitext(csv_path)[1].lower().lstrip(".") or "csv"
+    file_format = "json" if input_ext in ("json", "jsonl", "ndjson") else "csv"
     _step(f"Uploading {input_ext.upper()} input to '{raw_container}'")
     upload_input_file(csv_path, raw_container)
     if not check_blob_has_rows(raw_container):
@@ -578,7 +617,7 @@ def execute_pipeline(csv_path: str, pipeline_config: dict, schema: dict, progres
         _step(f"Uploading {len(notebook_stages)} notebook(s) to Databricks workspace")
         ensure_workspace_dir(DATABRICKS_NOTEBOOK_BASE)
         for stage in notebook_stages:
-            source = build_notebook_source(stage, AZURE_STORAGE_ACCOUNT)
+            source = build_notebook_source(stage, AZURE_STORAGE_ACCOUNT, file_format)
             wpath  = f"{DATABRICKS_NOTEBOOK_BASE.rstrip('/')}/{stage['name']}"
             upload_notebook(wpath, source)
             notebook_paths[stage["name"]] = wpath
@@ -597,12 +636,12 @@ def execute_pipeline(csv_path: str, pipeline_config: dict, schema: dict, progres
                     "message": f"Copy stage references datasets not defined in config: {sorted(missing_ds)}"}
         for ds in pipeline_config.get("datasets", []):
             if ds["name"] in copy_dataset_names:
-                r = create_dataset(token, ds)
+                r = create_dataset(token, ds, file_format)
                 if r.status_code not in (200, 201):
                     return {"status": "failed", "message": f"Dataset '{ds['name']}' creation failed"}
 
         _step("Creating and triggering ADF copy pipeline")
-        r = create_copy_pipeline(token, copy_stages)
+        r = create_copy_pipeline(token, copy_stages, file_format)
         if r.status_code not in (200, 201):
             return {"status": "failed", "message": "Copy pipeline creation failed"}
 

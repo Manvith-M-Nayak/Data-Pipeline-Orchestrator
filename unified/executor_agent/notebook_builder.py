@@ -312,17 +312,19 @@ NOTEBOOK_HEADER = "# Databricks notebook source\n"
 CELL_SEP = "\n# COMMAND ----------\n\n"
 
 
-def build_notebook_source(stage: dict, storage_account: str) -> str:
+def build_notebook_source(stage: dict, storage_account: str, file_format: str = "csv") -> str:
     """
     Generate a Databricks notebook (.py source format) for a notebook stage.
 
     The notebook:
       1. Pulls widget params: storage_key, run_id, stage_name
       2. Configures Spark to read/write wasbs:// with the supplied account key
-      3. Reads all CSVs from stage['source_container']
+      3. Reads all CSV and JSON (array / NDJSON) blobs from stage['source_container']
       4. Applies transformations (ADF-DSL → PySpark via _convert_expr)
       5. Applies optional filter_condition
-      6. Writes the result to stage['sink_container'] as a single CSV
+      6. Writes the result to stage['sink_container'] as a single file in
+         `file_format` ("csv" or "json") — the pipeline's input format is
+         preserved end-to-end
       7. Calls dbutils.notebook.exit() with a short JSON status string
     """
     source_container = stage["source_container"]
@@ -381,6 +383,7 @@ def build_notebook_source(stage: dict, storage_account: str) -> str:
         f'SOURCE_CONTAINER = "{source_container}"\n'
         f'SINK_CONTAINER   = "{sink_container}"\n'
         f'SHUFFLE_PARTITIONS = {shuffle_parts}\n'
+        f'OUTPUT_FORMAT    = "{ "json" if file_format == "json" else "csv" }"\n'
     )
 
     # ── Cell 2: SDK client + Spark config ─────────────────────────────────
@@ -396,15 +399,29 @@ def build_notebook_source(stage: dict, storage_account: str) -> str:
 
     # ── Cell 3: read source blobs via SDK → Spark DataFrame ───────────────
     cell_read = (
+        "def _load_json_frame(_raw):\n"
+        "    # Accepts a JSON array of objects, a single object, or NDJSON\n"
+        "    try:\n"
+        "        _doc = json.loads(_raw)\n"
+        "        if isinstance(_doc, dict):\n"
+        "            _doc = [_doc]\n"
+        "        return pd.DataFrame(_doc)\n"
+        "    except ValueError:\n"
+        "        return pd.read_json(io.BytesIO(_raw), lines=True)\n"
+        "\n"
         "_src_container = _blob_svc.get_container_client(SOURCE_CONTAINER)\n"
-        "_csv_frames = []\n"
+        "_frames = []\n"
         "for _blob in _src_container.list_blobs():\n"
-        "    if _blob.name.lower().endswith(\".csv\"):\n"
+        "    _name = _blob.name.lower()\n"
+        "    if _name.endswith(\".csv\"):\n"
         "        _data = _src_container.download_blob(_blob.name).readall()\n"
-        "        _csv_frames.append(pd.read_csv(io.BytesIO(_data)))\n"
-        "if not _csv_frames:\n"
-        "    raise RuntimeError(f\"No CSV files found in container '{SOURCE_CONTAINER}'\")\n"
-        "_pdf = pd.concat(_csv_frames, ignore_index=True)\n"
+        "        _frames.append(pd.read_csv(io.BytesIO(_data)))\n"
+        "    elif _name.endswith((\".json\", \".jsonl\", \".ndjson\")):\n"
+        "        _data = _src_container.download_blob(_blob.name).readall()\n"
+        "        _frames.append(_load_json_frame(_data))\n"
+        "if not _frames:\n"
+        "    raise RuntimeError(f\"No CSV/JSON files found in container '{SOURCE_CONTAINER}'\")\n"
+        "_pdf = pd.concat(_frames, ignore_index=True)\n"
         "df = spark.createDataFrame(_pdf)\n"
         "print(f\"[{stage_name}] read {df.count()} rows, {len(df.columns)} cols from {SOURCE_CONTAINER}\")\n"
     )
@@ -445,19 +462,23 @@ def build_notebook_source(stage: dict, storage_account: str) -> str:
         cell_agg = "# no aggregation configured for this stage\n"
 
     # ── Cell 6: write via SDK + exit ─────────────────────────────────────
-    # toPandas() → CSV bytes → upload. Avoids wasbs:// writer in serverless.
+    # toPandas() → CSV/JSON bytes → upload. Avoids wasbs:// writer in serverless.
     cell_write = (
         "written = df.count()\n"
-        "_output_bytes = df.toPandas().to_csv(index=False).encode(\"utf-8\")\n"
+        "if OUTPUT_FORMAT == \"json\":\n"
+        "    _output_bytes = df.toPandas().to_json(orient=\"records\", indent=2).encode(\"utf-8\")\n"
+        "else:\n"
+        "    _output_bytes = df.toPandas().to_csv(index=False).encode(\"utf-8\")\n"
+        "_output_name = f\"output/part-0000.{OUTPUT_FORMAT}\"\n"
         "_sink_container = _blob_svc.get_container_client(SINK_CONTAINER)\n"
         "try:\n"
         "    _sink_container.create_container()\n"
         "except Exception:\n"
         "    pass  # container may already exist\n"
         "_sink_container.upload_blob(\n"
-        "    \"output/part-0000.csv\", _output_bytes, overwrite=True\n"
+        "    _output_name, _output_bytes, overwrite=True\n"
         ")\n"
-        "print(f\"[{stage_name}] wrote {written} rows to {SINK_CONTAINER}/output/part-0000.csv\")\n"
+        "print(f\"[{stage_name}] wrote {written} rows to {SINK_CONTAINER}/{_output_name}\")\n"
         "dbutils.notebook.exit(json.dumps({\n"
         "    \"status\":      \"succeeded\",\n"
         "    \"stage\":       stage_name,\n"
