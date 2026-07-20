@@ -41,11 +41,15 @@ async def start_managed_run(
     except Exception as exc:
         print(f"[manager] execution_groups sanitize skipped: {exc}")
 
-    # Write CSV to a temp dir keeping the original filename — it becomes the
-    # blob name in the source container (executor needs a file path).
+    # Write the input to a temp dir keeping the original filename — it becomes
+    # the blob name in the source container (executor needs a file path).
+    # CSV and JSON (array-of-objects / NDJSON) are both supported; the file
+    # extension carries the format through to the executor.
     orig_name = os.path.basename(csv_file.filename or "") or "input.csv"
-    if not orig_name.lower().endswith(".csv"):
-        orig_name += ".csv"
+    if not orig_name.lower().endswith((".csv", ".json", ".jsonl", ".ndjson")):
+        # No usable extension — sniff content to pick one
+        head = contents.lstrip()[:1]
+        orig_name += ".json" if head in (b"{", b"[") else ".csv"
     tmp_dir  = tempfile.mkdtemp(prefix="manager_")
     tmp_path = os.path.join(tmp_dir, orig_name)
     with open(tmp_path, "wb") as f:

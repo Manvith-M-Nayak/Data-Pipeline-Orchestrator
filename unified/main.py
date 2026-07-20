@@ -161,6 +161,73 @@ def _infer_type(values: list) -> str:
     return "string"
 
 
+def _infer_json_type(values: list) -> str:
+    """Infer a column type from native JSON values (already typed)."""
+    non_null = [v for v in values if v is not None and v != ""]
+    if not non_null:
+        return "string"
+    n = len(non_null)
+    # bool is a subclass of int — exclude it explicitly
+    ints = sum(isinstance(v, int) and not isinstance(v, bool) for v in non_null)
+    floats = sum(isinstance(v, float) for v in non_null)
+    if ints / n > 0.8:
+        return "integer"
+    if (ints + floats) / n > 0.8:
+        return "double"
+    # Numeric strings ("42", "3.14") get the same treatment as CSV cells
+    strs = [str(v) for v in non_null if isinstance(v, str)]
+    if len(strs) == n:
+        return _infer_type(strs)
+    return "string"
+
+
+def detect_file_format(filename: str, text: str) -> str:
+    """'json' or 'csv', by extension first, content sniff as fallback."""
+    name = (filename or "").lower()
+    if name.endswith(".json") or name.endswith(".jsonl") or name.endswith(".ndjson"):
+        return "json"
+    if name.endswith(".csv"):
+        return "csv"
+    head = text.lstrip()[:1]
+    return "json" if head in ("{", "[") else "csv"
+
+
+def _parse_json_rows(text: str, sample_limit: int = 200):
+    """Parse a JSON array-of-objects, a single object, or NDJSON.
+
+    Returns (sample_rows, row_count). Raises ValueError if nothing parses.
+    """
+    stripped = text.strip()
+    if not stripped:
+        return [], 0
+    # Whole-document parse: array of objects or single object
+    try:
+        doc = json.loads(stripped)
+        if isinstance(doc, dict):
+            doc = [doc]
+        if isinstance(doc, list):
+            rows = [r for r in doc if isinstance(r, dict)]
+            if not rows and doc:
+                raise ValueError("JSON array does not contain objects")
+            return rows[:sample_limit], len(rows)
+        raise ValueError("JSON root must be an object or an array of objects")
+    except json.JSONDecodeError:
+        pass
+    # NDJSON: one object per line
+    sample, row_count = [], 0
+    for line in io.StringIO(stripped):
+        line = line.strip()
+        if not line:
+            continue
+        row = json.loads(line)  # raise on first malformed line
+        if not isinstance(row, dict):
+            raise ValueError("NDJSON lines must be JSON objects")
+        row_count += 1
+        if len(sample) < sample_limit:
+            sample.append(row)
+    return sample, row_count
+
+
 @app.post("/api/schema/detect", tags=["schema"])
 async def detect_schema(csv_file: UploadFile = File(...)):
     contents = await csv_file.read()
@@ -172,13 +239,36 @@ async def detect_schema(csv_file: UploadFile = File(...)):
         "xlarge (> 200MB)"
     )
     text = contents.decode("utf-8", errors="replace")
-    reader = csv.DictReader(io.StringIO(text))
-    # Count every row; keep only the first 200 in memory for type inference.
-    sample, row_count = [], 0
-    for row in reader:
-        row_count += 1
-        if len(sample) < 200:
-            sample.append(row)
+    file_format = detect_file_format(csv_file.filename, text)
+
+    if file_format == "json":
+        try:
+            sample, row_count = _parse_json_rows(text)
+        except (ValueError, json.JSONDecodeError) as exc:
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=422, detail=f"Invalid JSON file: {exc}")
+        # Union of keys across the sample — JSON rows may be sparse
+        headers: list = []
+        for r in sample:
+            for k in r.keys():
+                if k not in headers:
+                    headers.append(k)
+        columns = {
+            col: _infer_json_type([r.get(col) for r in sample]) for col in headers
+        }
+    else:
+        reader = csv.DictReader(io.StringIO(text))
+        # Count every row; keep only the first 200 in memory for type inference.
+        sample, row_count = [], 0
+        for row in reader:
+            row_count += 1
+            if len(sample) < 200:
+                sample.append(row)
+        headers = list(sample[0].keys()) if sample else []
+        columns = {
+            col: _infer_type([r.get(col, "") for r in sample]) for col in headers
+        }
 
     if not sample:
         return {
@@ -188,10 +278,9 @@ async def detect_schema(csv_file: UploadFile = File(...)):
             "row_count_sample": 0,
             "column_count": 0,
             "size_hint": size_hint,
+            "file_format": file_format,
         }
 
-    headers = list(sample[0].keys())
-    columns = {col: _infer_type([r.get(col, "") for r in sample]) for col in headers}
     preview = [{k: r.get(k, "") for k in headers} for r in sample[:6]]
 
     return {
@@ -201,6 +290,7 @@ async def detect_schema(csv_file: UploadFile = File(...)):
         "row_count_sample": len(sample),
         "column_count": len(headers),
         "size_hint": size_hint,
+        "file_format": file_format,
     }
 
 

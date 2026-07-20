@@ -107,15 +107,24 @@ def purge_container(container_name: str):
         raise
 
 
-def upload_csv(filepath: str, container_name: str) -> str:
+INPUT_EXTENSIONS = (".csv", ".json", ".jsonl", ".ndjson")
+
+
+def upload_input_file(filepath: str, container_name: str) -> str:
     filename = os.path.basename(filepath)
-    if filename.startswith("*") or not filename.lower().endswith(".csv"):
-        raise ValueError(f"Invalid CSV filename '{filename}'")
+    if filename.startswith("*") or not filename.lower().endswith(INPUT_EXTENSIONS):
+        raise ValueError(
+            f"Invalid input filename '{filename}' — expected one of {INPUT_EXTENSIONS}"
+        )
     container = _blob_service_client().get_container_client(container_name)
     with open(filepath, "rb") as f:
         container.upload_blob(name=filename, data=f, overwrite=True)
     print(f"   '{filename}' uploaded to '{container_name}'")
     return filename
+
+
+# Backwards-compatible alias — external callers may still import upload_csv
+upload_csv = upload_input_file
 
 
 def check_blob_has_rows(container_name: str) -> bool:
@@ -558,8 +567,9 @@ def execute_pipeline(csv_path: str, pipeline_config: dict, schema: dict, progres
         purge_container(name)
 
     raw_container = pipeline_config["containers_to_create"][0]
-    _step(f"Uploading CSV to '{raw_container}'")
-    upload_csv(csv_path, raw_container)
+    input_ext = os.path.splitext(csv_path)[1].lower().lstrip(".") or "csv"
+    _step(f"Uploading {input_ext.upper()} input to '{raw_container}'")
+    upload_input_file(csv_path, raw_container)
     if not check_blob_has_rows(raw_container):
         return {"status": "failed", "message": f"Upload verification failed on '{raw_container}'"}
 
