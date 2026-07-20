@@ -29,7 +29,7 @@ from config import (
     DATABRICKS_NOTEBOOK_BASE,
 )
 
-from .notebook_builder import build_notebook_source
+from .notebook_builder import build_notebook_source, UnsupportedTransformError
 
 
 ADF_API_VERSION       = "2018-06-01"
@@ -595,6 +595,24 @@ def execute_pipeline(csv_path: str, pipeline_config: dict, schema: dict, progres
             return {"status": "failed",
                     "message": f"Notebook stage '{s.get('name', '?')}' missing source_container/sink_container"}
 
+    input_ext = os.path.splitext(csv_path)[1].lower().lstrip(".") or "csv"
+    file_format = "json" if input_ext in ("json", "jsonl", "ndjson") else "csv"
+
+    # Build all notebook sources BEFORE any cloud call — a malformed
+    # transform/filter from the planner fails here for free, not as a
+    # SyntaxError inside a running (paid) Databricks job.
+    notebook_sources: dict = {}
+    if notebook_stages:
+        _step("Building notebook sources")
+        try:
+            for stage in notebook_stages:
+                notebook_sources[stage["name"]] = build_notebook_source(
+                    stage, AZURE_STORAGE_ACCOUNT, file_format
+                )
+        except (UnsupportedTransformError, ValueError) as exc:
+            return {"status": "failed",
+                    "message": f"Plan cannot be compiled to a notebook: {exc}"}
+
     _step("Authenticating with Azure")
     token = get_azure_token()
 
@@ -605,8 +623,6 @@ def execute_pipeline(csv_path: str, pipeline_config: dict, schema: dict, progres
         purge_container(name)
 
     raw_container = pipeline_config["containers_to_create"][0]
-    input_ext = os.path.splitext(csv_path)[1].lower().lstrip(".") or "csv"
-    file_format = "json" if input_ext in ("json", "jsonl", "ndjson") else "csv"
     _step(f"Uploading {input_ext.upper()} input to '{raw_container}'")
     upload_input_file(csv_path, raw_container)
     if not check_blob_has_rows(raw_container):
@@ -617,9 +633,8 @@ def execute_pipeline(csv_path: str, pipeline_config: dict, schema: dict, progres
         _step(f"Uploading {len(notebook_stages)} notebook(s) to Databricks workspace")
         ensure_workspace_dir(DATABRICKS_NOTEBOOK_BASE)
         for stage in notebook_stages:
-            source = build_notebook_source(stage, AZURE_STORAGE_ACCOUNT, file_format)
-            wpath  = f"{DATABRICKS_NOTEBOOK_BASE.rstrip('/')}/{stage['name']}"
-            upload_notebook(wpath, source)
+            wpath = f"{DATABRICKS_NOTEBOOK_BASE.rstrip('/')}/{stage['name']}"
+            upload_notebook(wpath, notebook_sources[stage["name"]])
             notebook_paths[stage["name"]] = wpath
 
     # ── ADF path (Copy activities only) ──────────────────────────────────────

@@ -192,6 +192,10 @@ def _convert_filter(expr: str) -> str:
                                         price between 10 and 50
     """
     e = expr.strip()
+    # The planner occasionally glues JSON config fragments onto the condition
+    # (e.g. "customer like '%alice%','num_workers':1,"). A dict-style
+    # key:value tail is never valid filter SQL — strip it before matching.
+    e = re.sub(r""",\s*['"]?\w+['"]?\s*:.*$""", "", e).strip().rstrip(",").strip()
     _NUM = r"-?\d+(?:\.\d+)?"
 
     # SQL-style: col BETWEEN a AND b
@@ -251,7 +255,20 @@ def _convert_filter(expr: str) -> str:
     for pattern, replacement in patterns:
         if re.match(pattern, e, re.IGNORECASE):
             return re.sub(pattern, replacement, e, flags=re.IGNORECASE)
-    return _convert_expr(e)
+    result = _convert_expr(e)
+    # Guard: the converted filter must at least be valid Python. Catching it
+    # here fails the run at plan-build time, before any cloud job is created —
+    # not with a SyntaxError inside a running Databricks notebook.
+    try:
+        compile(result, "<filter_condition>", "eval")
+    except SyntaxError:
+        raise UnsupportedTransformError(
+            f"filter_condition {expr!r} could not be converted to a valid "
+            f"PySpark expression (got: {result!r}). Use a supported form, "
+            f"e.g. \"col = value\", \"col > n\", \"col like '%x%'\", "
+            f"\"col in (...)\", \"col between a and b\"."
+        )
+    return result
 
 
 def _parse_transform(entry: str) -> tuple:
