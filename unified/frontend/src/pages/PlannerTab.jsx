@@ -157,14 +157,15 @@ export default function PlannerTab() {
     containerNameCount > 0 && (numStages === null || containerNameCount !== numStages);
 
   async function handleFile(file) {
-    if (!file?.name.endsWith(".csv")) { setError("Upload a .csv file."); return; }
+    const ok = /\.(csv|json|jsonl|ndjson)$/i.test(file?.name || "");
+    if (!ok) { setError("Upload a .csv or .json file."); return; }
     setError(""); setCsvFile(file); setDetecting(true); setDetected(null); setPlan(null);
     try {
       const result = await schemaApi.detect(file);
       setDetected(result);
       // persist schema columns for executor
       try { localStorage.setItem("last_csv_schema", JSON.stringify(result.columns)); } catch {}
-    } catch (e) { setError("Could not read CSV: " + e.message); }
+    } catch (e) { setError("Could not read file: " + e.message); }
     finally { setDetecting(false); }
   }
 
@@ -274,8 +275,8 @@ export default function PlannerTab() {
 
       {/* Upload */}
       <div style={C.card}>
-        <div style={C.cardHdr}><Upload size={16} color="#38bdf8" />Upload CSV</div>
-        <div style={C.cardSub}>Drop any CSV — column names and types detected automatically.</div>
+        <div style={C.cardHdr}><Upload size={16} color="#38bdf8" />Upload Data File</div>
+        <div style={C.cardSub}>Drop a CSV or JSON file — column names and types detected automatically.</div>
         <div
           style={C.drop(dragging, !!csvFile)}
           onClick={() => fileRef.current.click()}
@@ -283,7 +284,7 @@ export default function PlannerTab() {
           onDragLeave={() => setDragging(false)}
           onDrop={onDrop}
         >
-          <input ref={fileRef} type="file" accept=".csv" hidden onChange={(e) => handleFile(e.target.files[0])} />
+          <input ref={fileRef} type="file" accept=".csv,.json,.jsonl,.ndjson" hidden onChange={(e) => handleFile(e.target.files[0])} />
           <Upload size={32} color={csvFile ? "#22c55e" : dragging ? "#3b82f6" : "#334155"} style={{ marginBottom: 10 }} />
           {detecting ? (
             <div style={{ fontSize: 14, color: "#94a3b8" }}>Detecting schema… <Spinner /></div>
@@ -298,8 +299,8 @@ export default function PlannerTab() {
             </div>
           ) : (
             <>
-              <div style={{ fontSize: 14, color: "#64748b", fontWeight: 600 }}>Click or drag-and-drop your CSV</div>
-              <div style={{ fontSize: 12, color: "#475569" }}>Any CSV with a header row</div>
+              <div style={{ fontSize: 14, color: "#64748b", fontWeight: 600 }}>Click or drag-and-drop your CSV or JSON</div>
+              <div style={{ fontSize: 12, color: "#475569" }}>CSV with a header row · JSON array of objects · NDJSON</div>
             </>
           )}
         </div>

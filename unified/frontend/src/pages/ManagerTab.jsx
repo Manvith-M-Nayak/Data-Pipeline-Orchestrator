@@ -700,7 +700,7 @@ export default function ManagerTab() {
             </>
           ) : (
             <div style={{ fontSize: 13, color: "#64748b" }}>
-              No CSV — upload one in{" "}
+              No data file — upload one in{" "}
               <button onClick={() => navigate("/planner")} style={{ color: "#818cf8", background: "none", border: "none", cursor: "pointer", fontSize: 13 }}>
                 Planner
               </button>{" "}or{" "}
@@ -819,7 +819,7 @@ export default function ManagerTab() {
                       download
                       style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 12px", background: "#0ea5e9", color: "#fff", borderRadius: 8, fontSize: 12, fontWeight: 600, textDecoration: "none" }}
                     >
-                      <Download size={12} /> Download CSV
+                      <Download size={12} /> Download output
                     </a>
                   )}
                 </div>
@@ -893,7 +893,7 @@ export default function ManagerTab() {
             Central Manager ready
           </div>
           <div style={{ fontSize: 12, color: "#334155" }}>
-            Requires a plan from Planner Agent and a CSV file.
+            Requires a plan from Planner Agent and a data file (CSV or JSON).
             {!savedPlan && (
               <> <button onClick={() => navigate("/planner")} style={{ color: "#818cf8", background: "none", border: "none", cursor: "pointer", fontSize: 12 }}>Generate a plan →</button></>
             )}

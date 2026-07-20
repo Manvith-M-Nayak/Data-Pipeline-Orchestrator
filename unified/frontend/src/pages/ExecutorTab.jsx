@@ -95,7 +95,7 @@ const STEP_MATCHERS = [
   (t) => t.includes("validating plan") || t.includes("assurance agent") || t.includes("resource prediction") || t.includes("handing off"),
   (t) => t.includes("authenticating"),
   (t) => t.includes("creating storage"),
-  (t) => t.includes("uploading csv"),
+  (t) => t.includes("uploading csv") || t.includes("input to"),
   (t) => t.includes("notebook(s)"),
   (t) => t.includes("linked service") || t.includes("copy pipeline"),
   (t) => t.includes("stage group") || t.includes("monitoring databricks") || t.includes("running notebook"),
@@ -302,8 +302,8 @@ export default function ExecutorTab() {
       {/* CSV upload */}
       {savedPlan && (
         <div style={C.card}>
-          <div style={C.cardHdr}><Upload size={16} color="#38bdf8" />CSV File</div>
-          <input ref={fileRef} type="file" accept=".csv" hidden onChange={(e) => { const f = e.target.files[0]; setCsvFile(f); }} />
+          <div style={C.cardHdr}><Upload size={16} color="#38bdf8" />Data File</div>
+          <input ref={fileRef} type="file" accept=".csv,.json,.jsonl,.ndjson" hidden onChange={(e) => { const f = e.target.files[0]; setCsvFile(f); }} />
 
           {csvFile ? (
             /* File already loaded — from Planner or previous upload */
@@ -332,7 +332,7 @@ export default function ExecutorTab() {
               onDrop={onDrop}
             >
               <Upload size={28} color="#334155" style={{ marginBottom: 8 }} />
-              <div style={{ fontSize: 13, color: "#64748b" }}>Click or drag your CSV here</div>
+              <div style={{ fontSize: 13, color: "#64748b" }}>Click or drag your CSV or JSON here</div>
             </div>
           )}
         </div>
@@ -403,7 +403,7 @@ export default function ExecutorTab() {
                           background: "#0ea5e9", color: "#fff", borderRadius: 8, fontSize: 12,
                           fontWeight: 600, textDecoration: "none" }}
                       >
-                        <Download size={13} /> Download output CSV
+                        <Download size={13} /> Download output
                       </a>
                     )}
                   </div>
