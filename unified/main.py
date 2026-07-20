@@ -296,7 +296,7 @@ async def detect_schema(csv_file: UploadFile = File(...)):
 
 @app.get("/api/executor/download/{container}", tags=["executor"])
 async def download_output(container: str):
-    """Stream the first non-empty CSV blob from the given sink container."""
+    """Stream the first non-empty CSV or JSON blob from the given sink container."""
     from fastapi.responses import StreamingResponse
     from azure.storage.blob import BlobServiceClient
     import config as _cfg
@@ -310,10 +310,14 @@ async def download_output(container: str):
     client = BlobServiceClient.from_connection_string(conn)
     container_client = client.get_container_client(container)
 
-    # Find first .csv blob that has content
+    # Find first .csv or .json blob that has content
     target = None
     for blob in container_client.list_blobs():
-        if blob.name.endswith(".csv") and blob.size and blob.size > 0:
+        if (
+            blob.name.lower().endswith((".csv", ".json", ".jsonl", ".ndjson"))
+            and blob.size
+            and blob.size > 0
+        ):
             target = blob.name
             break
 
@@ -321,7 +325,7 @@ async def download_output(container: str):
         from fastapi import HTTPException
 
         raise HTTPException(
-            status_code=404, detail=f"No output CSV found in '{container}'"
+            status_code=404, detail=f"No output CSV/JSON found in '{container}'"
         )
 
     blob_client = container_client.get_blob_client(target)
@@ -331,10 +335,12 @@ async def download_output(container: str):
         for chunk in stream.chunks():
             yield chunk
 
-    filename = f"{container}-output.csv"
+    ext = os.path.splitext(target)[1].lower() or ".csv"
+    media_type = "text/csv" if ext == ".csv" else "application/json"
+    filename = f"{container}-output{ext}"
     return StreamingResponse(
         _stream(),
-        media_type="text/csv",
+        media_type=media_type,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
