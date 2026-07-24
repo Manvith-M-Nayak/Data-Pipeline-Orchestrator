@@ -6,6 +6,7 @@ import time
 
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 
+from background import spawn
 from .manager import CentralManager
 
 router = APIRouter()
@@ -81,7 +82,7 @@ async def start_managed_run(
             except OSError:
                 pass
 
-    asyncio.create_task(_task())
+    spawn(_task(), name=f"manager.run:{run_id}")
     return {"run_id": run_id, "status": "started"}
 
 

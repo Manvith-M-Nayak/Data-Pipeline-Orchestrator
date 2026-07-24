@@ -41,7 +41,10 @@ _DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 
 
 def _utcnow() -> str:
-    return datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    return (
+        datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
+        + "Z"
+    )
 
 
 # ── RunState — single source of truth for one managed run ───────────────────

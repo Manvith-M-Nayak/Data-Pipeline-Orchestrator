@@ -28,6 +28,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 
 from app_security import APIKeyMiddleware, read_upload_capped
+from background import spawn
 from performance_prediction_agent.router import router as perf_router
 from learning_policy_agent.router import router as learning_router
 
@@ -87,8 +88,11 @@ monitor_service = MonitorService(adf_service, db_service, groq_service)
 async def lifespan(app: FastAPI):
     _deps.init(adf_service, db_service, groq_service, monitor_service)
     await db_service.initialize()
-    asyncio.create_task(monitor_service.start_polling())
-    asyncio.create_task(monitor_service.backfill_missing_analyses(limit=75))
+    spawn(monitor_service.start_polling(), name="monitor.start_polling")
+    spawn(
+        monitor_service.backfill_missing_analyses(limit=75),
+        name="monitor.backfill_missing_analyses",
+    )
     yield
 
 
@@ -397,5 +401,7 @@ async def websocket_live(websocket: WebSocket):
     try:
         while True:
             await websocket.receive_text()
-    except (WebSocketDisconnect, Exception):
+    except WebSocketDisconnect:
+        pass
+    finally:
         monitor_service.ws_clients.discard(websocket)

@@ -9,6 +9,8 @@ from .adf_service  import ADFService
 from .db_service   import DBService
 from .groq_service import GroqService
 
+from background import spawn
+
 POLL_INTERVAL_SEC    = 20
 ANALYSIS_CONCURRENCY = 3
 
@@ -49,7 +51,7 @@ class MonitorService:
 
         for run_id in set(self._tracked) - live_ids:
             self._anomaly_verdicts.pop(run_id, None)
-            asyncio.create_task(self._handle_completed_run(self._tracked.pop(run_id)))
+            spawn(self._handle_completed_run(self._tracked.pop(run_id)))
 
         for run in live_runs:
             run_id = run["runId"]
@@ -95,7 +97,7 @@ class MonitorService:
         except Exception as exc:
             print(f"[monitor] completed-run fetch failed for {run_id}: {exc}")
             return
-        asyncio.create_task(
+        spawn(
             self._analyze(run_id, pipeline_name, final, activities, stats)
         )
 
@@ -120,7 +122,7 @@ class MonitorService:
             await self._db.upsert_run(run)
             if run.get("status") in ("Succeeded", "Failed"):
                 if not await self._db.analysis_exists(run["runId"]):
-                    asyncio.create_task(self._handle_completed_run(run))
+                    spawn(self._handle_completed_run(run))
         return len(runs)
 
     async def backfill_missing_analyses(self, limit: int = 50):
@@ -130,7 +132,7 @@ class MonitorService:
                 full  = await self._adf.get_pipeline_run(run["run_id"])
                 acts  = await self._adf.get_activity_runs(run["run_id"])
                 stats = await self._db.get_historical_stats(run["pipeline_name"])
-                asyncio.create_task(
+                spawn(
                     self._analyze(run["run_id"], run["pipeline_name"], full, acts, stats)
                 )
             except Exception:

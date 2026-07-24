@@ -523,9 +523,17 @@ print(f"  Time: {t_cv:.1f}s")
 print("\n" + "="*60)
 print("STEP 7: Saving models...")
 print("="*60)
-joblib.dump(reg, "models/duration_regressor.pkl")
-joblib.dump(clf, "models/outcome_classifier.pkl")
-joblib.dump(encoder, "models/feature_encoder.pkl")
+def _atomic_dump(obj, path):
+    # Write to a temp file then rename — a concurrent reader (the running
+    # server loading models) never sees a half-written .pkl.
+    tmp = f"{path}.tmp"
+    joblib.dump(obj, tmp)
+    os.replace(tmp, path)
+
+
+_atomic_dump(reg, "models/duration_regressor.pkl")
+_atomic_dump(clf, "models/outcome_classifier.pkl")
+_atomic_dump(encoder, "models/feature_encoder.pkl")
 
 metrics = {
     "duration_regressor": {"mae_seconds": round(mae, 2), "r2_score": round(r2, 4), "training_time_s": round(t_reg, 1)},
