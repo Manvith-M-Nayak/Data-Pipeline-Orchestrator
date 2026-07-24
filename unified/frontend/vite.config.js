@@ -6,7 +6,10 @@ import react from "@vitejs/plugin-react";
 // static build behind a reverse proxy that routes /api and /ws — see README.md.
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
-  const apiTarget = env.VITE_API_PROXY || "http://localhost:8000";
+  // Use explicit 127.0.0.1 (not "localhost"): Node resolves "localhost" to IPv6
+  // ::1 first, but uvicorn --host 127.0.0.1 binds IPv4 only, so a "localhost"
+  // target makes the proxy hit ::1:8000 and fail. IPv4 is deterministic.
+  const apiTarget = env.VITE_API_PROXY || "http://127.0.0.1:8000";
   const wsTarget = apiTarget.replace(/^http/, "ws");
   return {
     plugins: [react()],
