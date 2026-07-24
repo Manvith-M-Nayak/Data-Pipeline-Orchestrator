@@ -15,8 +15,20 @@ import json
 import os
 from contextlib import asynccontextmanager
 
+# Load a .env file (if present) into the environment BEFORE any service reads
+# os.getenv — this is the preferred secret store over the plaintext config.py.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except ImportError:
+    pass  # python-dotenv optional; fall back to real env vars / config.py
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+
+from app_security import APIKeyMiddleware, read_upload_capped
+from background import spawn
 from performance_prediction_agent.router import router as perf_router
 from learning_policy_agent.router import router as learning_router
 
@@ -76,19 +88,58 @@ monitor_service = MonitorService(adf_service, db_service, groq_service)
 async def lifespan(app: FastAPI):
     _deps.init(adf_service, db_service, groq_service, monitor_service)
     await db_service.initialize()
-    asyncio.create_task(monitor_service.start_polling())
-    asyncio.create_task(monitor_service.backfill_missing_analyses(limit=75))
+    # A run left mid-flight by the previous process can never finish — mark
+    # those persisted runs failed so the UI shows a terminal state, not a spinner.
+    try:
+        n = await db_service.mark_interrupted_manager_runs()
+        if n:
+            print(f"[startup] marked {n} interrupted manager run(s) as failed")
+    except Exception as exc:
+        print(f"[startup] interrupted-run sweep skipped: {exc}")
+    spawn(monitor_service.start_polling(), name="monitor.start_polling")
+    spawn(
+        monitor_service.backfill_missing_analyses(limit=75),
+        name="monitor.backfill_missing_analyses",
+    )
     yield
 
 
 app = FastAPI(title="Unified Agent Backend", version="1.0.0", lifespan=lifespan)
 
+# ── Auth ─────────────────────────────────────────────────────────────────────
+# Enforced only when API_KEY is set, so local dev stays frictionless. Added
+# before CORS so CORS remains the outermost layer (handles preflight OPTIONS).
+_API_KEY = os.getenv("API_KEY", "").strip()
+if _API_KEY:
+    app.add_middleware(APIKeyMiddleware, api_key=_API_KEY)
+else:
+    print(
+        "[security] WARNING: API_KEY not set — API authentication is DISABLED. "
+        "Set the API_KEY env var to require an x-api-key header on all requests."
+    )
+
+# ── CORS ─────────────────────────────────────────────────────────────────────
+_allowed_origins = [
+    o.strip()
+    for o in os.getenv(
+        "ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:3000"
+    ).split(",")
+    if o.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_allowed_origins,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Containers the download endpoint is permitted to read (empty = unrestricted).
+_DOWNLOAD_ALLOWLIST = [
+    c.strip()
+    for c in os.getenv("DOWNLOAD_CONTAINER_ALLOWLIST", "").split(",")
+    if c.strip()
+]
 
 # ── Routers ─────────────────────────────────────────────────────────────────
 app.include_router(planner_router, prefix="/api/planner", tags=["planner"])
@@ -230,7 +281,7 @@ def _parse_json_rows(text: str, sample_limit: int = 200):
 
 @app.post("/api/schema/detect", tags=["schema"])
 async def detect_schema(csv_file: UploadFile = File(...)):
-    contents = await csv_file.read()
+    contents = await read_upload_capped(csv_file)
     size = len(contents)
     size_hint = (
         "small (< 5MB)"    if size < 5_242_880   else
@@ -299,7 +350,13 @@ async def download_output(container: str):
     """Stream the first non-empty CSV or JSON blob from the given sink container."""
     from fastapi.responses import StreamingResponse
     from azure.storage.blob import BlobServiceClient
+    from fastapi import HTTPException
     import config as _cfg
+
+    if _DOWNLOAD_ALLOWLIST and container not in _DOWNLOAD_ALLOWLIST:
+        raise HTTPException(
+            status_code=403, detail=f"Container '{container}' is not downloadable"
+        )
 
     conn = (
         f"DefaultEndpointsProtocol=https;"
@@ -352,5 +409,7 @@ async def websocket_live(websocket: WebSocket):
     try:
         while True:
             await websocket.receive_text()
-    except (WebSocketDisconnect, Exception):
+    except WebSocketDisconnect:
+        pass
+    finally:
         monitor_service.ws_clients.discard(websocket)

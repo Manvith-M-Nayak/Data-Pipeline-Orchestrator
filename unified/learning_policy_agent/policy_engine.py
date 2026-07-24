@@ -130,6 +130,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
 from typing import Dict, List, Optional
 
@@ -195,6 +196,8 @@ class PolicyEngine:
         self.policy_path = policy_path
         self.log_path = log_path
         self.safety = safety or SafetyManager()
+        # Serializes policy saves and log appends across concurrent runs.
+        self._io_lock = threading.Lock()
 
     # ---------------------------------------------------------------- storage
 
@@ -212,13 +215,17 @@ class PolicyEngine:
     def _save(self, policies: Dict):
         policies["updated"] = time.time()
         os.makedirs(os.path.dirname(self.policy_path), exist_ok=True)
-        with open(self.policy_path, "w") as f:
-            json.dump(policies, f, indent=2)
+        # Atomic write: a concurrent reader never sees a half-written file.
+        tmp = f"{self.policy_path}.tmp"
+        with self._io_lock:
+            with open(tmp, "w") as f:
+                json.dump(policies, f, indent=2)
+            os.replace(tmp, self.policy_path)
 
     def _log(self, entry: Dict):
         entry["timestamp"] = time.time()
         os.makedirs(os.path.dirname(self.log_path), exist_ok=True)
-        with open(self.log_path, "a") as f:
+        with self._io_lock, open(self.log_path, "a") as f:
             f.write(json.dumps(entry) + "\n")
 
     def get_log(self, limit: int = 100) -> List[Dict]:

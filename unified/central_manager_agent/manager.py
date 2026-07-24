@@ -41,7 +41,10 @@ _DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 
 
 def _utcnow() -> str:
-    return datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    return (
+        datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
+        + "Z"
+    )
 
 
 # ── RunState — single source of truth for one managed run ───────────────────
@@ -81,6 +84,7 @@ class RunState:
 class CentralManager:
     MAX_RETRIES = 2
     RETRY_BACKOFF_S = [10, 30]  # seconds to wait before retry 1, retry 2
+    MAX_INMEM_RUNS = 200  # cap on _runs; terminal runs beyond this live only in sqlite
 
     def __init__(self):
         self._runs: Dict[str, RunState] = {}
@@ -1137,6 +1141,10 @@ class CentralManager:
         state.user_request = user_request or state.user_request
         t0 = time.time()
 
+        # Persist as in-flight immediately, and again on every exit path
+        # (completion, failure, early return) via the finally below — so a
+        # restart leaves a durable record instead of a 404.
+        await self._persist(state)
         try:
             # ── Phase 1: Validate ────────────────────────────────────────
             state.status = "validating"
@@ -1246,8 +1254,37 @@ class CentralManager:
             self._log(state, "RUN FAILED", str(exc)[:300], "abort", "error")
             try:
                 await self.record_feedback(state, time.time() - t0)
-            except Exception:
-                pass
+            except Exception as fb_exc:
+                print(f"[Manager] feedback during failure handling non-fatal: {fb_exc}")
+        finally:
+            # Runs on every exit — completion, exception, and each early return.
+            await self._persist(state)
+
+    async def _persist(self, state: "RunState") -> None:
+        """Write the run's current state to sqlite (no-op if DB not wired)."""
+        try:
+            from monitor_agent import deps
+
+            db = deps.get_db()
+            if db is not None:
+                await db.save_manager_run(self.get_state_dict(state.run_id))
+                self._prune_memory()
+        except Exception as exc:  # persistence must never break a run
+            print(f"[Manager] persist non-fatal: {exc}")
+
+    def _prune_memory(self) -> None:
+        """Bound in-memory growth: once persisted, terminal runs can be dropped
+        from _runs — /status and /runs fall back to sqlite for them."""
+        if len(self._runs) <= self.MAX_INMEM_RUNS:
+            return
+        terminal = [
+            (r.completed_at or "", rid)
+            for rid, r in self._runs.items()
+            if r.status in ("completed", "failed")
+        ]
+        terminal.sort()  # oldest-completed first
+        for _, rid in terminal[: len(self._runs) - self.MAX_INMEM_RUNS]:
+            self._runs.pop(rid, None)
 
     def get_state_dict(self, run_id: str) -> Optional[dict]:
         state = self._runs.get(run_id)
@@ -1290,6 +1327,6 @@ class CentralManager:
                     line = line.strip()
                     if line:
                         records.append(json.loads(line))
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"[Manager] feedback history read failed: {exc}")
         return records[-50:]  # last 50

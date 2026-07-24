@@ -6,6 +6,7 @@ import time
 
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 
+from background import spawn
 from .manager import CentralManager
 
 router = APIRouter()
@@ -23,7 +24,9 @@ async def start_managed_run(
     Kick off a fully-managed pipeline run.
     Returns run_id immediately; client polls /status/{run_id}.
     """
-    contents = await csv_file.read()
+    from app_security import read_upload_capped
+
+    contents = await read_upload_capped(csv_file)
     csv_size = len(contents)
 
     try:
@@ -79,13 +82,21 @@ async def start_managed_run(
             except OSError:
                 pass
 
-    asyncio.create_task(_task())
+    spawn(_task(), name=f"manager.run:{run_id}")
     return {"run_id": run_id, "status": "started"}
 
 
 @router.get("/status/{run_id}")
 async def run_status(run_id: str):
+    # In-memory is freshest for the live run; fall back to sqlite for runs from
+    # before a restart (otherwise the frontend polling loop 404s on resume).
     state = _manager.get_state_dict(run_id)
+    if state is None:
+        from monitor_agent import deps
+
+        db = deps.get_db()
+        if db is not None:
+            state = await db.get_manager_run(run_id)
     if state is None:
         raise HTTPException(status_code=404, detail="Run not found")
     return state
@@ -93,7 +104,17 @@ async def run_status(run_id: str):
 
 @router.get("/runs")
 async def list_runs():
-    return _manager.list_runs()
+    # Merge live (in-memory) runs with persisted ones; memory wins on conflict.
+    runs = _manager.list_runs()
+    seen = {r["run_id"] for r in runs}
+    from monitor_agent import deps
+
+    db = deps.get_db()
+    if db is not None:
+        for r in await db.list_manager_runs():
+            if r["run_id"] not in seen:
+                runs.append(r)
+    return sorted(runs, key=lambda x: x.get("started_at") or "", reverse=True)
 
 
 @router.get("/feedback")

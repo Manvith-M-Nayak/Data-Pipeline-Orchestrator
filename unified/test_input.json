@@ -1,0 +1,12 @@
+[
+  {"order_id": 1001, "customer": "alice johnson", "region": "north", "product": "laptop", "quantity": 2, "unit_price": 899.99, "order_date": "2026-07-01", "status": "shipped"},
+  {"order_id": 1002, "customer": "bob smith", "region": "south", "product": "monitor", "quantity": 1, "unit_price": 249.5, "order_date": "2026-07-02", "status": "pending"},
+  {"order_id": 1003, "customer": "carol diaz", "region": "east", "product": "keyboard", "quantity": 5, "unit_price": 39.99, "order_date": "2026-07-03", "status": "shipped"},
+  {"order_id": 1004, "customer": "dan lee", "region": "west", "product": "laptop", "quantity": 1, "unit_price": 1199.0, "order_date": "2026-07-05", "status": "delivered"},
+  {"order_id": 1005, "customer": "eve chen", "region": "north", "product": "mouse", "quantity": 3, "unit_price": 19.99, "order_date": "2026-07-06", "status": "shipped"},
+  {"order_id": 1006, "customer": "frank moore", "region": "south", "product": "monitor", "quantity": 2, "unit_price": 249.5, "order_date": "2026-07-08", "status": "cancelled"},
+  {"order_id": 1007, "customer": "grace kim", "region": "east", "product": "laptop", "quantity": 1, "unit_price": 949.0, "order_date": "2026-07-10", "status": "delivered"},
+  {"order_id": 1008, "customer": "hank patel", "region": "west", "product": "keyboard", "quantity": 4, "unit_price": 45.0, "order_date": "2026-07-11", "status": "pending"},
+  {"order_id": 1009, "customer": "iris wong", "region": "north", "product": "mouse", "quantity": 6, "unit_price": 24.99, "order_date": "2026-07-13", "status": "shipped"},
+  {"order_id": 1010, "customer": "jack brown", "region": "south", "product": "laptop", "quantity": 2, "unit_price": 1099.0, "order_date": "2026-07-15", "status": "delivered"}
+]

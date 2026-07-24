@@ -102,7 +102,10 @@ def train(csv_path: str = _DEFAULT_CSV, model_dir: str = _MODEL_DIR) -> dict:
     }
     os.makedirs(model_dir, exist_ok=True)
     bundle_path = os.path.join(model_dir, "resource_models.pkl")
-    joblib.dump(bundle, bundle_path)
+    # Atomic write so the running agent never loads a half-written bundle.
+    _tmp_bundle = bundle_path + ".tmp"
+    joblib.dump(bundle, _tmp_bundle)
+    os.replace(_tmp_bundle, bundle_path)
     with open(os.path.join(model_dir, "metrics.json"), "w") as f:
         json.dump(metrics, f, indent=2)
 

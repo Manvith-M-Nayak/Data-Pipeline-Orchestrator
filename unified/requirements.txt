@@ -27,6 +27,9 @@ azure-storage-blob>=12.20.0
 # File handling
 python-multipart==0.0.9
 
+# Secret loading — reads .env into the environment (preferred over plaintext config.py)
+python-dotenv>=1.0.0
+
 # Machine learning — resource_agent + performance_prediction_agent load trained
 # model bundles (.pkl) at runtime. joblib pickles are tied to the sklearn version
 # that wrote them, so pin sklearn exactly and train (Kaggle notebook / run_training)

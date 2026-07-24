@@ -48,12 +48,15 @@ Student-tier hard limits (Azure free / trial):
 import json
 import math
 import os
+import threading
 import time
 from dataclasses import dataclass, field, asdict
 from typing import Dict, List, Optional, Tuple
 
 _DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 _FEEDBACK_LOG = os.path.join(_DATA_DIR, "resource_feedback.jsonl")
+# Serializes concurrent feedback appends so records from parallel runs don't interleave.
+_FEEDBACK_LOCK = threading.Lock()
 
 # ── Student-tier hard limits ─────────────────────────────────────────────────
 MAX_WORKERS      = 4
@@ -782,7 +785,7 @@ class ResourceAgent:
                 "predicted_workers":    predicted_workers,
                 "actual_workers":       actual_workers,
             }
-            with open(_FEEDBACK_LOG, "a") as f:
+            with _FEEDBACK_LOCK, open(_FEEDBACK_LOG, "a") as f:
                 f.write(json.dumps(record) + "\n")
         except Exception as exc:
             print(f"[ResourceAgent] feedback write failed (non-fatal): {exc}")
@@ -931,7 +934,7 @@ class ResourceAgent:
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def _ts() -> str:
     import datetime
-    return datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _empty_plan(reason: str) -> dict:
@@ -969,6 +972,6 @@ def _load_feedback_raw() -> List[dict]:
                         records.append(json.loads(line))
                     except json.JSONDecodeError:
                         pass
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f"[ResourceAgent] feedback read failed: {exc}")
     return records

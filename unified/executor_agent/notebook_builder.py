@@ -192,6 +192,10 @@ def _convert_filter(expr: str) -> str:
                                         price between 10 and 50
     """
     e = expr.strip()
+    # The planner occasionally glues JSON config fragments onto the condition
+    # (e.g. "customer like '%alice%','num_workers':1,"). A dict-style
+    # key:value tail is never valid filter SQL — strip it before matching.
+    e = re.sub(r""",\s*['"]?\w+['"]?\s*:.*$""", "", e).strip().rstrip(",").strip()
     _NUM = r"-?\d+(?:\.\d+)?"
 
     # SQL-style: col BETWEEN a AND b
@@ -240,6 +244,11 @@ def _convert_filter(expr: str) -> str:
         (r'^equals\((\w+),\s*(-?\d+)\)$',       r'col("\1") == \2'),
         (r'^notEquals\((\w+),\s*\'([^\']+)\'\)$', r'col("\1") != "\2"'),
         (r'^isNull\((\w+)\)$',                  r'col("\1").isNull()'),
+        # SQL-style NULL checks — must precede the generic fallthrough, which
+        # would otherwise emit `col("x") is not null` (undefined `null` at
+        # runtime → NameError inside the Databricks job).
+        (r'^(\w+)\s+is\s+not\s+null$',          r'col("\1").isNotNull()'),
+        (r'^(\w+)\s+is\s+null$',                r'col("\1").isNull()'),
         # SQL-style (fine-tuned model): single '=' and '<>' equality, ranges, strings
         (r"^(\w+)\s*=\s*'([^']+)'$",                r'col("\1") == "\2"'),
         (rf"^(\w+)\s*=\s*({_NUM})$",                r'col("\1") == \2'),
@@ -251,7 +260,26 @@ def _convert_filter(expr: str) -> str:
     for pattern, replacement in patterns:
         if re.match(pattern, e, re.IGNORECASE):
             return re.sub(pattern, replacement, e, flags=re.IGNORECASE)
-    return _convert_expr(e)
+    result = _convert_expr(e)
+    # Guard: the converted filter must be valid Python AND free of SQL literals
+    # (null/true/false) that survive as bare identifiers — those compile fine
+    # but raise NameError inside the Databricks job. Catching both here fails
+    # the run at plan-build time, before any cloud job is created.
+    bad = None
+    try:
+        compile(result, "<filter_condition>", "eval")
+    except SyntaxError:
+        bad = "invalid syntax"
+    if bad is None and re.search(r"\b(null|true|false)\b", result):
+        bad = "unconverted SQL literal (null/true/false)"
+    if bad is not None:
+        raise UnsupportedTransformError(
+            f"filter_condition {expr!r} could not be converted to a valid "
+            f"PySpark expression ({bad}; got: {result!r}). Use a supported form, "
+            f"e.g. \"col is not null\", \"col = value\", \"col > n\", "
+            f"\"col like '%x%'\", \"col in (...)\", \"col between a and b\"."
+        )
+    return result
 
 
 def _parse_transform(entry: str) -> tuple:

@@ -4,6 +4,8 @@ from typing import Dict
 
 from fastapi import APIRouter, HTTPException
 
+from background import spawn
+
 router = APIRouter()
 
 # Legacy direct-run registry. Kept so /status and /jobs stay valid endpoints
@@ -67,8 +69,9 @@ async def _notify_monitor(result: dict, elapsed_ms: int):
             if monitor_svc:
                 activities = []
                 stats = await db.get_historical_stats("Databricks_Notebook_Pipeline")
-                asyncio.create_task(
-                    monitor_svc._analyze(run_id, "Databricks_Notebook_Pipeline", run_record, activities, stats)
+                spawn(
+                    monitor_svc._analyze(run_id, "Databricks_Notebook_Pipeline", run_record, activities, stats),
+                    name=f"executor.analyze:{run_id}",
                 )
     except Exception as e:
         print(f"[monitor notify] non-fatal: {e}")

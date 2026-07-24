@@ -1,8 +1,26 @@
 const BASE = "/api";
 
+// Sent as the x-api-key header when the backend has auth enabled (API_KEY set).
+const API_KEY = import.meta.env.VITE_API_KEY || "";
+
 async function req(path, opts = {}) {
-  const res = await fetch(`${BASE}${path}`, opts);
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  const headers = { ...(opts.headers || {}) };
+  if (API_KEY) headers["x-api-key"] = API_KEY;
+  const res = await fetch(`${BASE}${path}`, { ...opts, headers });
+  if (!res.ok) {
+    // FastAPI puts the real reason in the JSON `detail` body — surface it
+    // instead of the generic "422 Unprocessable Entity" status text.
+    let detail = "";
+    try {
+      const body = await res.json();
+      detail = typeof body?.detail === "string"
+        ? body.detail
+        : body?.detail ? JSON.stringify(body.detail) : "";
+    } catch {
+      /* non-JSON error body — fall back to status text */
+    }
+    throw new Error(detail || `${res.status} ${res.statusText}`);
+  }
   return res.json();
 }
 
@@ -130,10 +148,14 @@ function _qs(params) {
 let _ws = null;
 const _subs = new Set();
 
-export function connectWS(onMessage) {
-  _subs.add(onMessage);
-  if (_ws && _ws.readyState === WebSocket.OPEN) return () => _subs.delete(onMessage);
-
+// Opens the socket (idempotent) and wires reconnect. Kept separate from
+// connectWS so reconnect attempts never register a subscriber — the previous
+// `connectWS(() => {})` reconnect leaked one permanent empty subscriber per
+// reconnect, growing _subs unbounded while the server was down.
+function _openSocket() {
+  if (_ws && (_ws.readyState === WebSocket.OPEN || _ws.readyState === WebSocket.CONNECTING)) {
+    return;
+  }
   const proto = window.location.protocol === "https:" ? "wss" : "ws";
   _ws = new WebSocket(`${proto}://${window.location.host}/ws/live`);
 
@@ -145,9 +167,13 @@ export function connectWS(onMessage) {
 
   _ws.onclose = () => {
     _ws = null;
-    if (_subs.size > 0) setTimeout(() => connectWS(() => {}), 3000);
+    if (_subs.size > 0) setTimeout(_openSocket, 3000);
   };
+}
 
+export function connectWS(onMessage) {
+  _subs.add(onMessage);
+  _openSocket();
   return () => _subs.delete(onMessage);
 }
 
@@ -175,34 +201,6 @@ export const cost = {
       }),
     }),
   nodeRates: () => req("/cost-optimization/node-rates"),
-};
-
-// ── Learning & Policy Update Agent ──────────────────────────────────────────
-export const learning = {
-  status:  () => req("/learning/status"),
-  metrics: () => req("/learning/metrics"),
-  policies:() => req("/learning/policies"),
-  log:     (limit = 100) => req(`/learning/log?limit=${limit}`),
-  versions:() => req("/learning/versions"),
-  resourceDrift: () => req("/learning/resource-drift"),
-  cycle: (backgroundRetrain = true) =>
-    req("/learning/cycle", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ background_retrain: backgroundRetrain }),
-    }),
-  retrain: (sync = false) =>
-    req("/learning/retrain", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sync }),
-    }),
-  rollback: (versionId) =>
-    req("/learning/rollback", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ version_id: versionId }),
-    }),
 };
 
 export const health = () => req("/health");

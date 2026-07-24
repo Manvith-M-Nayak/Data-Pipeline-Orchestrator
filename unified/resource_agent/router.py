@@ -126,8 +126,8 @@ def model_info():
         try:
             with open(metrics_path) as f:
                 info["metrics"] = _json.load(f)
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"[resource] metrics.json read failed: {exc}")
     if not available and ResourceMLPredictor._load_error:
         info["load_error"] = ResourceMLPredictor._load_error
     return info

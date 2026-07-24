@@ -12,6 +12,9 @@ const AppContext = createContext(null);
 export function AppProvider({ children }) {
   // ── CSV file (File object — survives tab switch, not page reload)
   const [csvFile,         setCsvFileRaw]    = useState(null);
+  // Name persists across reload so the UI can name the file the user must
+  // re-select (the File object itself cannot be serialized to localStorage).
+  const [csvName,         setCsvNameRaw]    = useState(() => lsGet("csv_name"));
 
   // ── Planner state (persisted to localStorage)
   const [detectedSchema,  setDetectedSchemaRaw]  = useState(() => lsGet("planner_schema"));
@@ -31,7 +34,12 @@ export function AppProvider({ children }) {
   const [monitorTab, setMonitorTab] = useState("live");
 
   // ── Wrapped setters that also write localStorage
-  const setCsvFile        = (v) => setCsvFileRaw(v);
+  const setCsvFile        = (v) => {
+    setCsvFileRaw(v);
+    const name = v && v.name ? v.name : null;
+    setCsvNameRaw(name);
+    lsSet("csv_name", name);
+  };
   const setDetectedSchema = (v) => { setDetectedSchemaRaw(v);   lsSet("planner_schema", v); };
   const setPlannerPrompt  = (v) => { setPlannerPromptRaw(v);    lsSet("planner_prompt", v); };
   const setPlanResult     = (v) => { setPlanResultRaw(v);       lsSet("last_plan", v); };
@@ -43,7 +51,7 @@ export function AppProvider({ children }) {
 
   return (
     <AppContext.Provider value={{
-      csvFile, setCsvFile,
+      csvFile, setCsvFile, csvName,
       detectedSchema, setDetectedSchema,
       plannerPrompt, setPlannerPrompt,
       planResult, setPlanResult,

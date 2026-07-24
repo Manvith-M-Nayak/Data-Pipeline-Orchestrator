@@ -1,16 +1,20 @@
-import React, { useState } from "react";
-import { BrowserRouter, Routes, Route, NavLink } from "react-router-dom";
-import { Home, Brain, Zap, Activity, GitBranch, Cpu, RefreshCw, TrendingUp, DollarSign } from "lucide-react";
+import React, { useState, Suspense, lazy } from "react";
+import { BrowserRouter, Routes, Route, NavLink, useLocation } from "react-router-dom";
+import { Home, Brain, Zap, Activity, GitBranch, Cpu, RefreshCw, TrendingUp, DollarSign, AlertTriangle } from "lucide-react";
 import { monitor } from "./api.js";
-import { AppProvider } from "./AppContext.jsx";
-import HomePage    from "./pages/HomePage.jsx";
-import PlannerTab  from "./pages/PlannerTab.jsx";
-import ExecutorTab from "./pages/ExecutorTab.jsx";
-import MonitorTab  from "./pages/MonitorTab.jsx";
-import ManagerTab  from "./pages/ManagerTab.jsx";
-import ResourceTab from "./pages/ResourceTab.jsx";
-import PerformancePredictionTab from "./pages/PerformancePredictionTab.jsx";
-import CostOptimizationTab from "./pages/CostOptimizationTab.jsx";
+import { AppProvider, useAppContext } from "./AppContext.jsx";
+import ErrorBoundary from "./ErrorBoundary.jsx";
+
+// Route-level code splitting — each tab ships in its own chunk instead of one
+// monolithic bundle, so the initial load only pulls the landing page.
+const HomePage    = lazy(() => import("./pages/HomePage.jsx"));
+const PlannerTab  = lazy(() => import("./pages/PlannerTab.jsx"));
+const ExecutorTab = lazy(() => import("./pages/ExecutorTab.jsx"));
+const MonitorTab  = lazy(() => import("./pages/MonitorTab.jsx"));
+const ManagerTab  = lazy(() => import("./pages/ManagerTab.jsx"));
+const ResourceTab = lazy(() => import("./pages/ResourceTab.jsx"));
+const PerformancePredictionTab = lazy(() => import("./pages/PerformancePredictionTab.jsx"));
+const CostOptimizationTab = lazy(() => import("./pages/CostOptimizationTab.jsx"));
 
 const TABS = [
   { to: "/",          label: "Home",              icon: Home,       exact: true  },
@@ -52,6 +56,12 @@ const S = {
     flexShrink: 0,
   },
   main: { flex: 1, padding: 32, overflowY: "auto" },
+  banner: {
+    display: "flex", alignItems: "center", gap: 8,
+    background: "#422006", borderBottom: "1px solid #78350f", color: "#fcd34d",
+    padding: "8px 24px", fontSize: 12.5, flexShrink: 0,
+  },
+  loading: { color: "#64748b", fontSize: 13, padding: 8 },
 };
 
 function TabLink({ to, label, Icon, exact }) {
@@ -67,8 +77,23 @@ function TabLink({ to, label, Icon, exact }) {
   );
 }
 
-export default function App() {
+// Reload drops the in-memory File object but keeps derived state (schema/plan)
+// in localStorage — warn the user their restored plan has no CSV to run against.
+function CsvBanner() {
+  const { csvFile, detectedSchema, csvName } = useAppContext();
+  if (csvFile || !detectedSchema) return null;
+  return (
+    <div style={S.banner}>
+      <AlertTriangle size={14} />
+      Restored a saved plan{csvName ? ` for "${csvName}"` : ""}, but the data file
+      was cleared by the page reload. Re-select it in the Planner tab before running.
+    </div>
+  );
+}
+
+function Shell() {
   const [syncing, setSyncing] = useState(false);
+  const location = useLocation();
 
   async function handleSync() {
     setSyncing(true);
@@ -76,38 +101,50 @@ export default function App() {
   }
 
   return (
+    <div style={S.shell}>
+      <header style={S.header}>
+        <div style={S.logo}>
+          Pipeline Orchestrator
+          <div style={S.logoSub}>AI-powered · Azure ADF + Databricks</div>
+        </div>
+        <nav style={S.tabs}>
+          {TABS.map(({ to, label, icon: Icon, exact }) => (
+            <TabLink key={to} to={to} label={label} Icon={Icon} exact={exact} />
+          ))}
+        </nav>
+        <button style={S.syncBtn} onClick={handleSync} disabled={syncing}>
+          <RefreshCw size={12} />
+          {syncing ? "Syncing…" : "Sync (48h)"}
+        </button>
+      </header>
+      <CsvBanner />
+      <main style={S.main}>
+        {/* Keyed by route so a crash in one tab clears when you navigate away. */}
+        <ErrorBoundary key={location.pathname}>
+          <Suspense fallback={<div style={S.loading}>Loading…</div>}>
+            <Routes>
+              <Route path="/"          element={<HomePage />} />
+              <Route path="/planner"   element={<PlannerTab />} />
+              <Route path="/manager"   element={<ManagerTab />} />
+              <Route path="/resource"      element={<ResourceTab />} />
+              <Route path="/performance"   element={<PerformancePredictionTab />} />
+              <Route path="/cost"      element={<CostOptimizationTab />} />
+              <Route path="/executor"  element={<ExecutorTab />} />
+              <Route path="/monitor"   element={<MonitorTab />} />
+            </Routes>
+          </Suspense>
+        </ErrorBoundary>
+      </main>
+    </div>
+  );
+}
+
+export default function App() {
+  return (
     <BrowserRouter>
-    <AppProvider>
-      <div style={S.shell}>
-        <header style={S.header}>
-          <div style={S.logo}>
-            Pipeline Orchestrator
-            <div style={S.logoSub}>AI-powered · Azure ADF + Databricks</div>
-          </div>
-          <nav style={S.tabs}>
-            {TABS.map(({ to, label, icon: Icon, exact }) => (
-              <TabLink key={to} to={to} label={label} Icon={Icon} exact={exact} />
-            ))}
-          </nav>
-          <button style={S.syncBtn} onClick={handleSync} disabled={syncing}>
-            <RefreshCw size={12} />
-            {syncing ? "Syncing…" : "Sync (48h)"}
-          </button>
-        </header>
-        <main style={S.main}>
-          <Routes>
-            <Route path="/"          element={<HomePage />} />
-            <Route path="/planner"   element={<PlannerTab />} />
-            <Route path="/manager"   element={<ManagerTab />} />
-            <Route path="/resource"      element={<ResourceTab />} />
-            <Route path="/performance"   element={<PerformancePredictionTab />} />
-            <Route path="/cost"      element={<CostOptimizationTab />} />
-            <Route path="/executor"  element={<ExecutorTab />} />
-            <Route path="/monitor"   element={<MonitorTab />} />
-          </Routes>
-        </main>
-      </div>
-    </AppProvider>
+      <AppProvider>
+        <Shell />
+      </AppProvider>
     </BrowserRouter>
   );
 }

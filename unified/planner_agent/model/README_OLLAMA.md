@@ -11,10 +11,10 @@ load — no 15 GB HuggingFace download, no full merge.
 ## Contents
 | File | Purpose |
 |------|---------|
-| `planner_agent_lora.zip` | LoRA adapter (Qwen2.5-7B-Instruct, from fine-tune) |
-| `build_ollama_model.sh` | One-shot: unzip → LoRA→GGUF → pull base → `ollama create` |
+| `adapter/` | LoRA adapter (Qwen2.5-7B-Instruct, from fine-tune) — build source |
+| `build_ollama_model.sh` | One-shot: (unzip if needed) → LoRA→GGUF → pull base → `ollama create` |
 | `Modelfile` | Ollama recipe (`FROM qwen2.5:7b-instruct` + `ADAPTER` + system prompt) |
-| `planner finetune.ipynb` | Original training notebook (reference) |
+| `planner_finetune.ipynb` | Original training notebook (reference) |
 
 ## Prerequisites
 - [Ollama](https://ollama.com) installed and running (`ollama serve` or `brew services start ollama`)
