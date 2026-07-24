@@ -133,6 +133,7 @@ export default function PlannerTab() {
   }
 
   // ── pipeline settings (user overrides; null/"" = auto/recommended) ────────
+  const [pipelineMode,   setPipelineMode]   = useState("batch"); // batch | streaming
   const [numStages,      setNumStages]      = useState(null);   // null = model decides
   const [containerNames, setContainerNames] = useState("");
   const [overrides,      setOverrides]      = useState({
@@ -141,6 +142,7 @@ export default function PlannerTab() {
 
   function buildPlanOpts() {
     const opts = {};
+    if (pipelineMode === "streaming") opts.mode = "streaming";
     if (numStages !== null) opts.num_containers = numStages;
     const custom = {};
     Object.entries(overrides).forEach(([k, v]) => {
@@ -384,6 +386,39 @@ export default function PlannerTab() {
           <div style={C.cardSub}>
             Auto uses size-based recommendations. Override to control stage count and cloud resources
             {plan ? " — then re-plan to apply." : " before generating the plan."}
+          </div>
+
+          {/* Pipeline mode: batch (ETL, run-to-completion) vs streaming (incremental) */}
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 6 }}>Pipeline Mode</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              {[
+                { id: "batch",     label: "Batch (ETL)",  hint: "Process the whole dataset once, then finish." },
+                { id: "streaming", label: "Streaming",    hint: "Incremental: each run processes only new data (checkpointed)." },
+              ].map((m) => (
+                <button
+                  key={m.id}
+                  onClick={() => setPipelineMode(m.id)}
+                  title={m.hint}
+                  style={{
+                    flex: 1, padding: "10px 12px", cursor: "pointer", textAlign: "left",
+                    borderRadius: 8, fontSize: 13, fontWeight: pipelineMode === m.id ? 700 : 400,
+                    color: pipelineMode === m.id ? "#38bdf8" : "#94a3b8",
+                    background: pipelineMode === m.id ? "#0c2a3d" : "#0f172a",
+                    border: `1px solid ${pipelineMode === m.id ? "#38bdf8" : "#334155"}`,
+                  }}
+                >
+                  {m.label}
+                  <div style={{ fontSize: 11, fontWeight: 400, color: "#64748b", marginTop: 2 }}>{m.hint}</div>
+                </button>
+              ))}
+            </div>
+            {pipelineMode === "streaming" && (
+              <div style={{ fontSize: 11, color: "#f59e0b", marginTop: 6 }}>
+                Streaming builds a single incremental stage (source → sink) with a checkpoint;
+                re-run to process newly arrived data.
+              </div>
+            )}
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>

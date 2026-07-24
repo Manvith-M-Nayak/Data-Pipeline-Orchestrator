@@ -35,7 +35,7 @@ REQUIRED_PLAN_KEYS = {
 }
 
 # Valid stage types the executor supports
-KNOWN_STAGE_TYPES = {"copy", "notebook"}
+KNOWN_STAGE_TYPES = {"copy", "notebook", "stream"}
 
 _DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 
@@ -149,16 +149,16 @@ class CentralManager:
                 warnings.append(
                     f"Stage '{s.get('name', i)}' has unknown type '{stype}'"
                 )
-            # copy stages use dataset refs (source_dataset / sink_dataset)
-            # notebook stages use container refs (source_container / sink_container)
-            if stype == "notebook":
+            # copy stages use dataset refs (source_dataset / sink_dataset);
+            # notebook + stream stages use container refs (source/sink_container)
+            if stype in ("notebook", "stream"):
                 if not s.get("source_container"):
                     issues.append(
-                        f"Stage '{s.get('name', i)}' (notebook) missing 'source_container'"
+                        f"Stage '{s.get('name', i)}' ({stype}) missing 'source_container'"
                     )
                 if not s.get("sink_container"):
                     issues.append(
-                        f"Stage '{s.get('name', i)}' (notebook) missing 'sink_container'"
+                        f"Stage '{s.get('name', i)}' ({stype}) missing 'sink_container'"
                     )
             elif stype == "copy":
                 if not s.get("source_dataset") and not s.get("source_container"):
@@ -312,6 +312,11 @@ class CentralManager:
         # Surface top-level summary into state.predictions for backward compat
         copy_count = sum(1 for s in stages if s.get("type") == "copy")
         notebook_count = sum(1 for s in stages if s.get("type") == "notebook")
+        stream_count = sum(1 for s in stages if s.get("type") == "stream")
+        # Stream stages run on Databricks just like notebooks — count them as
+        # compute so downstream cost/perf don't treat them as free.
+        compute_count = notebook_count + stream_count
+        mode = (plan.get("mode") or "batch").lower()
         rec = plan.get("recommended_settings", {})
 
         complexity = "low"
@@ -325,6 +330,9 @@ class CentralManager:
             "stage_count": len(stages),
             "copy_stages": copy_count,
             "notebook_stages": notebook_count,
+            "stream_stages": stream_count,
+            "compute_stages": compute_count,
+            "mode": mode,
             "complexity": complexity,
             "suggested_workers": rp.get("peak_concurrent_workers", 0),
             "estimated_duration_s": rp.get("estimated_total_s", 0),
@@ -370,14 +378,19 @@ class CentralManager:
         workers = max(predictions["suggested_workers"], 1)
 
         copy_count = predictions["copy_stages"]
-        notebook_count = predictions["notebook_stages"]
+        # Stream stages bill on Databricks exactly like notebooks — without this
+        # a streaming plan (notebook_stages=0) would show $0 compute cost.
+        compute_count = predictions.get(
+            "compute_stages", predictions.get("notebook_stages", 0)
+        )
+        mode = predictions.get("mode", "batch")
 
         # ADF: $0.001 per activity run (copy = 1 activity)
         adf_usd = copy_count * 0.001
 
-        # Databricks serverless: ~0.07 DBU/s per notebook at min scale
+        # Databricks serverless: ~0.07 DBU/s per compute stage at min scale
         dbu_per_s = 0.07 * workers
-        dbx_usd = notebook_count * duration_s * dbu_per_s * 0.00025
+        dbx_usd = compute_count * duration_s * dbu_per_s * 0.00025
 
         # Azure Blob Storage: negligible for student volumes
         storage_usd = (predictions["file_size_mb"] / 1024) * 0.018  # $0.018/GB
@@ -392,7 +405,16 @@ class CentralManager:
             "total_usd": total,
             "budget_ok": budget_ok,
             "currency": "USD",
+            "mode": mode,
         }
+        if mode == "streaming":
+            # availableNow processes new data then stops — the estimate is the
+            # cost of ONE trigger, not a one-off whole-dataset run.
+            result["per_trigger_usd"] = total
+            result["note"] = (
+                "Cost is per trigger (incremental). Ongoing spend ≈ "
+                "per_trigger_usd × triggers per day."
+            )
         state.cost_estimate = result
 
         level = "ok" if budget_ok else "warn"
@@ -476,6 +498,15 @@ class CentralManager:
                 "warn",
             )
 
+        # Streaming predictions describe ONE trigger (incremental micro-batch),
+        # not a whole-dataset run — annotate so the UI/feedback read correctly.
+        _mode = (state.plan.get("mode") or "batch").lower()
+        result["mode"] = _mode
+        if _mode == "streaming":
+            result["scope"] = "per_trigger"
+            result["note"] = (
+                "Per-trigger prediction; the stream re-runs incrementally on new data."
+            )
         state.performance_prediction = result
 
         outcome = result.get("outcome", "unknown")
@@ -679,6 +710,16 @@ class CentralManager:
                 str(exc)[:200],
                 "skipping correction (fail-open)",
                 "warn",
+            )
+
+        # Streaming-specific guidance: with availableNow, spend is driven by how
+        # often the job is triggered, not by one big run.
+        if (state.plan.get("mode") or "batch").lower() == "streaming":
+            result["mode"] = "streaming"
+            result["streaming_advice"] = (
+                "Streaming cost scales with trigger frequency. Batch more files per "
+                "trigger (fewer, larger micro-batches) to cut fixed cluster-startup "
+                "overhead; the checkpoint already avoids reprocessing old data."
             )
 
         state.cost_optimization = result

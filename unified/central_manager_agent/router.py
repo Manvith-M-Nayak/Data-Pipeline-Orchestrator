@@ -120,3 +120,74 @@ async def list_runs():
 @router.get("/feedback")
 async def feedback_history():
     return _manager.get_feedback_history()
+
+
+# ── Streaming console ─────────────────────────────────────────────────────────
+# A streaming pipeline runs incrementally (availableNow). These endpoints keep it
+# "live": drop data → process now, or auto-poll every interval_s for new data.
+from .stream_manager import stream_manager
+
+
+@router.post("/stream/start")
+async def stream_start(body: dict):
+    """Register a live stream. body: {config, schema, file_format?, interval_s?}."""
+    config = body.get("config") or {}
+    schema = body.get("schema") or {}
+    file_format = body.get("file_format") or "csv"
+    interval_s = body.get("interval_s") or 0
+    try:
+        return await stream_manager.start(config, schema, file_format, interval_s)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@router.post("/stream/{stream_id}/data")
+async def stream_add_data(stream_id: str, csv_file: UploadFile = File(...)):
+    """Drop new data into a running stream's source and process it immediately."""
+    from app_security import read_upload_capped
+
+    data = await read_upload_capped(csv_file)
+    if not data or not data.strip():
+        raise HTTPException(status_code=422, detail="Dropped file is empty — nothing to process")
+    try:
+        return await stream_manager.add_data(stream_id, data, csv_file.filename or "data.csv")
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Stream not found")
+
+
+@router.post("/stream/{stream_id}/tick")
+async def stream_tick(stream_id: str):
+    """Manually run one incremental pass (process whatever new data is in source)."""
+    try:
+        return await stream_manager.tick(stream_id, reason="manual")
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Stream not found")
+
+
+@router.post("/stream/{stream_id}/stop")
+async def stream_stop(stream_id: str):
+    try:
+        return await stream_manager.stop(stream_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Stream not found")
+
+
+@router.get("/stream/list")
+async def stream_list():
+    return stream_manager.list()
+
+
+@router.get("/stream/{stream_id}")
+async def stream_get(stream_id: str):
+    try:
+        return stream_manager.get(stream_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Stream not found")
+
+
+@router.get("/stream/{stream_id}/output")
+async def stream_output(stream_id: str, limit: int = 200):
+    try:
+        return stream_manager.output_preview(stream_id, limit)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Stream not found")

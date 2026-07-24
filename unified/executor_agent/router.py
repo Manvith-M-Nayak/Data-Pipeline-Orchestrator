@@ -49,13 +49,21 @@ async def _notify_monitor(result: dict, elapsed_ms: int):
         now     = datetime.datetime.now(datetime.timezone.utc)
         start_dt = now - datetime.timedelta(milliseconds=elapsed_ms)
 
-        # Databricks-only runs have no ADF run_id — inject synthetic DB record
+        # Databricks-only runs have no ADF run_id — inject synthetic DB record.
+        # Streaming runs get their own pipeline name so the monitor keeps a
+        # separate duration baseline (incremental triggers ≠ batch runs).
+        mode = (result.get("mode") or "batch").lower()
+        pipeline_name = (
+            "Databricks_Streaming_Pipeline"
+            if mode == "streaming"
+            else "Databricks_Notebook_Pipeline"
+        )
         if db and run_id.startswith("dbx-"):
             adf_status = "Succeeded" if status == "ok" else "Failed"
-            message    = result.get("message", f"Stages: {', '.join(stages)}")
+            message    = result.get("message", f"[{mode}] Stages: {', '.join(stages)}")
             run_record = {
                 "runId":        run_id,
-                "pipelineName": "Databricks_Notebook_Pipeline",
+                "pipelineName": pipeline_name,
                 "status":       adf_status,
                 "runStart":     start_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "runEnd":       now.strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -68,9 +76,9 @@ async def _notify_monitor(result: dict, elapsed_ms: int):
             # which would try to call the ADF API with a dbx- run_id
             if monitor_svc:
                 activities = []
-                stats = await db.get_historical_stats("Databricks_Notebook_Pipeline")
+                stats = await db.get_historical_stats(pipeline_name)
                 spawn(
-                    monitor_svc._analyze(run_id, "Databricks_Notebook_Pipeline", run_record, activities, stats),
+                    monitor_svc._analyze(run_id, pipeline_name, run_record, activities, stats),
                     name=f"executor.analyze:{run_id}",
                 )
     except Exception as e:

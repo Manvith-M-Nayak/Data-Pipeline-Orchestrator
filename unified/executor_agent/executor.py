@@ -29,7 +29,11 @@ from config import (
     DATABRICKS_NOTEBOOK_BASE,
 )
 
-from .notebook_builder import build_notebook_source, UnsupportedTransformError
+from .notebook_builder import (
+    build_notebook_source,
+    build_stream_notebook_source,
+    UnsupportedTransformError,
+)
 
 
 ADF_API_VERSION       = "2018-06-01"
@@ -110,17 +114,20 @@ def purge_container(container_name: str):
 INPUT_EXTENSIONS = (".csv", ".json", ".jsonl", ".ndjson")
 
 
-def upload_input_file(filepath: str, container_name: str) -> str:
+def upload_input_file(filepath: str, container_name: str, blob_name: str = None) -> str:
     filename = os.path.basename(filepath)
     if filename.startswith("*") or not filename.lower().endswith(INPUT_EXTENSIONS):
         raise ValueError(
             f"Invalid input filename '{filename}' — expected one of {INPUT_EXTENSIONS}"
         )
+    # Streaming appends each trigger's input under a unique name (so prior data
+    # is retained and the checkpoint can dedup); batch overwrites a fixed name.
+    dest = blob_name or filename
     container = _blob_service_client().get_container_client(container_name)
     with open(filepath, "rb") as f:
-        container.upload_blob(name=filename, data=f, overwrite=True)
-    print(f"   '{filename}' uploaded to '{container_name}'")
-    return filename
+        container.upload_blob(name=dest, data=f, overwrite=True)
+    print(f"   '{filename}' uploaded to '{container_name}/{dest}'")
+    return dest
 
 
 # Backwards-compatible alias — external callers may still import upload_csv
@@ -570,17 +577,37 @@ def check_pipeline_status(token: str, run_id: str, poll_interval: int = 10, time
 # ────────────────────────────────────────────────────────────────────────────
 # End-to-end driver
 # ────────────────────────────────────────────────────────────────────────────
-def execute_pipeline(csv_path: str, pipeline_config: dict, schema: dict, progress=None) -> dict:
+def execute_pipeline(
+    csv_path: str,
+    pipeline_config: dict,
+    schema: dict,
+    progress=None,
+    skip_input_upload: bool = False,
+    file_format_override: str = None,
+) -> dict:
+    """Run a pipeline end-to-end.
+
+    skip_input_upload: streaming "tick" mode — don't upload a new input file;
+      just re-run the stream notebook against the existing source container so
+      it picks up whatever new data arrived (checkpoint dedups). csv_path may be
+      None in that case; pass file_format_override so codegen knows csv vs json.
+    """
     def _step(msg: str, dbx_run_id: int = None):
         print(f"\n--- {msg} ---")
         if progress:
             progress(msg, dbx_run_id)
 
     run_tag = str(int(time.time()))
+    mode = (pipeline_config.get("mode") or "batch").lower()
+    streaming = mode == "streaming"
 
     stages          = pipeline_config.get("stages", [])
     copy_stages     = [s for s in stages if s.get("type") == "copy"]
     notebook_stages = [s for s in stages if s.get("type") == "notebook"]
+    stream_stages   = [s for s in stages if s.get("type") == "stream"]
+    # notebook + stream stages both run through the Databricks Jobs path; they
+    # differ only in the generated notebook source (batch vs incremental).
+    compute_stages  = notebook_stages + stream_stages
 
     # Validate stage references up front — a malformed config should fail
     # with a clear message before any cloud resources are touched.
@@ -590,23 +617,33 @@ def execute_pipeline(csv_path: str, pipeline_config: dict, schema: dict, progres
         if not s.get("source_dataset") or not s.get("sink_dataset"):
             return {"status": "failed",
                     "message": f"Copy stage '{s.get('name', '?')}' missing source_dataset/sink_dataset"}
-    for s in notebook_stages:
+    for s in compute_stages:
         if not s.get("source_container") or not s.get("sink_container"):
             return {"status": "failed",
-                    "message": f"Notebook stage '{s.get('name', '?')}' missing source_container/sink_container"}
+                    "message": f"{s.get('type', 'compute').title()} stage '{s.get('name', '?')}' missing source_container/sink_container"}
 
-    input_ext = os.path.splitext(csv_path)[1].lower().lstrip(".") or "csv"
-    file_format = "json" if input_ext in ("json", "jsonl", "ndjson") else "csv"
+    if skip_input_upload:
+        # Streaming tick — no new file; derive format from the override.
+        file_format = (file_format_override or "csv").lower()
+        input_ext = file_format
+    else:
+        input_ext = os.path.splitext(csv_path)[1].lower().lstrip(".") or "csv"
+        file_format = "json" if input_ext in ("json", "jsonl", "ndjson") else "csv"
 
     # Build all notebook sources BEFORE any cloud call — a malformed
     # transform/filter from the planner fails here for free, not as a
     # SyntaxError inside a running (paid) Databricks job.
     notebook_sources: dict = {}
-    if notebook_stages:
+    if compute_stages:
         _step("Building notebook sources")
         try:
-            for stage in notebook_stages:
-                notebook_sources[stage["name"]] = build_notebook_source(
+            for stage in compute_stages:
+                builder = (
+                    build_stream_notebook_source
+                    if stage.get("type") == "stream"
+                    else build_notebook_source
+                )
+                notebook_sources[stage["name"]] = builder(
                     stage, AZURE_STORAGE_ACCOUNT, file_format
                 )
         except (UnsupportedTransformError, ValueError) as exc:
@@ -619,20 +656,35 @@ def execute_pipeline(csv_path: str, pipeline_config: dict, schema: dict, progres
     _step("Creating storage containers")
     for name in pipeline_config["containers_to_create"]:
         create_blob_container(token, name)
-    for name in pipeline_config["containers_to_create"]:
-        purge_container(name)
+    # Batch starts each run from a clean slate. Streaming must NOT purge — the
+    # source accumulates across triggers and the checkpoint dedups it, so prior
+    # data and sink output are retained.
+    if not streaming:
+        for name in pipeline_config["containers_to_create"]:
+            purge_container(name)
 
     raw_container = pipeline_config["containers_to_create"][0]
-    _step(f"Uploading {input_ext.upper()} input to '{raw_container}'")
-    upload_input_file(csv_path, raw_container)
-    if not check_blob_has_rows(raw_container):
+    if skip_input_upload:
+        # Streaming tick: process whatever new data already sits in the source.
+        _step(f"Streaming tick — scanning source '{raw_container}' for new data")
+    elif streaming:
+        # Unique blob name per trigger so new data lands alongside old; the
+        # stream notebook's checkpoint skips whatever it already ingested.
+        stream_blob = f"stream-{run_tag}-{os.path.basename(csv_path)}"
+        _step(f"Appending {input_ext.upper()} input to stream source '{raw_container}'")
+        upload_input_file(csv_path, raw_container, blob_name=stream_blob)
+    else:
+        _step(f"Uploading {input_ext.upper()} input to '{raw_container}'")
+        upload_input_file(csv_path, raw_container)
+    # A streaming tick may legitimately find no new data — don't fail on that.
+    if not skip_input_upload and not check_blob_has_rows(raw_container):
         return {"status": "failed", "message": f"Upload verification failed on '{raw_container}'"}
 
     notebook_paths: dict = {}
-    if notebook_stages:
-        _step(f"Uploading {len(notebook_stages)} notebook(s) to Databricks workspace")
+    if compute_stages:
+        _step(f"Uploading {len(compute_stages)} notebook(s) to Databricks workspace")
         ensure_workspace_dir(DATABRICKS_NOTEBOOK_BASE)
-        for stage in notebook_stages:
+        for stage in compute_stages:
             wpath = f"{DATABRICKS_NOTEBOOK_BASE.rstrip('/')}/{stage['name']}"
             upload_notebook(wpath, notebook_sources[stage["name"]])
             notebook_paths[stage["name"]] = wpath
@@ -679,9 +731,9 @@ def execute_pipeline(csv_path: str, pipeline_config: dict, schema: dict, progres
     # Stages run group by group per config["execution_groups"]; stages inside
     # one group run concurrently (independent fan-out branches). Falls back to
     # fully sequential when the config carries no groups.
-    if notebook_stages:
-        nb_by_name = {s["name"]: s for s in notebook_stages}
-        raw_groups = pipeline_config.get("execution_groups") or [[s["name"]] for s in notebook_stages]
+    if compute_stages:
+        nb_by_name = {s["name"]: s for s in compute_stages}
+        raw_groups = pipeline_config.get("execution_groups") or [[s["name"]] for s in compute_stages]
         groups, seen = [], set()
         for g in raw_groups:
             if not isinstance(g, list):
@@ -690,7 +742,7 @@ def execute_pipeline(csv_path: str, pipeline_config: dict, schema: dict, progres
             seen.update(keep)
             if keep:
                 groups.append(keep)
-        for s in notebook_stages:                 # anything the groups missed
+        for s in compute_stages:                  # anything the groups missed
             if s["name"] not in seen:
                 groups.append([s["name"]])
 
@@ -743,10 +795,12 @@ def execute_pipeline(csv_path: str, pipeline_config: dict, schema: dict, progres
     return {
         "status":         "ok",
         "run_id":         adf_run_id or f"dbx-{run_tag}",
+        "mode":           mode,
         "stages":         [s["name"] for s in stages],
         "sink_container": sink_container,
         "result": {
             "copy_stages":     len(copy_stages),
             "notebook_stages": len(notebook_stages),
+            "stream_stages":   len(stream_stages),
         },
     }

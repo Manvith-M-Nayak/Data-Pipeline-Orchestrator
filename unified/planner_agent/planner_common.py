@@ -121,6 +121,77 @@ def _build_stages(clist: list, rec: dict) -> list:
     return stages
 
 
+def to_streaming_plan(config: dict, container_names: list = None) -> dict:
+    """Convert a batch plan into a streaming plan (single incremental stage).
+
+    Reuses the transforms/filter/aggregation the planner already extracted from
+    the prompt — streaming just changes the topology: instead of an ADF copy
+    ingest followed by Databricks transform stages, one 'stream' stage reads the
+    source container incrementally (checkpoint-based) and writes the sink. The
+    executor runs it with availableNow semantics (process new data, then stop).
+    """
+    stages = config.get("stages", []) or []
+    notebook_stages = [s for s in stages if s.get("type") == "notebook"]
+
+    # Merge all transform steps (order preserved); take the first filter /
+    # aggregation encountered — a single stage does the combined work.
+    merged_transforms, filter_condition, aggregation = [], None, None
+    for s in notebook_stages:
+        for t in (s.get("transformations") or []):
+            if t and t not in merged_transforms:
+                merged_transforms.append(t)
+        if filter_condition is None and s.get("filter_condition"):
+            filter_condition = s.get("filter_condition")
+        if aggregation is None and s.get("aggregation"):
+            aggregation = s.get("aggregation")
+    if not merged_transforms:
+        merged_transforms = ["processed_time = currentTimestamp()"]
+
+    # Isolate each streaming pipeline in its own containers. Reusing fixed names
+    # (e.g. "ingest"/"transform") across different datasets pollutes the source
+    # and sink — the checkpoint would skip a new dataset's data as "already
+    # seen", and the sink would mix outputs. A unique suffix per generated plan
+    # keeps triggers of the SAME plan incremental while isolating DIFFERENT ones.
+    if container_names and len(container_names) >= 2:
+        source, sink = container_names[0], container_names[-1]
+    else:
+        import uuid
+        sid = uuid.uuid4().hex[:8]
+        source, sink = f"stream-src-{sid}", f"stream-sink-{sid}"
+    checkpoint = f"{sink}-chk"
+
+    rec = config.get("recommended_settings") or get_recommended_settings("medium")
+    stage = {
+        "name":               "Stream_Ingest_Transform",
+        "type":               "stream",
+        "source_container":   source,
+        "sink_container":     sink,
+        "checkpoint_container": checkpoint,
+        "transformations":    merged_transforms,
+        "filter_condition":   filter_condition,
+        "shuffle_partitions": rec.get("shuffle_partitions", 8),
+    }
+    if aggregation:
+        stage["aggregation"] = aggregation
+
+    return {
+        "mode":                 "streaming",
+        "containers":           {"stage0": source, "stage1": sink},
+        "containers_to_create": [source, sink],
+        "datasets":             _build_datasets([source, sink]),
+        "stages":               [stage],
+        "execution_order":      [stage["name"]],
+        "execution_groups":     [[stage["name"]]],
+        "num_containers":       2,
+        "recommended_settings": rec,
+        "streaming": {
+            "trigger":              "availableNow",
+            "source_container":     source,
+            "checkpoint_container": checkpoint,
+        },
+    }
+
+
 def apply_prompt_stage_names(config: dict, user_prompt: str) -> dict:
     """If the user's prompt references numbered stages ("Stage 1: ...",
     "step 2 ..."), rename the notebook stages to match that vocabulary
