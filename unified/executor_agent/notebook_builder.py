@@ -522,3 +522,210 @@ def build_notebook_source(stage: dict, storage_account: str, file_format: str = 
 
     cells = [cell_pip, cell_imports, cell_spark, cell_read, cell_transforms, cell_filter, cell_agg, cell_write]
     return NOTEBOOK_HEADER + CELL_SEP.join(cells)
+
+
+def _stage_compute_cells(stage: dict):
+    """Shared transform → filter → aggregation cell strings for a stage.
+
+    Returns (cell_transforms, cell_filter, cell_agg, has_agg). Same grammar the
+    batch builder uses, so streaming and batch stages transform identically.
+    """
+    transforms       = stage.get("transformations", []) or []
+    filter_condition = stage.get("filter_condition")
+    aggregation      = stage.get("aggregation")
+
+    agg_group_by, agg_exprs = _build_agg_block(aggregation)
+    has_agg = bool(agg_group_by and agg_exprs)
+
+    pyspark_transforms = []
+    for raw in transforms:
+        parsed = _parse_transform(raw)
+        if not parsed:
+            pyspark_transforms.append(("_skipped", f"# skipped malformed transform: {raw!r}"))
+            continue
+        col_name, rhs = parsed
+        if has_agg and col_name == "processed_time":
+            continue
+        pyspark_transforms.append((col_name, _convert_expr(rhs)))
+
+    pyspark_filter = _convert_filter(filter_condition) if filter_condition else None
+
+    if pyspark_transforms:
+        lines = []
+        for col_name, rhs in pyspark_transforms:
+            if col_name == "_skipped":
+                lines.append(rhs)
+            else:
+                lines.append(f'df = df.withColumn("{col_name}", {rhs})')
+        cell_transforms = "\n".join(lines)
+    else:
+        cell_transforms = "# no transformations configured for this stage\n"
+
+    if pyspark_filter:
+        cell_filter = (
+            f'df = df.filter({pyspark_filter})\n'
+            'print(f"[{stage_name}] after filter: {df.count()} rows")\n'
+        )
+    else:
+        cell_filter = "# no filter configured for this stage\n"
+
+    if has_agg:
+        group_args = ", ".join(f'"{g}"' for g in agg_group_by)
+        agg_args   = ",\n    ".join(agg_exprs)
+        cell_agg = (
+            f"df = df.groupBy({group_args}).agg(\n"
+            f"    {agg_args},\n"
+            ")\n"
+            'df = df.withColumn("processed_time", current_timestamp())\n'
+            'print(f"[{stage_name}] after aggregation: {df.count()} groups")\n'
+        )
+    else:
+        cell_agg = "# no aggregation configured for this stage\n"
+
+    return cell_transforms, cell_filter, cell_agg, has_agg
+
+
+def build_stream_notebook_source(stage: dict, storage_account: str, file_format: str = "csv") -> str:
+    """
+    Generate a streaming-style Databricks notebook for a "stream" stage.
+
+    Implements availableNow (incremental-then-stop) semantics on plain Blob
+    storage — the serverless workspace blocks the wasbs/abfss connectors that
+    Spark Structured Streaming / Auto Loader need, so incrementality is tracked
+    with a checkpoint manifest instead of a Spark checkpoint:
+
+      1. Load the manifest (set of already-processed blob names) from
+         CHECKPOINT_CONTAINER; empty on first run.
+      2. List the source container; keep only blobs NOT in the manifest.
+      3. No new blobs → exit success immediately (idle trigger).
+      4. Otherwise read only the new blobs, apply the same transform/filter/agg
+         grammar as batch, append the result to the sink as a uniquely-named
+         part file (never overwriting prior output), then advance the manifest.
+
+    Re-triggering the job processes only data that arrived since last time —
+    "continuously processing" when driven on a schedule / button.
+    """
+    source_container    = stage["source_container"]
+    sink_container      = stage["sink_container"]
+    checkpoint_container = stage.get("checkpoint_container") or f"{sink_container}-chk"
+    shuffle_parts       = int(stage.get("shuffle_partitions", 8))
+
+    cell_transforms, cell_filter, cell_agg, _ = _stage_compute_cells(stage)
+
+    cell_pip = "%pip install azure-storage-blob --quiet\n"
+
+    cell_imports = (
+        "from pyspark.sql import SparkSession\n"
+        "from pyspark.sql.functions import (\n"
+        "    col, lit, when, coalesce, expr,\n"
+        "    upper, lower, trim, ltrim, rtrim, initcap, length,\n"
+        "    concat, concat_ws, substring, regexp_replace,\n"
+        "    current_timestamp, current_date,\n"
+        "    year, month, dayofmonth, hour, minute, second,\n"
+        "    to_date, to_timestamp, date_format,\n"
+        "    round, floor, ceil, abs, sqrt, pow,\n"
+        "    sum, avg, mean, min, max, count,\n"
+        ")\n"
+        "import json\n"
+        "import io\n"
+        "import pandas as pd\n"
+        "from azure.storage.blob import BlobServiceClient\n"
+        "\n"
+        'dbutils.widgets.text("storage_key", "", "Azure Storage Account Key")\n'
+        'dbutils.widgets.text("run_id", "", "Run ID")\n'
+        'dbutils.widgets.text("stage_name", "", "Stage Name")\n'
+        "\n"
+        'storage_key = dbutils.widgets.get("storage_key")\n'
+        'run_id      = dbutils.widgets.get("run_id")\n'
+        'stage_name  = dbutils.widgets.get("stage_name")\n'
+        "\n"
+        f'STORAGE_ACCOUNT      = "{storage_account}"\n'
+        f'SOURCE_CONTAINER     = "{source_container}"\n'
+        f'SINK_CONTAINER       = "{sink_container}"\n'
+        f'CHECKPOINT_CONTAINER = "{checkpoint_container}"\n'
+        f'SHUFFLE_PARTITIONS   = {shuffle_parts}\n'
+        f'OUTPUT_FORMAT        = "{ "json" if file_format == "json" else "csv" }"\n'
+    )
+
+    cell_spark = (
+        "_blob_svc = BlobServiceClient(\n"
+        "    account_url=f\"https://{STORAGE_ACCOUNT}.blob.core.windows.net\",\n"
+        "    credential=storage_key,\n"
+        ")\n"
+        "spark.conf.set(\"spark.sql.shuffle.partitions\", str(SHUFFLE_PARTITIONS))\n"
+        "print(f\"[{stage_name}] STREAM run_id={run_id} source={SOURCE_CONTAINER} sink={SINK_CONTAINER}\")\n"
+    )
+
+    # ── Cell: load checkpoint manifest + read only new blobs ──────────────
+    cell_read = (
+        "def _load_json_frame(_raw):\n"
+        "    try:\n"
+        "        _doc = json.loads(_raw)\n"
+        "        if isinstance(_doc, dict):\n"
+        "            _doc = [_doc]\n"
+        "        return pd.DataFrame(_doc)\n"
+        "    except ValueError:\n"
+        "        return pd.read_json(io.BytesIO(_raw), lines=True)\n"
+        "\n"
+        "_chk = _blob_svc.get_container_client(CHECKPOINT_CONTAINER)\n"
+        "try:\n"
+        "    _chk.create_container()\n"
+        "except Exception:\n"
+        "    pass  # checkpoint container may already exist\n"
+        "_manifest_name = f\"{stage_name}.json\"\n"
+        "try:\n"
+        "    _processed = set(json.loads(_chk.download_blob(_manifest_name).readall()))\n"
+        "except Exception:\n"
+        "    _processed = set()  # first trigger — nothing processed yet\n"
+        "\n"
+        "_src = _blob_svc.get_container_client(SOURCE_CONTAINER)\n"
+        "_frames, _new_files = [], []\n"
+        "for _blob in _src.list_blobs():\n"
+        "    if _blob.name in _processed:\n"
+        "        continue  # already ingested on a prior trigger\n"
+        "    _name = _blob.name.lower()\n"
+        "    if _name.endswith(\".csv\"):\n"
+        "        _data = _src.download_blob(_blob.name).readall()\n"
+        "        _frames.append(pd.read_csv(io.BytesIO(_data))); _new_files.append(_blob.name)\n"
+        "    elif _name.endswith((\".json\", \".jsonl\", \".ndjson\")):\n"
+        "        _data = _src.download_blob(_blob.name).readall()\n"
+        "        _frames.append(_load_json_frame(_data)); _new_files.append(_blob.name)\n"
+        "print(f\"[{stage_name}] {len(_new_files)} new file(s) since last checkpoint\")\n"
+        "if not _frames:\n"
+        "    dbutils.notebook.exit(json.dumps({\n"
+        "        \"status\": \"succeeded\", \"stage\": stage_name, \"run_id\": run_id,\n"
+        "        \"rows_written\": 0, \"new_files\": 0, \"note\": \"no new data\",\n"
+        "    }))\n"
+        "_pdf = pd.concat(_frames, ignore_index=True)\n"
+        "df = spark.createDataFrame(_pdf)\n"
+        "print(f\"[{stage_name}] read {df.count()} new rows from {SOURCE_CONTAINER}\")\n"
+    )
+
+    # ── Cell: append output + advance checkpoint ──────────────────────────
+    cell_write = (
+        "written = df.count()\n"
+        "if OUTPUT_FORMAT == \"json\":\n"
+        "    _output_bytes = df.toPandas().to_json(orient=\"records\", indent=2).encode(\"utf-8\")\n"
+        "else:\n"
+        "    _output_bytes = df.toPandas().to_csv(index=False).encode(\"utf-8\")\n"
+        "# Unique per trigger — appends to the sink instead of overwriting.\n"
+        "_output_name = f\"output/part-{run_id}.{OUTPUT_FORMAT}\"\n"
+        "_sink = _blob_svc.get_container_client(SINK_CONTAINER)\n"
+        "try:\n"
+        "    _sink.create_container()\n"
+        "except Exception:\n"
+        "    pass  # sink container may already exist\n"
+        "_sink.upload_blob(_output_name, _output_bytes, overwrite=True)\n"
+        "# Advance the checkpoint only after a successful write.\n"
+        "_processed.update(_new_files)\n"
+        "_chk.upload_blob(_manifest_name, json.dumps(sorted(_processed)).encode(\"utf-8\"), overwrite=True)\n"
+        "print(f\"[{stage_name}] appended {written} rows to {SINK_CONTAINER}/{_output_name}; \"\n"
+        "      f\"checkpoint now tracks {len(_processed)} file(s)\")\n"
+        "dbutils.notebook.exit(json.dumps({\n"
+        "    \"status\": \"succeeded\", \"stage\": stage_name, \"run_id\": run_id,\n"
+        "    \"rows_written\": written, \"new_files\": len(_new_files), \"sink\": SINK_CONTAINER,\n"
+        "}))\n"
+    )
+
+    cells = [cell_pip, cell_imports, cell_spark, cell_read, cell_transforms, cell_filter, cell_agg, cell_write]
+    return NOTEBOOK_HEADER + CELL_SEP.join(cells)
