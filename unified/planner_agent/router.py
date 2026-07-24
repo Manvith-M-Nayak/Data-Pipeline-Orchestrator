@@ -2,7 +2,7 @@ import asyncio
 from fastapi import APIRouter
 from fastapi.concurrency import run_in_threadpool
 from . import decide_pipeline_config
-from .planner_common import sanitize_execution_groups
+from .planner_common import sanitize_execution_groups, to_streaming_plan
 
 router = APIRouter()
 
@@ -58,5 +58,11 @@ async def plan_pipeline(body: dict):
     # sanitize_execution_groups repairs any data-dependency violations.
     if isinstance(execution_groups, list) and execution_groups:
         config = sanitize_execution_groups(config, execution_groups)
+
+    # Streaming mode: reshape the batch plan into a single incremental stream
+    # stage, reusing the transforms/filter the model already extracted.
+    mode = (body.get("mode") or "batch").lower()
+    if mode == "streaming":
+        config = to_streaming_plan(config, container_names)
 
     return {"config": config, "used_fallback": used_fallback}

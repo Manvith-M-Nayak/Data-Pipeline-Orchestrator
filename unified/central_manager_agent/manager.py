@@ -35,7 +35,7 @@ REQUIRED_PLAN_KEYS = {
 }
 
 # Valid stage types the executor supports
-KNOWN_STAGE_TYPES = {"copy", "notebook"}
+KNOWN_STAGE_TYPES = {"copy", "notebook", "stream"}
 
 _DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 
@@ -149,16 +149,16 @@ class CentralManager:
                 warnings.append(
                     f"Stage '{s.get('name', i)}' has unknown type '{stype}'"
                 )
-            # copy stages use dataset refs (source_dataset / sink_dataset)
-            # notebook stages use container refs (source_container / sink_container)
-            if stype == "notebook":
+            # copy stages use dataset refs (source_dataset / sink_dataset);
+            # notebook + stream stages use container refs (source/sink_container)
+            if stype in ("notebook", "stream"):
                 if not s.get("source_container"):
                     issues.append(
-                        f"Stage '{s.get('name', i)}' (notebook) missing 'source_container'"
+                        f"Stage '{s.get('name', i)}' ({stype}) missing 'source_container'"
                     )
                 if not s.get("sink_container"):
                     issues.append(
-                        f"Stage '{s.get('name', i)}' (notebook) missing 'sink_container'"
+                        f"Stage '{s.get('name', i)}' ({stype}) missing 'sink_container'"
                     )
             elif stype == "copy":
                 if not s.get("source_dataset") and not s.get("source_container"):

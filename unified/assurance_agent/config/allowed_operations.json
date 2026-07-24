@@ -1,7 +1,7 @@
 {
   "_comment": "Whitelist of operations the Assurance Agent will accept in a plan. Anything not listed here fails the allowed_operations check. sql_functions/sql_keywords are tokens that the column_references check treats as NON-columns when scanning expressions.",
 
-  "stage_types": ["copy", "notebook"],
+  "stage_types": ["copy", "notebook", "stream"],
 
   "aggregation_ops": ["avg", "sum", "min", "max", "count"],
 

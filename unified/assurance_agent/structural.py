@@ -213,6 +213,10 @@ class StructuralValidator:
         name, label, tier = "stage_ordering", "Stage ordering", "structure"
         stages = plan.get("stages", [])
         types_cfg = self.ordering.get("stage_types", {})
+        # Streaming plans have no ADF copy ingest — a single 'stream' stage both
+        # reads the source and transforms it — so the batch-only "first stage
+        # must be copy" / "single copy" rules don't apply.
+        streaming = (plan.get("mode") or "batch").lower() == "streaming"
         violations = []
 
         # 4a. every stage type is known to the ordering ruleset
@@ -225,12 +229,12 @@ class StructuralValidator:
 
         # 4b. first stage must be the configured ingest type (no transform before load)
         first_type = self.ordering.get("first_stage_type")
-        if first_type and stages and stages[0].get("type") != first_type:
+        if not streaming and first_type and stages and stages[0].get("type") != first_type:
             violations.append(
                 f"first stage must be '{first_type}' (load before transform), got '{stages[0].get('type')}'")
 
         # 4c. only the first stage may be the ingest/copy type, if configured
-        if self.ordering.get("single_copy_only") and first_type:
+        if not streaming and self.ordering.get("single_copy_only") and first_type:
             for i, s in enumerate(stages):
                 if i > 0 and s.get("type") == first_type:
                     violations.append(
