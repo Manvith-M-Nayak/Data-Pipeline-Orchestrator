@@ -261,17 +261,7 @@ def _convert_filter(expr: str) -> str:
         if re.match(pattern, e, re.IGNORECASE):
             return re.sub(pattern, replacement, e, flags=re.IGNORECASE)
     result = _convert_expr(e)
-    # Guard: the converted filter must be valid Python AND free of SQL literals
-    # (null/true/false) that survive as bare identifiers — those compile fine
-    # but raise NameError inside the Databricks job. Catching both here fails
-    # the run at plan-build time, before any cloud job is created.
-    bad = None
-    try:
-        compile(result, "<filter_condition>", "eval")
-    except SyntaxError:
-        bad = "invalid syntax"
-    if bad is None and re.search(r"\b(null|true|false)\b", result):
-        bad = "unconverted SQL literal (null/true/false)"
+    bad = _invalid_pyspark_reason(result)
     if bad is not None:
         raise UnsupportedTransformError(
             f"filter_condition {expr!r} could not be converted to a valid "
@@ -280,6 +270,22 @@ def _convert_filter(expr: str) -> str:
             f"\"col like '%x%'\", \"col in (...)\", \"col between a and b\"."
         )
     return result
+
+
+def _invalid_pyspark_reason(expr: str):
+    """Return a reason string if ``expr`` is NOT a safe PySpark expression, else
+    None. Rejects invalid Python syntax and bare SQL literals (null/true/false)
+    that compile but raise NameError inside a Databricks job. Used to guard both
+    filter conditions and column transforms so a hallucinated planner expression
+    fails/skips at build time instead of crashing a paid cloud run.
+    """
+    try:
+        compile(expr, "<pyspark_expr>", "eval")
+    except SyntaxError:
+        return "invalid syntax"
+    if re.search(r"\b(null|true|false)\b", expr):
+        return "unconverted SQL literal (null/true/false)"
+    return None
 
 
 def _parse_transform(entry: str) -> tuple:
@@ -377,6 +383,14 @@ def build_notebook_source(stage: dict, storage_account: str, file_format: str = 
         if has_agg and col_name == "processed_time":
             continue
         rhs_pyspark = _convert_expr(rhs)
+        # A hallucinated transform (e.g. "null? : null") would crash the
+        # Databricks job — skip it at build time instead.
+        bad = _invalid_pyspark_reason(rhs_pyspark)
+        if bad:
+            pyspark_transforms.append(
+                ("_skipped", f"# skipped invalid transform {col_name!r} ({bad}): {rhs_pyspark!r}")
+            )
+            continue
         pyspark_transforms.append((col_name, rhs_pyspark))
 
     pyspark_filter = _convert_filter(filter_condition) if filter_condition else None
@@ -546,7 +560,14 @@ def _stage_compute_cells(stage: dict):
         col_name, rhs = parsed
         if has_agg and col_name == "processed_time":
             continue
-        pyspark_transforms.append((col_name, _convert_expr(rhs)))
+        rhs_pyspark = _convert_expr(rhs)
+        bad = _invalid_pyspark_reason(rhs_pyspark)
+        if bad:
+            pyspark_transforms.append(
+                ("_skipped", f"# skipped invalid transform {col_name!r} ({bad}): {rhs_pyspark!r}")
+            )
+            continue
+        pyspark_transforms.append((col_name, rhs_pyspark))
 
     pyspark_filter = _convert_filter(filter_condition) if filter_condition else None
 
