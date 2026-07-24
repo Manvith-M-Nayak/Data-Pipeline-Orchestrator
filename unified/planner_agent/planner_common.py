@@ -147,13 +147,17 @@ def to_streaming_plan(config: dict, container_names: list = None) -> dict:
     if not merged_transforms:
         merged_transforms = ["processed_time = currentTimestamp()"]
 
-    clist = config.get("containers_to_create") or []
+    # Isolate each streaming pipeline in its own containers. Reusing fixed names
+    # (e.g. "ingest"/"transform") across different datasets pollutes the source
+    # and sink — the checkpoint would skip a new dataset's data as "already
+    # seen", and the sink would mix outputs. A unique suffix per generated plan
+    # keeps triggers of the SAME plan incremental while isolating DIFFERENT ones.
     if container_names and len(container_names) >= 2:
         source, sink = container_names[0], container_names[-1]
-    elif len(clist) >= 2:
-        source, sink = clist[0], clist[-1]
     else:
-        source, sink = "stream_source", "stream_sink"
+        import uuid
+        sid = uuid.uuid4().hex[:8]
+        source, sink = f"stream-src-{sid}", f"stream-sink-{sid}"
     checkpoint = f"{sink}-chk"
 
     rec = config.get("recommended_settings") or get_recommended_settings("medium")

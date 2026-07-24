@@ -347,8 +347,14 @@ async def detect_schema(csv_file: UploadFile = File(...)):
 
 @app.get("/api/executor/download/{container}", tags=["executor"])
 async def download_output(container: str):
-    """Stream the first non-empty CSV or JSON blob from the given sink container."""
-    from fastapi.responses import StreamingResponse
+    """Return the pipeline output for a sink container.
+
+    Batch writes a single output file; streaming appends one part file per
+    trigger. This merges ALL output blobs into one response so the caller gets
+    the complete result, not just the first (oldest) part — CSV keeps a single
+    header, JSON merges into one array.
+    """
+    from fastapi.responses import Response
     from azure.storage.blob import BlobServiceClient
     from fastapi import HTTPException
     import config as _cfg
@@ -367,38 +373,73 @@ async def download_output(container: str):
     client = BlobServiceClient.from_connection_string(conn)
     container_client = client.get_container_client(container)
 
-    # Find first .csv or .json blob that has content
-    target = None
-    for blob in container_client.list_blobs():
-        if (
-            blob.name.lower().endswith((".csv", ".json", ".jsonl", ".ndjson"))
-            and blob.size
-            and blob.size > 0
-        ):
-            target = blob.name
-            break
+    # Collect every output data blob, prefer the "output/" prefix the notebooks
+    # write to. Sorted by name so part files apply in a stable order.
+    exts = (".csv", ".json", ".jsonl", ".ndjson")
+    blobs = [
+        b.name
+        for b in container_client.list_blobs()
+        if b.name.lower().endswith(exts) and b.size and b.size > 0
+    ]
+    output_blobs = sorted(n for n in blobs if n.lower().startswith("output/"))
+    targets = output_blobs or sorted(blobs)  # fall back to any data blob
 
-    if not target:
-        from fastapi import HTTPException
-
+    if not targets:
         raise HTTPException(
             status_code=404, detail=f"No output CSV/JSON found in '{container}'"
         )
 
-    blob_client = container_client.get_blob_client(target)
+    ext = os.path.splitext(targets[0])[1].lower() or ".csv"
+    is_json = ext in (".json", ".jsonl", ".ndjson")
 
-    def _stream():
-        stream = blob_client.download_blob()
-        for chunk in stream.chunks():
-            yield chunk
+    def _read(name: str) -> str:
+        return container_client.get_blob_client(name).download_blob().readall().decode(
+            "utf-8", errors="replace"
+        )
 
-    ext = os.path.splitext(target)[1].lower() or ".csv"
-    media_type = "text/csv" if ext == ".csv" else "application/json"
+    parts_used = 0
+    if is_json:
+        merged: list = []
+        for name in targets:
+            try:
+                doc = json.loads(_read(name))
+            except json.JSONDecodeError:
+                continue
+            merged.extend(doc if isinstance(doc, list) else [doc])
+            parts_used += 1
+        body = json.dumps(merged, indent=2).encode("utf-8")
+        media_type = "application/json"
+    else:
+        # CSV: keep the first file's header, append only data rows from the rest.
+        # Parts whose header differs belong to a DIFFERENT dataset (a container
+        # that was reused across pipelines) — skip them rather than emit a
+        # corrupt file with a stray header row mid-stream.
+        lines: list = []
+        header = None
+        for name in targets:
+            rows = _read(name).lstrip("﻿").splitlines()
+            if not rows:
+                continue
+            if header is None:
+                header = rows[0]
+                lines.append(header)
+                lines.extend(r for r in rows[1:] if r != "")
+                parts_used += 1
+            elif rows[0] == header:
+                lines.extend(r for r in rows[1:] if r != "")
+                parts_used += 1
+            # else: schema mismatch — different dataset, skip this part.
+        body = ("\n".join(lines) + "\n").encode("utf-8")
+        media_type = "text/csv"
+
     filename = f"{container}-output{ext}"
-    return StreamingResponse(
-        _stream(),
+    return Response(
+        content=body,
         media_type=media_type,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-Output-Parts": str(parts_used),
+        },
     )
 
 
