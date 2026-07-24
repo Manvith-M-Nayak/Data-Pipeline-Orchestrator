@@ -58,6 +58,22 @@ class DBService:
                     logged_at     TEXT DEFAULT (datetime('now'))
                 )
             """)
+            # Central-manager run state — persisted so runs survive a restart
+            # (in-memory _runs is lost) and the frontend never 404s on resume.
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS manager_runs (
+                    run_id       TEXT PRIMARY KEY,
+                    status       TEXT,
+                    phase        TEXT,
+                    step         TEXT,
+                    started_at   TEXT,
+                    completed_at TEXT,
+                    retries      INTEGER,
+                    stage_count  INTEGER,
+                    state_json   TEXT,
+                    updated_at   TEXT DEFAULT (datetime('now'))
+                )
+            """)
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_runs_pipeline ON pipeline_runs(pipeline_name)"
             )
@@ -65,6 +81,91 @@ class DBService:
                 "CREATE INDEX IF NOT EXISTS idx_runs_status ON pipeline_runs(status)"
             )
             await db.commit()
+
+    # ── Central-manager run persistence ──────────────────────────────────────
+    _MANAGER_TERMINAL = ("completed", "failed")
+
+    async def save_manager_run(self, state: Dict[str, Any]):
+        """Upsert a full manager RunState snapshot (state == get_state_dict())."""
+        if not state or not state.get("run_id"):
+            return
+        plan = state.get("plan") or {}
+        stage_count = len(plan.get("stages", []))
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                """
+                INSERT INTO manager_runs
+                    (run_id, status, phase, step, started_at, completed_at,
+                     retries, stage_count, state_json, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                ON CONFLICT(run_id) DO UPDATE SET
+                    status=excluded.status, phase=excluded.phase, step=excluded.step,
+                    completed_at=excluded.completed_at, retries=excluded.retries,
+                    stage_count=excluded.stage_count, state_json=excluded.state_json,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    state.get("run_id"), state.get("status"), state.get("phase"),
+                    state.get("step"), state.get("started_at"), state.get("completed_at"),
+                    state.get("retries", 0), stage_count, json.dumps(state),
+                ),
+            )
+            await db.commit()
+
+    async def get_manager_run(self, run_id: str) -> Optional[Dict]:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                "SELECT state_json FROM manager_runs WHERE run_id=?", (run_id,)
+            ) as cur:
+                row = await cur.fetchone()
+        if not row:
+            return None
+        try:
+            return json.loads(row[0])
+        except (ValueError, TypeError):
+            return None
+
+    async def list_manager_runs(self, limit: int = 100) -> List[Dict]:
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                """
+                SELECT run_id, status, phase, step, started_at, completed_at,
+                       retries, stage_count
+                FROM manager_runs ORDER BY started_at DESC LIMIT ?
+                """,
+                (limit,),
+            ) as cur:
+                rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+    async def mark_interrupted_manager_runs(self) -> int:
+        """On startup, fail any run left non-terminal by a crash/restart — its
+        asyncio task is gone, so it can never complete."""
+        placeholders = ",".join("?" * len(self._MANAGER_TERMINAL))
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                f"SELECT run_id, state_json FROM manager_runs "
+                f"WHERE status NOT IN ({placeholders})",
+                self._MANAGER_TERMINAL,
+            ) as cur:
+                rows = await cur.fetchall()
+            for r in rows:
+                try:
+                    st = json.loads(r["state_json"])
+                except (ValueError, TypeError):
+                    st = {"run_id": r["run_id"]}
+                st["status"] = "failed"
+                st["step"] = "Failed: interrupted by server restart"
+                st["error"] = st.get("error") or "Run interrupted by server restart"
+                await db.execute(
+                    "UPDATE manager_runs SET status='failed', step=?, "
+                    "state_json=?, updated_at=datetime('now') WHERE run_id=?",
+                    (st["step"], json.dumps(st), r["run_id"]),
+                )
+            await db.commit()
+            return len(rows)
 
     async def upsert_run(self, run: Dict[str, Any]):
         async with aiosqlite.connect(DB_PATH) as db:

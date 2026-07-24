@@ -88,7 +88,15 @@ async def start_managed_run(
 
 @router.get("/status/{run_id}")
 async def run_status(run_id: str):
+    # In-memory is freshest for the live run; fall back to sqlite for runs from
+    # before a restart (otherwise the frontend polling loop 404s on resume).
     state = _manager.get_state_dict(run_id)
+    if state is None:
+        from monitor_agent import deps
+
+        db = deps.get_db()
+        if db is not None:
+            state = await db.get_manager_run(run_id)
     if state is None:
         raise HTTPException(status_code=404, detail="Run not found")
     return state
@@ -96,7 +104,17 @@ async def run_status(run_id: str):
 
 @router.get("/runs")
 async def list_runs():
-    return _manager.list_runs()
+    # Merge live (in-memory) runs with persisted ones; memory wins on conflict.
+    runs = _manager.list_runs()
+    seen = {r["run_id"] for r in runs}
+    from monitor_agent import deps
+
+    db = deps.get_db()
+    if db is not None:
+        for r in await db.list_manager_runs():
+            if r["run_id"] not in seen:
+                runs.append(r)
+    return sorted(runs, key=lambda x: x.get("started_at") or "", reverse=True)
 
 
 @router.get("/feedback")

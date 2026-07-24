@@ -88,6 +88,14 @@ monitor_service = MonitorService(adf_service, db_service, groq_service)
 async def lifespan(app: FastAPI):
     _deps.init(adf_service, db_service, groq_service, monitor_service)
     await db_service.initialize()
+    # A run left mid-flight by the previous process can never finish — mark
+    # those persisted runs failed so the UI shows a terminal state, not a spinner.
+    try:
+        n = await db_service.mark_interrupted_manager_runs()
+        if n:
+            print(f"[startup] marked {n} interrupted manager run(s) as failed")
+    except Exception as exc:
+        print(f"[startup] interrupted-run sweep skipped: {exc}")
     spawn(monitor_service.start_polling(), name="monitor.start_polling")
     spawn(
         monitor_service.backfill_missing_analyses(limit=75),
