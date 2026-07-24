@@ -1,7 +1,12 @@
 const BASE = "/api";
 
+// Sent as the x-api-key header when the backend has auth enabled (API_KEY set).
+const API_KEY = import.meta.env.VITE_API_KEY || "";
+
 async function req(path, opts = {}) {
-  const res = await fetch(`${BASE}${path}`, opts);
+  const headers = { ...(opts.headers || {}) };
+  if (API_KEY) headers["x-api-key"] = API_KEY;
+  const res = await fetch(`${BASE}${path}`, { ...opts, headers });
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return res.json();
 }

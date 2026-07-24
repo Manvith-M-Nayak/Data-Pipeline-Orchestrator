@@ -23,7 +23,9 @@ async def start_managed_run(
     Kick off a fully-managed pipeline run.
     Returns run_id immediately; client polls /status/{run_id}.
     """
-    contents = await csv_file.read()
+    from app_security import read_upload_capped
+
+    contents = await read_upload_capped(csv_file)
     csv_size = len(contents)
 
     try:
