@@ -301,6 +301,6 @@ class RetrainingManager:
             if on_done:
                 try:
                     on_done(result)
-                except Exception:  # noqa: BLE001
-                    pass
+                except Exception as cb_exc:  # noqa: BLE001
+                    print(f"[Retrain] on_done callback failed (non-fatal): {cb_exc}")
         return result

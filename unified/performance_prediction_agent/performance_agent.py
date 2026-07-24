@@ -319,8 +319,8 @@ class PerformancePredictionAgent:
                             records.append(json.loads(line))
                         except json.JSONDecodeError:
                             pass
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"[PerfAgent] feedback read failed: {exc}")
         return records
 
     # ── Adjustment factor from history ────────────────────────────────────────

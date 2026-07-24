@@ -1254,8 +1254,8 @@ class CentralManager:
             self._log(state, "RUN FAILED", str(exc)[:300], "abort", "error")
             try:
                 await self.record_feedback(state, time.time() - t0)
-            except Exception:
-                pass
+            except Exception as fb_exc:
+                print(f"[Manager] feedback during failure handling non-fatal: {fb_exc}")
         finally:
             # Runs on every exit — completion, exception, and each early return.
             await self._persist(state)
@@ -1327,6 +1327,6 @@ class CentralManager:
                     line = line.strip()
                     if line:
                         records.append(json.loads(line))
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"[Manager] feedback history read failed: {exc}")
         return records[-50:]  # last 50

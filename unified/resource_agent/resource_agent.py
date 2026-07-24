@@ -972,6 +972,6 @@ def _load_feedback_raw() -> List[dict]:
                         records.append(json.loads(line))
                     except json.JSONDecodeError:
                         pass
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f"[ResourceAgent] feedback read failed: {exc}")
     return records
