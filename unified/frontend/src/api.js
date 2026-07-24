@@ -125,6 +125,27 @@ export const manager = {
   feedback: ()       => req("/manager/feedback"),
 };
 
+// ── Streaming console ─────────────────────────────────────────────────────────
+// Live incremental streaming: start a stream, drop data → it processes now,
+// poll status + output for results.
+export const stream = {
+  start: (config, schemaObj, fileFormat = "csv", intervalS = 0) =>
+    req("/manager/stream/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ config, schema: schemaObj, file_format: fileFormat, interval_s: intervalS }),
+    }),
+  addData: (streamId, file) => {
+    const fd = new FormData();
+    fd.append("csv_file", file);
+    return req(`/manager/stream/${streamId}/data`, { method: "POST", body: fd });
+  },
+  tick:   (streamId) => req(`/manager/stream/${streamId}/tick`, { method: "POST" }),
+  stop:   (streamId) => req(`/manager/stream/${streamId}/stop`, { method: "POST" }),
+  get:    (streamId) => req(`/manager/stream/${streamId}`),
+  output: (streamId, limit = 200) => req(`/manager/stream/${streamId}/output?limit=${limit}`),
+};
+
 // ── Monitor ──────────────────────────────────────────────────────────────────
 export const monitor = {
   getLiveRuns:      ()           => req("/monitor/pipelines/live"),

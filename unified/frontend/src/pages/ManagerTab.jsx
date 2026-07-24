@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { manager, executor } from "../api.js";
 import { useAppContext } from "../AppContext.jsx";
+import StreamingConsole from "./StreamingConsole.jsx";
 import {
   Shield, ShieldCheck, Brain, Zap, ClipboardCheck, TrendingUp, CheckCircle,
   XCircle, AlertTriangle, Clock, Activity, RotateCcw, Download,
@@ -723,14 +724,14 @@ export default function ManagerTab() {
         />
       )}
 
-      {/* Run controls */}
+      {/* Run controls — batch runs once; streaming runs live via the console below */}
       <div style={{ display: "flex", gap: 10, marginBottom: 20, alignItems: "center" }}>
         <button
           style={S.btnPrimary(!canRun)}
           disabled={!canRun}
           onClick={handleRun}
         >
-          <Activity size={14} /> Run via Manager
+          <Activity size={14} /> {savedPlan?.config?.mode === "streaming" ? "Run once (seed data)" : "Run via Manager"}
         </button>
         {(mgrState || error) && (
           <button style={S.btnSecondary} onClick={reset}>
@@ -738,6 +739,15 @@ export default function ManagerTab() {
           </button>
         )}
       </div>
+
+      {/* Streaming console — live incremental processing for streaming-mode plans */}
+      {savedPlan?.config?.mode === "streaming" && (
+        <StreamingConsole
+          config={savedPlan.config}
+          schema={savedSchema || (detectedSchema?.columns ? { columns: detectedSchema.columns } : {})}
+          fileFormat={detectedSchema?.file_format || "csv"}
+        />
+      )}
 
       {/* All runs — managed here or mirrored from the Executor Agent */}
       {allRuns.length > 0 && (

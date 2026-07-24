@@ -577,7 +577,21 @@ def check_pipeline_status(token: str, run_id: str, poll_interval: int = 10, time
 # ────────────────────────────────────────────────────────────────────────────
 # End-to-end driver
 # ────────────────────────────────────────────────────────────────────────────
-def execute_pipeline(csv_path: str, pipeline_config: dict, schema: dict, progress=None) -> dict:
+def execute_pipeline(
+    csv_path: str,
+    pipeline_config: dict,
+    schema: dict,
+    progress=None,
+    skip_input_upload: bool = False,
+    file_format_override: str = None,
+) -> dict:
+    """Run a pipeline end-to-end.
+
+    skip_input_upload: streaming "tick" mode — don't upload a new input file;
+      just re-run the stream notebook against the existing source container so
+      it picks up whatever new data arrived (checkpoint dedups). csv_path may be
+      None in that case; pass file_format_override so codegen knows csv vs json.
+    """
     def _step(msg: str, dbx_run_id: int = None):
         print(f"\n--- {msg} ---")
         if progress:
@@ -608,8 +622,13 @@ def execute_pipeline(csv_path: str, pipeline_config: dict, schema: dict, progres
             return {"status": "failed",
                     "message": f"{s.get('type', 'compute').title()} stage '{s.get('name', '?')}' missing source_container/sink_container"}
 
-    input_ext = os.path.splitext(csv_path)[1].lower().lstrip(".") or "csv"
-    file_format = "json" if input_ext in ("json", "jsonl", "ndjson") else "csv"
+    if skip_input_upload:
+        # Streaming tick — no new file; derive format from the override.
+        file_format = (file_format_override or "csv").lower()
+        input_ext = file_format
+    else:
+        input_ext = os.path.splitext(csv_path)[1].lower().lstrip(".") or "csv"
+        file_format = "json" if input_ext in ("json", "jsonl", "ndjson") else "csv"
 
     # Build all notebook sources BEFORE any cloud call — a malformed
     # transform/filter from the planner fails here for free, not as a
@@ -645,7 +664,10 @@ def execute_pipeline(csv_path: str, pipeline_config: dict, schema: dict, progres
             purge_container(name)
 
     raw_container = pipeline_config["containers_to_create"][0]
-    if streaming:
+    if skip_input_upload:
+        # Streaming tick: process whatever new data already sits in the source.
+        _step(f"Streaming tick — scanning source '{raw_container}' for new data")
+    elif streaming:
         # Unique blob name per trigger so new data lands alongside old; the
         # stream notebook's checkpoint skips whatever it already ingested.
         stream_blob = f"stream-{run_tag}-{os.path.basename(csv_path)}"
@@ -654,7 +676,8 @@ def execute_pipeline(csv_path: str, pipeline_config: dict, schema: dict, progres
     else:
         _step(f"Uploading {input_ext.upper()} input to '{raw_container}'")
         upload_input_file(csv_path, raw_container)
-    if not check_blob_has_rows(raw_container):
+    # A streaming tick may legitimately find no new data — don't fail on that.
+    if not skip_input_upload and not check_blob_has_rows(raw_container):
         return {"status": "failed", "message": f"Upload verification failed on '{raw_container}'"}
 
     notebook_paths: dict = {}
