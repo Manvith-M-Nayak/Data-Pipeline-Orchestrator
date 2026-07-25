@@ -123,6 +123,9 @@ export const manager = {
   status:   (runId)  => req(`/manager/status/${runId}`),
   listRuns: ()       => req("/manager/runs"),
   feedback: ()       => req("/manager/feedback"),
+  // Combined results & logs endpoints
+  combinedRun:  (runId) => req(`/manager/combined/run/${runId}`),
+  analytics:    (limit = 200) => req(`/manager/combined/analytics?limit=${limit}`),
 };
 
 // ── Streaming console ─────────────────────────────────────────────────────────

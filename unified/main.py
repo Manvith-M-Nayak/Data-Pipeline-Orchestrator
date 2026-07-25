@@ -76,6 +76,7 @@ from central_manager_agent.router import router as manager_router
 from resource_agent.router import router as resource_router
 from assurance_agent.router import router as assurance_router
 from cost_optimization_agent.router import router as cost_optimizer_router
+from central_manager_agent.combined import router as combined_router
 
 # ── Service singletons ──────────────────────────────────────────────────────
 db_service = DBService()
@@ -166,6 +167,7 @@ app.include_router(
     mon_anomalies.router, prefix="/api/monitor/anomalies", tags=["monitor-anomalies"]
 )
 app.include_router(learning_router, prefix="/api/learning", tags=["learning"])
+app.include_router(combined_router, prefix="/api/manager/combined", tags=["combined"])
 
 @app.get("/api/health")
 async def health():
