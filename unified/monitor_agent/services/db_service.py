@@ -117,6 +117,13 @@ class DBService:
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_runs_status ON pipeline_runs(status)"
             )
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_anomaly_events_kind ON anomaly_events(kind)"
+            )
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_run_metrics_pipeline "
+                "ON run_metrics(pipeline_name, status, created_at)"
+            )
             await db.commit()
 
     # ── Central-manager run persistence ──────────────────────────────────────
@@ -378,7 +385,7 @@ class DBService:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 f"SELECT * FROM anomaly_events {where} "
-                f"ORDER BY detected_at DESC LIMIT ?",
+                f"ORDER BY id DESC LIMIT ?",
                 params,
             ) as cur:
                 rows = await cur.fetchall()
@@ -403,16 +410,19 @@ class DBService:
             await db.commit()
 
     async def get_metric_history(
-        self, pipeline_name: str, exclude_run_id: str = "", limit: int = 50
+        self, pipeline_name: str, exclude_run_id: str = "", limit: int = 50,
+        include_failed: bool = False,
     ) -> List[Dict]:
-        """Prior successful runs' metrics, newest first (baseline source)."""
+        """Prior runs' metrics, newest first (baseline source). Successful runs
+        only unless include_failed."""
+        status_clause = "" if include_failed else "AND status='ok'"
         async with aiosqlite.connect(DB_PATH) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
-                """
+                f"""
                 SELECT * FROM run_metrics
-                WHERE pipeline_name=? AND run_id != ? AND status='ok'
-                ORDER BY created_at DESC LIMIT ?
+                WHERE pipeline_name=? AND run_id != ? {status_clause}
+                ORDER BY created_at DESC, rowid DESC LIMIT ?
                 """,
                 (pipeline_name, exclude_run_id, limit),
             ) as cur:

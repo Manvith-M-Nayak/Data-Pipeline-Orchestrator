@@ -13,7 +13,7 @@ Kinds detected here and the signal each uses:
     timeout       poll result TIMEOUT / POLL_ERROR in the failure message
     retry_storm   manager retries > 0 (>=2 escalates to high)
     slow_runtime  duration > 1.2x the pipeline's historical p95 (needs >=3 runs)
-    cold_start    slow_runtime AND >6h gap since the previous run
+    cold_start    slow_runtime AND >6h gap since the pipeline's previous run
     zero_rows     run succeeded but the final stage wrote 0 rows
     sla_breach    duration > SLA_SECONDS (config, 0/unset disables)
     cost_spike    manager cost estimate > 2x the trailing average (needs >=3)
@@ -24,10 +24,19 @@ NOT detectable without Spark task-level metrics (documented, not faked):
                   on serverless; would require emitting metrics from inside the
                   generated notebook. Tracked as a future enhancement.
 
+Baselines are per PIPELINE, not per engine: every history-based check
+(slow_runtime, cold_start, cost_spike, schema_drift) compares a run only with
+earlier runs of the same pipeline identity (see pipeline_key). Its history is
+the run_metrics table this module writes.
+
 Detection failures are always non-fatal: this module observes runs, it must
 never break one.
 """
 
+import datetime as _dt
+import hashlib
+import json
+import re
 from typing import Dict, List, Optional
 
 from .db_service import DBService
@@ -41,30 +50,74 @@ MIN_HISTORY = 3           # baseline runs needed before slow/cost verdicts
 
 
 def _sla_seconds() -> float:
-    """SLA target from config.py / env; 0 disables sla_breach detection."""
+    """SLA target from env / config.py; 0 disables sla_breach detection."""
+    import settings
     try:
-        import config as _c
-        val = getattr(_c, "SLA_SECONDS", None)
-        if val:
-            return float(val)
-    except ImportError:
-        pass
-    import os
-    try:
-        return float(os.getenv("SLA_SECONDS", "0"))
+        return float(settings.get("SLA_SECONDS", "0"))
     except ValueError:
         return 0.0
 
 
-def _pipeline_name(result: Optional[Dict]) -> str:
-    """Mirror executor_agent.router._notify_monitor's naming so events join
-    cleanly with the monitor's pipeline_runs history."""
+def _engine_name(result: Optional[Dict]) -> str:
     mode = ((result or {}).get("mode") or "batch").lower()
     return (
         "Databricks_Streaming_Pipeline"
         if mode == "streaming"
         else "Databricks_Notebook_Pipeline"
     )
+
+
+def _norm(v) -> str:
+    return re.sub(r"\s+", " ", str(v or "")).strip().lower()
+
+
+def pipeline_key(plan: Optional[Dict], result: Optional[Dict] = None) -> str:
+    """Stable identity of a pipeline, used to key every baseline.
+
+    A plan-supplied ``pipeline_name`` wins. Otherwise it is a hash of what the
+    pipeline actually does — each stage's type, source, sink, transforms,
+    filter and aggregations — so re-running the same pipeline shares history
+    while different pipelines on the same engine no longer do.
+    """
+    engine = _engine_name(result)
+    plan = plan or {}
+    name = str(plan.get("pipeline_name") or "").strip()
+    if name:
+        return f"{engine}:{re.sub(r'[^A-Za-z0-9_.-]+', '_', name)[:64]}"
+    shape = [
+        {
+            "type": _norm(st.get("type")),
+            "src": _norm(st.get("source_container") or st.get("source_dataset")),
+            "sink": _norm(st.get("sink_container") or st.get("sink_dataset")),
+            "tx": sorted(_norm(t) for t in (st.get("transformations") or [])),
+            "filter": _norm(st.get("filter_condition")),
+            "agg": json.dumps(st.get("aggregations") or {}, sort_keys=True).lower(),
+        }
+        for st in plan.get("stages") or []
+    ]
+    if not shape:
+        return engine
+    digest = hashlib.sha1(json.dumps(shape, sort_keys=True).encode()).hexdigest()[:10]
+    return f"{engine}:{digest}"
+
+
+def _parse_ts(value) -> Optional[_dt.datetime]:
+    """Parse sqlite datetime('now') / ISO-8601 (with or without Z) as UTC."""
+    if not value:
+        return None
+    try:
+        ts = _dt.datetime.fromisoformat(str(value).strip().replace("Z", "+00:00").replace(" ", "T"))
+    except ValueError:
+        return None
+    return ts if ts.tzinfo else ts.replace(tzinfo=_dt.timezone.utc)
+
+
+def _p95_stats(durations: List[float]) -> Dict:
+    if not durations:
+        return {"count": 0, "avg": 0, "p95": 0}
+    d = sorted(durations)
+    n = len(d)
+    return {"count": n, "avg": sum(d) / n, "p95": d[min(int(n * 0.95), n - 1)]}
 
 
 async def detect_and_store(
@@ -88,7 +141,7 @@ async def detect_and_store(
     # prefer its dbx- id over the ADF copy id when the plan had both.
     run_id = ((result or {}).get("dbx_run_id") or (result or {}).get("run_id")
               or state.get("run_id", "unknown"))
-    pipeline = _pipeline_name(result)
+    pipeline = pipeline_key(state.get("plan"), result)
     duration_s = elapsed_ms / 1000.0
     status_ok = bool(result) and result.get("status") == "ok"
     retries = int(state.get("retries") or 0)
@@ -123,34 +176,35 @@ async def detect_and_store(
              f"(status={'ok' if status_ok else 'failed'}).",
              {"retries": retries})
 
-    # ── history-based checks (need the monitor DB; all optional) ─────────────
+    # ── history-based checks (this pipeline's prior runs; all optional) ─────
     try:
-        stats = await db.get_historical_stats(pipeline)
+        history = await db.get_metric_history(pipeline, exclude_run_id=run_id, limit=100)
     except Exception:
-        stats = {"count": 0}
+        history = []
+    stats = _p95_stats([h["duration_s"] for h in history if h.get("duration_s")])
 
     is_slow = (
         status_ok
-        and stats.get("count", 0) >= MIN_HISTORY
-        and stats.get("p95", 0) > 0
+        and stats["count"] >= MIN_HISTORY
+        and stats["p95"] > 0
         and duration_s > stats["p95"] * SLOW_FACTOR
     )
     if is_slow:
         ratio = duration_s / stats["p95"]
-        # Cold start: same slowness signal but explained by a long idle gap.
+        # Cold start: same slowness signal, explained by a long idle gap since
+        # this pipeline's previous run finished (run_metrics rows are written
+        # at run end; history excludes the current run and is newest-first).
         gap_s = None
         try:
-            prior = await db.get_pipeline_runs(pipeline_name=pipeline, limit=2)
-            # rows are newest-first; index 1 is the previous run (0 may be us)
-            if len(prior) >= 2 and prior[1].get("run_end"):
-                import datetime as _dt
-                prev_end = _dt.datetime.strptime(
-                    prior[1]["run_end"], "%Y-%m-%dT%H:%M:%SZ"
-                ).replace(tzinfo=_dt.timezone.utc)
+            last_any = await db.get_metric_history(
+                pipeline, exclude_run_id=run_id, limit=1, include_failed=True
+            )
+            prev_end = _parse_ts(last_any[0].get("created_at")) if last_any else None
+            if prev_end is not None:
                 gap_s = (_dt.datetime.now(_dt.timezone.utc) - prev_end
                          ).total_seconds() - duration_s
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"[anomaly] cold-start gap non-fatal: {exc}")
 
         if gap_s is not None and gap_s > COLD_GAP_S:
             _add("cold_start", "medium",
@@ -160,9 +214,9 @@ async def detect_and_store(
                   "idle_gap_h": round(gap_s / 3600, 1)})
         else:
             _add("slow_runtime", "high" if ratio >= 2 else "medium",
-                 f"Ran {duration_s:.0f}s — {ratio:.1f}x the historical p95 "
+                 f"Ran {duration_s:.0f}s — {ratio:.1f}x this pipeline's p95 "
                  f"({stats['p95']:.0f}s over {stats['count']} runs).",
-                 {"duration_s": duration_s, "avg_s": stats.get("avg"),
+                 {"duration_s": duration_s, "avg_s": stats["avg"],
                   "p95_s": stats["p95"], "count": stats["count"]})
 
     # ── sla_breach ───────────────────────────────────────────────────────────
@@ -185,8 +239,7 @@ async def detect_and_store(
     cost = ((state.get("cost_estimate") or {}).get("total_usd"))
     try:
         if cost is not None:
-            hist = await db.get_metric_history(pipeline, exclude_run_id=run_id)
-            costs = [h["cost_usd"] for h in hist if h.get("cost_usd")]
+            costs = [h["cost_usd"] for h in history if h.get("cost_usd")]
             if len(costs) >= MIN_HISTORY:
                 avg_cost = sum(costs) / len(costs)
                 if avg_cost > 0 and cost > avg_cost * COST_FACTOR:
@@ -196,8 +249,8 @@ async def detect_and_store(
                          f"(${avg_cost:.4f} over {len(costs)} runs).",
                          {"cost_usd": cost, "avg_cost_usd": avg_cost,
                           "history": len(costs)})
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f"[anomaly] cost check non-fatal: {exc}")
 
     # ── schema_drift ─────────────────────────────────────────────────────────
     try:

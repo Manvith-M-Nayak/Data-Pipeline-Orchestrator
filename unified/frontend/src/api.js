@@ -174,6 +174,9 @@ export const monitor = {
   getAnomalyLogs:   ()           => req("/monitor/logs/anomalies"),
   getPrediction:    (name)       => req(`/monitor/predictions/${encodeURIComponent(name)}`),
   getAnomalies:     ()           => req("/monitor/anomalies/"),
+  // Classified events from anomaly_detector.py (failure, slow_runtime, …)
+  getAnomalyEvents: (kind = "", limit = 200) =>
+    req(`/monitor/anomalies/events?limit=${limit}${kind ? `&kind=${encodeURIComponent(kind)}` : ""}`),
 };
 
 function _qs(params) {
