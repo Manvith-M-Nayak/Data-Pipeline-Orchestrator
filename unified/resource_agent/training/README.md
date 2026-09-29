@@ -62,7 +62,7 @@ python -m resource_agent.training.train_resource_model
 ## ⚠️ scikit-learn version pinning
 
 joblib pickles are tied to the scikit-learn version that wrote them. The FastAPI app runs
-**scikit-learn 1.7.0** (pinned in `requirements.txt`), and the Kaggle notebook installs the
+**scikit-learn 1.6.1** (pinned in `requirements.txt`), and the Kaggle notebook installs the
 same version. If the training and serving versions differ, `ResourceMLPredictor` raises
 `MLNotAvailable` on load and the agent silently falls back to the heuristic — check
 `GET /api/resource/model-info` to see which path is live.

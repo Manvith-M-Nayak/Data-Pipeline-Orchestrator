@@ -35,7 +35,8 @@ python-dotenv>=1.0.0
 # that wrote them, so pin sklearn exactly and train (Kaggle notebook / run_training)
 # against the SAME version, or model loading fails and the agents fall back to
 # their heuristics. See resource_agent/training/README.md.
-scikit-learn==1.7.0
+# 1.6.1 is the newest release that supports Python 3.9 (the project venv).
+scikit-learn==1.6.1
 joblib>=1.3.0
 numpy>=1.26
 pandas>=2.0

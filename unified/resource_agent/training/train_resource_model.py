@@ -15,9 +15,9 @@ All models share the FEATURE_COLS contract and are saved into a single bundle
     python -m resource_agent.training.train_resource_model
 
 IMPORTANT: joblib pickles are tied to the scikit-learn version that wrote them.
-Train with the SAME scikit-learn the FastAPI process uses (currently 1.7.0) or
+Train with the SAME scikit-learn the FastAPI process uses (currently 1.6.1) or
 the agent will fail to load the bundle and silently fall back to the heuristic.
-The Kaggle notebook pins scikit-learn==1.7.0 for exactly this reason.
+The Kaggle notebook pins scikit-learn==1.6.1 for exactly this reason.
 """
 
 import json

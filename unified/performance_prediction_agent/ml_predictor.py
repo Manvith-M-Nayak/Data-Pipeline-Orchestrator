@@ -19,6 +19,7 @@ from typing import Dict, List, Optional
 
 import joblib
 import numpy as np
+import pandas as pd
 
 _MODEL_DIR = os.path.join(os.path.dirname(__file__), "models")
 
@@ -66,6 +67,14 @@ class MLPredictor:
             cls._duration_model = joblib.load(_DURATION_MODEL_PATH)
             cls._outcome_model  = joblib.load(_OUTCOME_MODEL_PATH)
             cls._encoder        = joblib.load(_ENCODER_PATH)
+            # Stale bundles (trained on an older feature set) would fail on
+            # every prediction — refuse them once, with a clear reason.
+            for m in (cls._duration_model, cls._outcome_model):
+                if getattr(m, "n_features_in_", len(FEATURE_COLS)) != len(FEATURE_COLS):
+                    raise ValueError(
+                        f"model expects {m.n_features_in_} features but FEATURE_COLS has "
+                        f"{len(FEATURE_COLS)} — retrain with run_training.py"
+                    )
         except Exception as exc:
             cls._load_error = str(exc)
             cls._duration_model = None
@@ -87,7 +96,7 @@ class MLPredictor:
         resource_plan: dict,
         predictions: dict,
         plan: dict,
-    ) -> np.ndarray:
+    ) -> pd.DataFrame:
         stages = plan.get("stages", [])
         allocations = resource_plan.get("allocations", [])
         execution_groups = resource_plan.get("execution_groups", [])
@@ -165,7 +174,8 @@ class MLPredictor:
             correction_uncertainty,
             stage_parallelism_efficiency,
         ]
-        return np.array(row, dtype=float).reshape(1, -1)
+        # Named columns, matching how the models were fitted (run_training.py).
+        return pd.DataFrame([row], columns=FEATURE_COLS, dtype=float)
 
     @classmethod
     def predict(
