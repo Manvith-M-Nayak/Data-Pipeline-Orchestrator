@@ -14,5 +14,5 @@ This package holds the supervised-regression pieces:
                       utilization) that ground the synthetic label generator.
 
 Duration / runtime / SLA prediction deliberately lives in the Performance
-Prediction Agent, not here — see RESPONSIBILITIES.md.
+Prediction Agent, not here — see docs/RESPONSIBILITIES.md.
 """

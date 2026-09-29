@@ -1,6 +1,6 @@
 # Resource Setup Guide
 
-Complete step-by-step instructions for creating every Azure resource and API key this project needs, and exactly where each value goes in `unified/config.py`.
+Complete step-by-step instructions for creating every Azure resource and API key this project needs, and exactly where each value goes in `unified/.env`.
 
 > **Azure for Students:** You get $100 free credit with no credit card required. All resources in this guide are available on the student tier. Watch the Databricks cost warning in step 6 — it is the only resource that can drain your credit quickly if left running.
 
@@ -41,8 +41,8 @@ After registration, you land on the app overview page.
 
 | Value | Where on the page | Config key |
 |---|---|---|
-| `AZURE_TENANT_ID` | Overview → **Directory (tenant) ID** | `unified/config.py` |
-| `AZURE_CLIENT_ID` | Overview → **Application (client) ID** | `unified/config.py` |
+| `AZURE_TENANT_ID` | Overview → **Directory (tenant) ID** | `unified/.env` |
+| `AZURE_CLIENT_ID` | Overview → **Application (client) ID** | `unified/.env` |
 
 ### Create a client secret
 
@@ -54,7 +54,7 @@ After registration, you land on the app overview page.
 
 | Value | Where | Config key |
 |---|---|---|
-| `AZURE_CLIENT_SECRET` | The **Value** column (copy before leaving the page) | `unified/config.py` |
+| `AZURE_CLIENT_SECRET` | The **Value** column (copy before leaving the page) | `unified/.env` |
 
 ---
 
@@ -66,7 +66,7 @@ After registration, you land on the app overview page.
 
 | Value | Where | Config key |
 |---|---|---|
-| `AZURE_SUBSCRIPTION_ID` | Subscriptions → your sub → Overview → **Subscription ID** | `unified/config.py` |
+| `AZURE_SUBSCRIPTION_ID` | Subscriptions → your sub → Overview → **Subscription ID** | `unified/.env` |
 
 ---
 
@@ -86,7 +86,7 @@ A resource group is a container that holds related Azure resources. ADF, Storage
 
 | Value | Where | Config key |
 |---|---|---|
-| `AZURE_RESOURCE_GROUP` | The name you chose above | `unified/config.py` |
+| `AZURE_RESOURCE_GROUP` | The name you chose above | `unified/.env` |
 
 ---
 
@@ -107,8 +107,8 @@ A resource group is a container that holds related Azure resources. ADF, Storage
 
 | Value | Where | Config key |
 |---|---|---|
-| `AZURE_DATA_FACTORY` | The name you chose above | `unified/config.py` |
-| `ADF_FACTORY_NAME` | Same name | `unified/monitor_agent` (bridged automatically from config.py) |
+| `AZURE_DATA_FACTORY` | The name you chose above | `unified/.env` |
+| `ADF_FACTORY_NAME` | Optional — the monitor falls back to `AZURE_DATA_FACTORY` | `unified/.env` |
 
 ### Verify
 
@@ -138,7 +138,7 @@ The project uses Blob Storage for landing zones (raw, bronze, silver containers)
 
 | Value | Where | Config key |
 |---|---|---|
-| `AZURE_STORAGE_ACCOUNT` | The name you chose above (e.g. `pipelinestoragemn`) | `unified/config.py` |
+| `AZURE_STORAGE_ACCOUNT` | The name you chose above (e.g. `pipelinestoragemn`) | `unified/.env` |
 
 ### Collect the storage account key
 
@@ -149,7 +149,7 @@ The project uses Blob Storage for landing zones (raw, bronze, silver containers)
 
 | Value | Where | Config key |
 |---|---|---|
-| `AZURE_STORAGE_KEY` | Access keys → key1 → **Key** | `unified/config.py` |
+| `AZURE_STORAGE_KEY` | Access keys → key1 → **Key** | `unified/.env` |
 
 ---
 
@@ -188,7 +188,7 @@ The project uses Blob Storage for landing zones (raw, bronze, silver containers)
 
 | Value | Where | Config key |
 |---|---|---|
-| `DATABRICKS_HOST` | Browser URL after clicking Launch Workspace | `unified/config.py` |
+| `DATABRICKS_HOST` | Browser URL after clicking Launch Workspace | `unified/.env` |
 
 ### Generate a personal access token
 
@@ -203,7 +203,7 @@ The project uses Blob Storage for landing zones (raw, bronze, silver containers)
 
 | Value | Where | Config key |
 |---|---|---|
-| `DATABRICKS_TOKEN` | The token you just generated (starts with `dapi`) | `unified/config.py` |
+| `DATABRICKS_TOKEN` | The token you just generated (starts with `dapi`) | `unified/.env` |
 
 ### Cluster settings
 
@@ -273,7 +273,7 @@ now runs the local fine-tuned model — see step 8b).
 
 | Value | Where | Config key |
 |---|---|---|
-| `GROQ_API_KEY` | Groq Console → API Keys → your key | `unified/config.py` |
+| `GROQ_API_KEY` | Groq Console → API Keys → your key | `unified/.env` |
 
 ---
 
@@ -298,23 +298,18 @@ Full build details (prereqs, disk, test command) are in
 | `PLANNER_MODEL` | `planner-agent` | model name from `ollama create` |
 
 > To skip the local model and use Groq for the planner too, set
-> `PLANNER_BACKEND = "groq"` in `unified/config.py`.
+> `PLANNER_BACKEND=groq` in `unified/.env`.
 
 ### Running it (after the one-time build)
 
-The model is built once. Day-to-day you only need Ollama running plus the
-backend:
+The model is built once. Day-to-day you only start the backend — it launches
+`ollama serve` itself if Ollama isn't running and preloads the planner model
+(set `OLLAMA_AUTOSTART=0` in `.env` to manage Ollama yourself):
 
 ```bash
-# Ollama server — make it permanent (auto-starts at login, survives reboots):
-brew services start ollama
-#   …or run it temporarily in a terminal for this session only:
-#   ollama serve
-
-# Backend:
 cd unified
 source venv/bin/activate
-python main.py
+uvicorn main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 Verify the model is registered: `ollama list` should show `planner-agent`.
@@ -322,53 +317,56 @@ You do **not** rebuild the model each time.
 
 ---
 
-## 9. Fill in `unified/config.py`
+## 9. Fill in `unified/.env`
 
-Copy the example file and fill in all values collected above:
+Copy the template and fill in all values collected above:
 
 ```bash
-cp unified/config.example.py unified/config.py
+cp unified/.env.example unified/.env
 ```
 
-Then open `unified/config.py` and replace every placeholder:
+Then open `unified/.env` and replace every placeholder (`KEY=value`, no quotes needed):
 
-```python
+```bash
+# ── API security ─────────────────────────────────────────────
+API_KEY=                     # leave empty for local use (localhost only); set for any shared deployment
+
 # ── Azure Service Principal ──────────────────────────────────
-AZURE_TENANT_ID     = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"   # step 1
-AZURE_CLIENT_ID     = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"   # step 1
-AZURE_CLIENT_SECRET = "your-secret-value-from-step-1"          # step 1
+AZURE_TENANT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx        # step 1
+AZURE_CLIENT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx        # step 1
+AZURE_CLIENT_SECRET=your-secret-value-from-step-1           # step 1
 
-# ── Azure Subscription + Resource Group ─────────────────────
-AZURE_SUBSCRIPTION_ID = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" # step 2
-AZURE_RESOURCE_GROUP  = "data-pipeline-rg"                      # step 3
-
-# ── Azure Data Factory ───────────────────────────────────────
-AZURE_DATA_FACTORY = "my-data-factory"                          # step 4
+# ── Azure Subscription + Resource Group + Data Factory ──────
+AZURE_SUBSCRIPTION_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx  # step 2
+AZURE_RESOURCE_GROUP=data-pipeline-rg                       # step 3
+AZURE_DATA_FACTORY=my-data-factory                          # step 4
 
 # ── Azure Blob Storage ───────────────────────────────────────
-AZURE_STORAGE_ACCOUNT = "pipelinestoragemn"                     # step 5
-AZURE_STORAGE_KEY     = "your-long-base64-key"                  # step 5
+AZURE_STORAGE_ACCOUNT=pipelinestoragemn                     # step 5
+AZURE_STORAGE_KEY=your-long-base64-key                      # step 5
 
 # ── Azure Databricks ─────────────────────────────────────────
-DATABRICKS_HOST       = "https://adb-1234567890.12.azuredatabricks.net"  # step 6
-DATABRICKS_TOKEN      = "dapixxxxxxxxxxxxxxxxxxxx"              # step 6
-DATABRICKS_CLUSTER_ID = ""
-DATABRICKS_SPARK_VERSION = "13.3.x-scala2.12"
-DATABRICKS_NODE_TYPE     = "Standard_DS3_v2"
-DATABRICKS_NOTEBOOK_BASE = "/Shared/unified_orchestrator"
+DATABRICKS_HOST=https://adb-1234567890.12.azuredatabricks.net   # step 6
+DATABRICKS_TOKEN=dapixxxxxxxxxxxxxxxxxxxx                       # step 6
+DATABRICKS_CLUSTER_ID=
+DATABRICKS_NOTEBOOK_BASE=/Shared/unified_orchestrator
 
 # ── Planner backend (local fine-tuned model) ────────────────
-PLANNER_BACKEND = "ollama"                                     # step 8b ("groq" for legacy)
-OLLAMA_HOST     = "http://localhost:11434"                     # step 8b
-PLANNER_MODEL   = "planner-agent"                              # step 8b
+PLANNER_BACKEND=ollama                                      # step 8b ("groq" for cloud)
+OLLAMA_HOST=http://localhost:11434
+PLANNER_MODEL=planner-agent
 
-# ── Groq (monitor + self-healing) ────────────────────────────
-GROQ_API_KEY = "gsk_xxxxxxxxxxxxxxxxxxxxxxxxxxxx"               # step 8
+# ── Groq (monitor analysis + planner fallback) ───────────────
+GROQ_MODEL=openai/gpt-oss-120b
+GROQ_API_KEY=gsk_xxxxxxxxxxxxxxxxxxxxxxxxxxxx                # step 8
 ```
 
-> **Note:** `unified/config.py` is already in `.gitignore`. Never commit it.
+`.env.example` lists the remaining optional keys with their defaults.
 
-The unified backend (`unified/main.py`) automatically bridges all values from `config.py` into environment variables, so the monitor agent services pick them up without any extra configuration. You do **not** need a separate `.env` file.
+> **Note:** `unified/.env` is in `.gitignore`. Never commit it.
+
+Every module reads settings through `unified/settings.py` (environment → `.env` →
+legacy `config.py` → default), so nothing else needs configuring.
 
 ---
 
@@ -376,11 +374,11 @@ The unified backend (`unified/main.py`) automatically bridges all values from `c
 
 Run these checks in order. Each one is independent and fast.
 
-### Check 1 — Python can read config
+### Check 1 — Python can read the settings
 
 ```bash
 cd unified
-python3 -c "import config; print('Tenant:', config.AZURE_TENANT_ID[:8], '...')"
+python3 -c "import settings; print('Tenant:', settings.get('AZURE_TENANT_ID')[:8], '...')"
 ```
 
 Expected: prints first 8 chars of your tenant ID.
@@ -389,10 +387,7 @@ Expected: prints first 8 chars of your tenant ID.
 
 ```bash
 python3 -c "
-import asyncio, sys
-sys.path.insert(0, '.')
-import config, os
-os.environ.setdefault('AZURE_TENANT_ID', config.AZURE_TENANT_ID)
+import asyncio
 from monitor_agent.services.db_service import DBService
 asyncio.run(DBService().initialize())
 print('DB OK')
@@ -405,14 +400,7 @@ Expected: `DB OK`. Creates `unified/data/adf_monitor.db`.
 
 ```bash
 python3 -c "
-import asyncio, sys, config, os
-sys.path.insert(0, '.')
-os.environ['AZURE_TENANT_ID']     = config.AZURE_TENANT_ID
-os.environ['AZURE_CLIENT_ID']     = config.AZURE_CLIENT_ID
-os.environ['AZURE_CLIENT_SECRET'] = config.AZURE_CLIENT_SECRET
-os.environ['ADF_FACTORY_NAME']    = config.AZURE_DATA_FACTORY
-os.environ['AZURE_SUBSCRIPTION_ID'] = config.AZURE_SUBSCRIPTION_ID
-os.environ['AZURE_RESOURCE_GROUP']  = config.AZURE_RESOURCE_GROUP
+import asyncio
 from monitor_agent.services.adf_service import ADFService
 token = asyncio.run(ADFService()._get_token())
 print('Token OK:', token[:20], '...')
@@ -425,14 +413,7 @@ Expected: prints first 20 chars of an access token.
 
 ```bash
 python3 -c "
-import asyncio, sys, config, os
-sys.path.insert(0, '.')
-os.environ['AZURE_TENANT_ID']       = config.AZURE_TENANT_ID
-os.environ['AZURE_CLIENT_ID']       = config.AZURE_CLIENT_ID
-os.environ['AZURE_CLIENT_SECRET']   = config.AZURE_CLIENT_SECRET
-os.environ['ADF_FACTORY_NAME']      = config.AZURE_DATA_FACTORY
-os.environ['AZURE_SUBSCRIPTION_ID'] = config.AZURE_SUBSCRIPTION_ID
-os.environ['AZURE_RESOURCE_GROUP']  = config.AZURE_RESOURCE_GROUP
+import asyncio
 from monitor_agent.services.adf_service import ADFService
 runs = asyncio.run(ADFService().get_active_pipeline_runs())
 print(f'ADF OK — {len(runs)} active run(s)')
@@ -445,16 +426,14 @@ Expected: `ADF OK — 0 active run(s)` (or more if pipelines are running).
 
 ```bash
 python3 -c "
-import asyncio, sys, config, os
-sys.path.insert(0, '.')
-os.environ['GROQ_API_KEY'] = config.GROQ_API_KEY
+import asyncio, settings
 from monitor_agent.services.groq_service import GroqService
-result = asyncio.run(GroqService().predict_runtime('test', []))
-print('Groq OK:', result.get('confidence'))
+print('Groq OK:', asyncio.run(GroqService()._chat('Reply with OK.', 'ping'))[:40])
 "
 ```
 
-Expected: `Groq OK: low` (or similar).
+Expected: `Groq OK: OK` (or similar). A `model_not_found` error means `GROQ_MODEL`
+isn't available to your key — pick one from console.groq.com → Models.
 
 ### Check 6 — Full backend
 
@@ -465,7 +444,7 @@ uvicorn main:app --reload --port 8000
 ```
 
 Open `http://localhost:8000/api/health` in your browser.  
-Expected response: `{"status":"ok","agents":["planner","executor","monitor"]}`
+Expected response: `{"status":"ok","agents":["planner","assurance","executor","monitor",...]}`
 
 Open `http://localhost:8000/docs` for the full interactive API.
 
@@ -493,7 +472,7 @@ Expected: sidebar with Live, Logs, Anomalies, Predictions, Planner, Executor pag
 | `AADSTS700016: Application not found` | Personal account tenant mismatch | In app registration, change supported account types to include personal accounts (step 1) |
 | `StorageErrorCode.AuthorizationPermissionMismatch` | Storage role missing | Assign Storage Blob Data Contributor (step 7b) |
 | `OperationNotAllowed: Operation results in exceeding quota` | Student vCPU quota hit | Switch `DATABRICKS_NODE_TYPE` to `Standard_DS2_v2` or request quota increase |
-| `groq.AuthenticationError` | Wrong or missing Groq key | Re-check `GROQ_API_KEY` in config.py |
+| `groq.AuthenticationError` | Wrong or missing Groq key | Re-check `GROQ_API_KEY` in `unified/.env` |
 | `ModuleNotFoundError: No module named 'groq'` | Dependencies not installed | Run `pip install -r unified/requirements.txt` |
 | `node: command not found` | Node.js not installed | Download from nodejs.org — install v18 LTS or later |
 | `python: command not found` | macOS uses `python3` | Use `python3` — all commands in this guide already use `python3` |

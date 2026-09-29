@@ -6,10 +6,12 @@ Run:  python build_finetune_notebook.py
 Then verify the data-prep block with:  python build_finetune_notebook.py --verify
 """
 import json
+import os
 import sys
 
-NB_PATH = "finetune_qwen_planner.ipynb"
-DATASET = "planner_config_dataset.jsonl"
+_HERE = os.path.dirname(os.path.abspath(__file__))
+NB_PATH = os.path.join(_HERE, "finetune_qwen_planner.ipynb")
+DATASET = os.path.join(_HERE, "datasets", "planner_config_dataset.jsonl")
 
 
 # ── The system prompt the fine-tuned model is trained against. Kept consistent

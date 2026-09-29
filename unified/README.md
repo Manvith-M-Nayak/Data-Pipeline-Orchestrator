@@ -52,6 +52,9 @@ Settings resolve **environment / `.env` → legacy `config.py` → default** (`s
 | `learning_policy_agent/` | `/api/learning` | Learns correction factors from feedback; retrains / rolls back models. |
 | `frontend/` | — | React + Vite dashboard (dev proxy → `127.0.0.1:8000`). |
 | `settings.py`, `app_security.py`, `background.py`, `jsonl_log.py` | — | Config resolution, auth + upload limits, safe background tasks, rotating feedback logs. |
+| `planner_agent/training/` | — | Planner fine-tuning dataset generator, validator, notebook builder, live eval (see its README). |
+| `scripts/` | — | `integration_test.py` (local pre-execution flow test), `seed_anomalies.py` (demo data), `test_input.json` (sample request). |
+| `docs/` | — | Design notes: agent responsibilities, scan findings, agent deep-dives. |
 
 ## Models
 
@@ -76,6 +79,12 @@ Runtime state is in `data/` (gitignored):
 
 ## Planner training data
 
-The planner's fine-tuning dataset generator and validator (`generate_dataset.py`,
-`validate_dataset.py`, `report.py`, `build_finetune_notebook.py`) are documented in
-[DATASET_GENERATOR.md](DATASET_GENERATOR.md).
+The planner's fine-tuning dataset generator and validator live in
+`planner_agent/training/` and are documented in its [README](planner_agent/training/README.md).
+Run them from anywhere, e.g. `python planner_agent/training/validate_dataset.py`.
+
+## Tests
+
+```bash
+python scripts/integration_test.py   # Resource → Performance → Cost pre-execution flow, no cloud calls
+```

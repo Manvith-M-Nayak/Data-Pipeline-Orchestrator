@@ -194,7 +194,7 @@ Two LoRA fine-tuning paths are included:
   (`planner-agent-lora.gguf` + `Modelfile`).
 
 The dataset (`planner_config_dataset.jsonl`) is generated and validated by the tooling in
-`unified/` (`generate_dataset.py`, `validate_dataset.py`) — one JSON object per line of
+`unified/planner_agent/training/` (`generate_dataset.py`, `validate_dataset.py`) — one JSON object per line of
 `{schema, user_prompt, config}`, with a validator enforcing structural, quality, and
 semantic correctness on every row.
 

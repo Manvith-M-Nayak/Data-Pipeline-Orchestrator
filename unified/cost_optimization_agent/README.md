@@ -109,7 +109,7 @@ The trained bundle lands in `models/cost_models.pkl`. The training CSV is gitign
 
 ```bash
 cd unified
-python -m integration_test
+python scripts/integration_test.py
 ```
 
 Exercises the full pre-execution pipeline: Resource Agent → Performance Prediction → Cost Optimization (ML path) → Central Manager wiring. Exits non-zero on failure.

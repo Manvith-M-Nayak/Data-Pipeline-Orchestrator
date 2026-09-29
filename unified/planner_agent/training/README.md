@@ -1,6 +1,8 @@
 # Planner-Agent synthetic dataset
 
-> Part of the orchestrator backend — see [README.md](README.md) for running the app.
+> Part of the orchestrator backend — see [unified/README.md](../../README.md) for running the app.
+> Datasets are read from / written to `datasets/` here (gitignored); every tool
+> resolves paths from its own location, so they can be run from any directory.
 
 A **configurable, seeded generator** and an **independent validator** for the
 planner fine-tuning dataset. Output format is unchanged from the previous

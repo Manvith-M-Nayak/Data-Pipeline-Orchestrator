@@ -4,7 +4,7 @@ Resource Agent — owns RESOURCE MANAGEMENT for the pipeline.
 Given a plan + its data, it recommends the compute SETTINGS every stage should
 run with and guarantees they fit the student-tier hard limits. It deliberately
 does NOT own runtime / SLA / outcome prediction — that is the Performance
-Prediction Agent's job (see RESPONSIBILITIES.md). The per-stage `duration_s`
+Prediction Agent's job (see docs/RESPONSIBILITIES.md). The per-stage `duration_s`
 fields here are an INTERNAL sizing aid only (used to compare allocation options
 and to drive mid-run reallocation); they are never the plan's authoritative
 runtime.
@@ -95,7 +95,7 @@ class StageRequirements:
     estimated_diu:     int          # ADF DIU (copy stages only), clamped to MAX_DIU
     estimated_duration_s: int       # INTERNAL sizing aid only — NOT the plan's
                                     # runtime. Runtime/SLA is owned by the
-                                    # Performance Prediction Agent (see RESPONSIBILITIES.md).
+                                    # Performance Prediction Agent (see docs/RESPONSIBILITIES.md).
     confidence:        float        # 0–1 based on data richness
     rationale:         str          # human-readable reasoning
     # Raw amounts the plan *requested* before clamping to hard limits.
@@ -406,7 +406,7 @@ class ResourceAgent:
         When the ML recommender sized the stage, its numbers are AUTHORITATIVE:
         they already reflect a demand-driven right-sizing, so we only cap them at
         the hard limits (the Planner's recommended_settings is just a hint that
-        the Resource Agent may override — see RESPONSIBILITIES.md).
+        the Resource Agent may override — see docs/RESPONSIBILITIES.md).
 
         Fallback (heuristic) path: cap at recommended_settings + hard limits and
         apply a size-based driver-only / reduce-by-one shrink.

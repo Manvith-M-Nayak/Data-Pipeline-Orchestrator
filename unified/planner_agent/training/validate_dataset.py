@@ -36,7 +36,13 @@ Rules:
 
 import json
 import re
+import os
 import sys
+
+# Datasets live in ./datasets next to this script (gitignored); resolving from
+# __file__ lets the tools run from any working directory.
+DATASET_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "datasets")
+DEFAULT_DATASET = os.path.join(DATASET_DIR, "planner_config_dataset.jsonl")
 from collections import Counter, defaultdict
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -698,7 +704,7 @@ def report(records):
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     quiet = "--quiet" in sys.argv
-    path = args[0] if args else "planner_config_dataset.jsonl"
+    path = args[0] if args else DEFAULT_DATASET
 
     records, failures = [], []
     with open(path, encoding="utf-8") as f:

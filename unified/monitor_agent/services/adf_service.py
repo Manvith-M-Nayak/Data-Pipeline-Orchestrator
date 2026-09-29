@@ -5,12 +5,15 @@ from typing import List, Dict, Any, Optional
 
 import httpx
 
-TENANT_ID       = os.getenv("AZURE_TENANT_ID", "")
-CLIENT_ID       = os.getenv("AZURE_CLIENT_ID", "")
-CLIENT_SECRET   = os.getenv("AZURE_CLIENT_SECRET", "")
-SUBSCRIPTION_ID = os.getenv("AZURE_SUBSCRIPTION_ID", "")
-RESOURCE_GROUP  = os.getenv("AZURE_RESOURCE_GROUP", "")
-FACTORY_NAME    = os.getenv("ADF_FACTORY_NAME", "")
+import settings
+
+TENANT_ID       = settings.get("AZURE_TENANT_ID")
+CLIENT_ID       = settings.get("AZURE_CLIENT_ID")
+CLIENT_SECRET   = settings.get("AZURE_CLIENT_SECRET")
+SUBSCRIPTION_ID = settings.get("AZURE_SUBSCRIPTION_ID")
+RESOURCE_GROUP  = settings.get("AZURE_RESOURCE_GROUP")
+# ADF_FACTORY_NAME is the legacy name; AZURE_DATA_FACTORY is what .env uses.
+FACTORY_NAME    = settings.get("ADF_FACTORY_NAME") or settings.get("AZURE_DATA_FACTORY")
 
 ADF_API_VERSION = "2018-06-01"
 MGMT_BASE       = "https://management.azure.com"

@@ -9,7 +9,7 @@ Mirrors the Performance Prediction Agent's ml_predictor pattern exactly:
 
 The model recommends compute SETTINGS only (workers / DIU / peak memory /
 shuffle partitions / node type). Duration, runtime and SLA prediction live in
-the Performance Prediction Agent — see RESPONSIBILITIES.md.
+the Performance Prediction Agent — see docs/RESPONSIBILITIES.md.
 """
 
 import os

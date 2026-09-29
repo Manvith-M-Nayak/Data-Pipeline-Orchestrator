@@ -5,7 +5,7 @@ Simulates the Central Manager's Phases 1 → 2a → 2b → 2c flow:
   Resource Agent → Performance Prediction → Cost Optimization
 
 Run:
-    python -m integration_test
+    python scripts/integration_test.py
 """
 
 import os
@@ -17,7 +17,8 @@ try:
 except Exception:
     pass
 
-sys.path.insert(0, os.path.dirname(__file__))
+# Lives in scripts/ — put the project root (unified/) on the path.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
 _plan = {
     "num_containers": 3,

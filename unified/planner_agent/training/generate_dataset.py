@@ -32,7 +32,7 @@ import math
 import random
 import sys
 
-from validate_dataset import (render_prompt, expected_settings, column_range,
+from validate_dataset import (DEFAULT_DATASET, render_prompt, expected_settings, column_range,
                               parse_filter, RANGES, DOMAIN_OVERRIDES,
                               EDITABLE_SETTINGS)
 
@@ -42,7 +42,7 @@ from validate_dataset import (render_prompt, expected_settings, column_range,
 CONFIG = {
     "num_rows": 5000,
     "seed": 20260628,
-    "output_path": "planner_config_dataset.jsonl",
+    "output_path": DEFAULT_DATASET,
 
     "size_dist": {"small (< 5MB)": 0.30, "medium (5–50MB)": 0.30,
                   "large (50–200MB)": 0.20, "xlarge (> 200MB)": 0.20},

@@ -12,11 +12,11 @@ This reuses validate_dataset.report() so the two stay in sync.
 import json
 import sys
 
-from validate_dataset import report
+from validate_dataset import DEFAULT_DATASET, report
 
 
 def main():
-    path = sys.argv[1] if len(sys.argv) > 1 else "planner_config_dataset.jsonl"
+    path = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_DATASET
     records = []
     with open(path, encoding="utf-8") as f:
         for line in f:
