@@ -65,9 +65,17 @@ async def combined_run_detail(run_id: str):
             break
 
     # 3. Monitor analysis (AI insights, anomalies, root cause)
+    # pipeline_runs is keyed by the executor's ADF / dbx- run id, not the
+    # manager's uuid — try the Databricks record first, then the ADF one.
     monitor_analysis = None
     if db is not None:
-        rows = await db.get_pipeline_runs(run_id=run_id, limit=1)
+        ex = state.get("executor_result") or {}
+        rows = []
+        for rid in (ex.get("dbx_run_id"), ex.get("run_id"), ex.get("adf_run_id")):
+            if rid:
+                rows = await db.get_pipeline_runs(run_id=rid, limit=1)
+                if rows:
+                    break
         if rows:
             monitor_analysis = {
                 "pipeline_name": rows[0].get("pipeline_name"),

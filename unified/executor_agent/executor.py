@@ -684,6 +684,7 @@ def execute_pipeline(
     mode = (pipeline_config.get("mode") or "batch").lower()
     streaming = mode == "streaming"
     stage_rows: dict = {}   # stage name -> rows_written (from notebook exit JSON)
+    completed: list = []    # stage names that actually finished successfully
 
     stages          = pipeline_config.get("stages", [])
     copy_stages     = [s for s in stages if s.get("type") == "copy"]
@@ -810,7 +811,10 @@ def execute_pipeline(
                 "run_id":  adf_run_id,
                 "message": f"Copy pipeline finished with status={result['status']}",
                 "result":  result["run"],
+                "mode":    mode,
+                "stages_completed": completed,
             }
+        completed.extend(s["name"] for s in copy_stages)
 
     # ── Databricks Jobs API path (notebook stages, serverless) ───────────────
     # Stages run group by group per config["execution_groups"]; stages inside
@@ -863,6 +867,8 @@ def execute_pipeline(
                 rw = (p.get("notebook_exit") or {}).get("rows_written")
                 if isinstance(rw, int):
                     stage_rows[n] = rw
+                if p["result_state"] == "SUCCESS":
+                    completed.append(n)
 
             failures = [(n, p) for n, p in results if p["result_state"] != "SUCCESS"]
             if failures:
@@ -877,24 +883,36 @@ def execute_pipeline(
                         f"{poll['state_message']}{extra}"
                     ),
                     "result":  poll,
+                    "mode":    mode,
+                    "adf_run_id": adf_run_id,
+                    "dbx_run_id": f"dbx-{run_tag}",
+                    "stages_completed": completed,
                 }
 
     # Last container in the plan is the final sink
     containers = pipeline_config.get("containers_to_create", [])
     sink_container = containers[-1] if containers else None
 
-    # rows_written = output of the LAST compute stage that reported one (the
-    # final sink's row count). None when no stage reported (e.g. copy-only).
+    # rows_written = the final sink's row count: take the last EXECUTED group
+    # that reported rows, preferring the stage that writes to the final sink
+    # (a fan-out group has sibling branches). None when no stage reported.
     rows_written = None
-    for s in compute_stages:
-        if s["name"] in stage_rows:
-            rows_written = stage_rows[s["name"]]
+    for group in reversed(groups if compute_stages else []):
+        reported = [n for n in group if n in stage_rows]
+        if reported:
+            to_sink = [n for n in reported if nb_by_name[n].get("sink_container") == sink_container]
+            rows_written = stage_rows[(to_sink or reported)[-1]]
+            break
 
     return {
         "status":         "ok",
         "run_id":         adf_run_id or f"dbx-{run_tag}",
         "mode":           mode,
         "stages":         [s["name"] for s in stages],
+        "stages_completed": completed,
+        # Both ids, so the monitor can record ADF and Databricks runs separately.
+        "adf_run_id":     adf_run_id,
+        "dbx_run_id":     f"dbx-{run_tag}" if compute_stages else None,
         "sink_container": sink_container,
         "rows_written":   rows_written,
         "result": {

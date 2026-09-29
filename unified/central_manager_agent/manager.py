@@ -613,14 +613,27 @@ class CentralManager:
                 deps[s["name"]].append(sinks[src])
 
         # Topological sort into parallel groups
-        remaining = list(state.plan.get("execution_order", [s["name"] for s in stages]))
+        # execution_order sets the preferred order, but every stage must land in
+        # a group exactly once — names missing from it are appended, unknown or
+        # duplicate names are dropped (the executor does the same).
+        remaining: List[str] = []
+        for n in list(state.plan.get("execution_order") or []) + [s["name"] for s in stages]:
+            if n in deps and n not in remaining:
+                remaining.append(n)
         resolved: set = set()
         while remaining:
             group = [
                 n for n in remaining if all(d in resolved for d in deps.get(n, []))
             ]
             if not group:
-                group = [remaining[0]]  # break cycle
+                self._log(
+                    state,
+                    "PARALLELISM WARN",
+                    f"dependency cycle among {remaining}",
+                    f"breaking it by running '{remaining[0]}' first",
+                    "warn",
+                )
+                group = [remaining[0]]
             groups.append(group)
             for n in group:
                 resolved.add(n)
@@ -885,6 +898,10 @@ class CentralManager:
                 result = await run_in_threadpool(
                     execute_pipeline, csv_path, config, schema, _progress
                 )
+                # Set immediately (success or failure dict) so feedback, the
+                # monitor and anomaly detection see the real result.
+                if isinstance(result, dict):
+                    state.executor_result = result
 
                 if isinstance(result, dict) and result.get("status") == "ok":
                     self._log(
@@ -955,7 +972,7 @@ class CentralManager:
 
         # Check 2 — stage completion
         stages_expected = len(state.plan.get("stages", []))
-        stages_ran = len(result.get("stages", []))
+        stages_ran = len(result.get("stages_completed", []))
         checks["stages_expected"] = stages_expected
         checks["stages_completed"] = stages_ran
         checks["all_stages_completed"] = stages_ran >= stages_expected
@@ -1011,7 +1028,9 @@ class CentralManager:
     # ────────────────────────────────────────────────────────────────────────
     # Phase 5 — Feedback / learning loop record
     # ────────────────────────────────────────────────────────────────────────
-    async def record_feedback(self, state: RunState, actual_duration_s: float):
+    async def record_feedback(
+        self, state: RunState, actual_duration_s: float, final_status: Optional[str] = None
+    ):
         self._enter(state, "feedback", "Recording outcome to feedback log")
         try:
             os.makedirs(_DATA_DIR, exist_ok=True)
@@ -1047,7 +1066,7 @@ class CentralManager:
             record = {
                 "ts": _utcnow(),
                 "run_id": state.run_id,
-                "final_status": state.status,
+                "final_status": final_status or state.status,
                 "stage_count": len(state.plan.get("stages", [])),
                 "retries": state.retries,
                 "actual_duration_s": round(actual_duration_s, 1),
@@ -1271,11 +1290,14 @@ class CentralManager:
             await self.run_assurance(state, result, time.time() - t0)
 
             # ── Phase 5: Feedback ────────────────────────────────────────
+            # The log gets the outcome ("completed"), not the in-progress
+            # "feedback" status the run is in while it is being written.
             state.status = "feedback"
-            await self.record_feedback(state, time.time() - t0)
+            await self.record_feedback(state, time.time() - t0, final_status="completed")
 
             # ── Done ─────────────────────────────────────────────────────
             state.status = "completed"
+            state.phase = "completed"
             state.executor_result = result
             state.step = "Complete"
             state.completed_at = _utcnow()

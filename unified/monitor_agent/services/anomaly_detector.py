@@ -84,7 +84,10 @@ async def detect_and_store(
     """
     db = db or DBService()
     events: List[Dict] = []
-    run_id = (result or {}).get("run_id") or state.get("run_id", "unknown")
+    # Events are keyed on the Databricks record _notify_monitor writes, so
+    # prefer its dbx- id over the ADF copy id when the plan had both.
+    run_id = ((result or {}).get("dbx_run_id") or (result or {}).get("run_id")
+              or state.get("run_id", "unknown"))
     pipeline = _pipeline_name(result)
     duration_s = elapsed_ms / 1000.0
     status_ok = bool(result) and result.get("status") == "ok"
