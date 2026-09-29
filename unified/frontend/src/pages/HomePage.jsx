@@ -155,7 +155,7 @@ export default function HomePage() {
       {noData && (
         <div style={S.noData}>
           <AlertTriangle size={14} color="#f59e0b" />
-          No pipeline data yet. Click <strong style={{ color: "#38bdf8", cursor: "pointer", margin: "0 4px" }} onClick={() => monitor.sync(48).then(loadSummary)}>Sync (48h)</strong> in the header to pull recent ADF runs, or run your first pipeline.
+          No pipeline data yet. Click <strong style={{ color: "#38bdf8", cursor: "pointer", margin: "0 4px" }} onClick={() => monitor.sync(48).then(loadSummary).catch((e) => console.error("[sync]", e))}>Sync (48h)</strong> in the header to pull recent ADF runs, or run your first pipeline.
         </div>
       )}
 

@@ -10,9 +10,7 @@ Data sources merged:
   - anomaly_log (SQLite)        → stuck-pipeline anomaly records
 """
 
-import json
 import os
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -22,19 +20,13 @@ _DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 
 
 def _feedback_records() -> list:
-    path = os.path.join(_DATA_DIR, "manager_feedback.jsonl")
-    if not os.path.exists(path):
-        return []
-    records = []
+    from jsonl_log import read_jsonl
+
     try:
-        with open(path) as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    records.append(json.loads(line))
-    except Exception:
-        pass
-    return records
+        return read_jsonl(os.path.join(_DATA_DIR, "manager_feedback.jsonl"))
+    except Exception as exc:
+        print(f"[combined] feedback read failed: {exc}")
+        return []
 
 
 async def _get_db():
@@ -214,7 +206,6 @@ async def combined_analytics(limit: int = Query(default=200, ge=1, le=1000)):
     formula_predictions = sum(
         1 for fb in feedback if fb.get("prediction_source") == "formula"
     )
-    total_predictions = ml_predictions + formula_predictions
 
     # Learning corrections applied
     corrections_applied = sum(

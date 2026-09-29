@@ -1,7 +1,7 @@
 """Resource Agent — FastAPI router."""
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter
+from pydantic import BaseModel, Field
 from typing import Any, Dict, List, Optional
 
 from .resource_agent import (
@@ -23,7 +23,9 @@ _agent = ResourceAgent()
 class AnalyzeRequest(BaseModel):
     plan:           Dict[str, Any]
     csv_size_bytes: int                = 0
-    schema:         Optional[Dict]     = None
+    # JSON key stays "schema"; the attribute can't be named `schema` because
+    # that shadows pydantic's BaseModel.schema.
+    schema_:        Optional[Dict]     = Field(default=None, alias="schema")
     execution_groups: Optional[List[List[str]]] = None
 
 
@@ -50,7 +52,7 @@ def analyze(req: AnalyzeRequest):
     return _agent.analyze(
         plan=req.plan,
         csv_size_bytes=req.csv_size_bytes,
-        schema=req.schema,
+        schema=req.schema_,
         execution_groups=req.execution_groups,
     )
 

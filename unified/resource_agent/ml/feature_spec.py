@@ -23,7 +23,6 @@ so a recommendation is always feasible by construction.
 
 from ..resource_agent import (
     NODE_SPECS,
-    DEFAULT_NODE,
     MAX_WORKERS,
     MAX_DIU,
     MAX_TOTAL_MEM_GB,

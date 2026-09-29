@@ -13,6 +13,7 @@ from urllib3.exceptions import ProtocolError, HTTPError as HTTPErrorFromUrllib3
 import settings
 
 GROQ_API_KEY = settings.get("GROQ_API_KEY")
+GROQ_MODEL = settings.get("GROQ_MODEL", "openai/gpt-oss-120b")
 
 from .planner_common import (
     DEFAULT_EDITABLE_SETTINGS,
@@ -187,7 +188,7 @@ Design the complete unified ADF+Databricks pipeline configuration JSON:
 """
 
     payload = {
-        "model": "llama-3.3-70b-versatile",
+        "model": GROQ_MODEL,
         "messages": [
             {"role": "system", "content": system_context},
             {"role": "user",   "content": user_message},

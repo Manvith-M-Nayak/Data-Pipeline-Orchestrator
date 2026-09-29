@@ -27,9 +27,8 @@ Actual record shape written by CentralManager.record_feedback():
 from __future__ import annotations
 
 import datetime
-import json
 import os
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 # unified/data/manager_feedback.jsonl — same file the Manager writes and the
 # Performance Prediction Agent's formula fallback reads.
@@ -74,19 +73,10 @@ class FeedbackCollector:
 
     def load_records(self, limit: Optional[int] = None) -> List[Dict]:
         """Load all (or last `limit`) normalized records from the log."""
-        if not os.path.exists(self.feedback_path):
-            return []
-        records: List[Dict] = []
-        with open(self.feedback_path, "r") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    raw = json.loads(line)
-                except json.JSONDecodeError:
-                    continue  # never let one corrupt line kill learning
-                records.append(self.normalize(raw))
+        from jsonl_log import read_jsonl
+
+        # Includes rotated archives, so training never loses history.
+        records: List[Dict] = [self.normalize(raw) for raw in read_jsonl(self.feedback_path)]
         if limit is not None:
             records = records[-limit:]
         return records

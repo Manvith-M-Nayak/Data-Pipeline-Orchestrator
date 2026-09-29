@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState } from "react";
+import React, { createContext, useContext, useMemo, useState } from "react";
 
 function lsGet(key, fallback = null) {
   try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; }
@@ -33,35 +33,38 @@ export function AppProvider({ children }) {
   // ── Monitor sub-tab (session only)
   const [monitorTab, setMonitorTab] = useState("live");
 
-  // ── Wrapped setters that also write localStorage
-  const setCsvFile        = (v) => {
-    setCsvFileRaw(v);
-    const name = v && v.name ? v.name : null;
-    setCsvNameRaw(name);
-    lsSet("csv_name", name);
-  };
-  const setDetectedSchema = (v) => { setDetectedSchemaRaw(v);   lsSet("planner_schema", v); };
-  const setPlannerPrompt  = (v) => { setPlannerPromptRaw(v);    lsSet("planner_prompt", v); };
-  const setPlanResult     = (v) => { setPlanResultRaw(v);       lsSet("last_plan", v); };
-  const setExecutorJobId  = (v) => { setExecutorJobIdRaw(v);    lsSet("exec_job_id", v); };
-  const setExecutorJobState=(v) => { setExecutorJobStateRaw(v); lsSet("exec_job_state", v); };
-  const setExecutorStep   = (v) => { setExecutorStepRaw(v);     lsSet("exec_step", v); };
-  const setManagerRunId   = (v) => { setManagerRunIdRaw(v);     lsSet("mgr_run_id", v); };
-  const setManagerState   = (v) => { setManagerStateRaw(v);     lsSet("mgr_state", v); };
+  // ── Wrapped setters that also write localStorage. Built once: the raw
+  // useState setters are stable, so consumers get stable function identities.
+  const setters = useMemo(() => ({
+    setCsvFile: (v) => {
+      setCsvFileRaw(v);
+      const name = v && v.name ? v.name : null;
+      setCsvNameRaw(name);
+      lsSet("csv_name", name);
+    },
+    setDetectedSchema:   (v) => { setDetectedSchemaRaw(v);   lsSet("planner_schema", v); },
+    setPlannerPrompt:    (v) => { setPlannerPromptRaw(v);    lsSet("planner_prompt", v); },
+    setPlanResult:       (v) => { setPlanResultRaw(v);       lsSet("last_plan", v); },
+    setExecutorJobId:    (v) => { setExecutorJobIdRaw(v);    lsSet("exec_job_id", v); },
+    setExecutorJobState: (v) => { setExecutorJobStateRaw(v); lsSet("exec_job_state", v); },
+    setExecutorStep:     (v) => { setExecutorStepRaw(v);     lsSet("exec_step", v); },
+    setManagerRunId:     (v) => { setManagerRunIdRaw(v);     lsSet("mgr_run_id", v); },
+    setManagerState:     (v) => { setManagerStateRaw(v);     lsSet("mgr_state", v); },
+    setMonitorTab,
+  }), []);
+
+  // Memoized so consumers only re-render when a value they read changes.
+  const value = useMemo(() => ({
+    ...setters,
+    csvFile, csvName, detectedSchema, plannerPrompt, planResult,
+    executorJobId, executorJobState, executorStep,
+    managerRunId, managerState, monitorTab,
+  }), [setters, csvFile, csvName, detectedSchema, plannerPrompt, planResult,
+       executorJobId, executorJobState, executorStep,
+       managerRunId, managerState, monitorTab]);
 
   return (
-    <AppContext.Provider value={{
-      csvFile, setCsvFile, csvName,
-      detectedSchema, setDetectedSchema,
-      plannerPrompt, setPlannerPrompt,
-      planResult, setPlanResult,
-      executorJobId, setExecutorJobId,
-      executorJobState, setExecutorJobState,
-      executorStep, setExecutorStep,
-      managerRunId, setManagerRunId,
-      managerState, setManagerState,
-      monitorTab, setMonitorTab,
-    }}>
+    <AppContext.Provider value={value}>
       {children}
     </AppContext.Provider>
   );

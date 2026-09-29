@@ -314,7 +314,7 @@ async def detect_schema(csv_file: UploadFile = File(...)):
         except (ValueError, json.JSONDecodeError) as exc:
             from fastapi import HTTPException
 
-            raise HTTPException(status_code=422, detail=f"Invalid JSON file: {exc}")
+            raise HTTPException(status_code=422, detail=f"Invalid JSON file: {exc}") from exc
         # Union of keys across the sample — JSON rows may be sparse
         headers: list = []
         for r in sample:

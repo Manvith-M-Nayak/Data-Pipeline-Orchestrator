@@ -1,183 +1,81 @@
-# Planner-Agent synthetic dataset
+# Unified Orchestrator — backend + dashboard
 
-A **configurable, seeded generator** and an **independent validator** for the
-planner fine-tuning dataset. Output format is unchanged from the previous
-dataset (the training notebook still parses it) — the *content* is now varied
-and logically correct, so the model learns to reason instead of memorizing one
-`raw→bronze→silver→gold` template.
+Everything that runs lives in this folder: a FastAPI backend (`main.py`) that hosts
+every agent, and a React dashboard (`frontend/`). The repo-root
+[README](../README.md) explains the architecture; this file is how to run and work on it.
 
-## Files
-
-| File | Purpose |
-|------|---------|
-| `generate_dataset.py` | Seeded, reproducible. Writes `planner_config_dataset.jsonl`. Driven entirely by the `CONFIG` block at the top. Imports the canonical renderers/settings/ranges from `validate_dataset.py` so it can't drift from the rules. |
-| `validate_dataset.py` | **Source of truth for correctness.** Self-contained (imports no generator/planner code). Checks every row against all rules; exits non-zero on any failure, printing the offending row index + reason. Also prints a diversity report. |
-| `report.py` | Standalone diversity report (reuses `validate_dataset.report`). |
-
-### Single source of truth
-
-To make prompt⇄config and rules un-drift-able, three things live **only** in
-`validate_dataset.py` and are imported by the generator:
-
-- `render_prompt(config)` — the `user_prompt` is a *pure function* of `config`.
-  The generator builds the config, then renders the prompt from it; the
-  validator re-renders and asserts char-for-char equality. A prompt can never
-  describe an operation the config doesn't have, or vice-versa.
-- `expected_settings(size_hint, has_aggregation)` — the one deterministic
-  resource mapping (below).
-- `column_range` / `RANGES` — the realistic per-column value ranges.
-
-> **Note:** the generator writes `planner_config_dataset.jsonl`. The training
-> notebook builder (`build_finetune_notebook.py`) currently points at
-> `synthetic_planner_dataset.jsonl` — update its `DATASET` path to
-> `planner_config_dataset.jsonl` (or symlink) to pick this up.
-
-## Quick start
+## Run it
 
 ```bash
-python generate_dataset.py --rows 2000        # -> planner_config_dataset.jsonl
-python validate_dataset.py                     # 100% pass + diversity report
-python report.py                               # diversity report only
+# 1. Configuration — secrets live in .env (gitignored)
+cp .env.example .env            # fill in Azure, Databricks, Groq values
+
+# 2. Backend (Python 3.9 venv; scikit-learn is pinned to 1.6.1 to match the models)
+python3 -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+uvicorn main:app --reload --host 127.0.0.1 --port 8000
+
+# 3. Dashboard (separate terminal)
+cd frontend && npm install && npm run dev      # http://localhost:5173
 ```
 
-Same seed ⇒ byte-identical output. Override per run:
+On startup the backend also starts Ollama (`ollama serve`) if it isn't running and
+loads the fine-tuned `planner-agent` model — see [Planner model](#models).
+Health check: `GET /api/health`. Interactive API docs: `/docs`.
 
-```bash
-python generate_dataset.py --rows 5000 --seed 7 --out my.jsonl
-python validate_dataset.py my.jsonl
-```
+## Configuration
 
-## Output format (one JSON object per line)
+Settings resolve **environment / `.env` → legacy `config.py` → default** (`settings.py`).
+`config.py` is optional; `.env.example` lists every key. Notable ones:
 
-```
-{"schema": {...}, "user_prompt": "...", "config": {...}}
-```
+| Key | Purpose |
+|---|---|
+| `API_KEY` | When set, every request needs `x-api-key`. **When empty, only localhost clients are served.** Set the same value as `VITE_API_KEY` for the frontend. Set it whenever the app is behind a reverse proxy. |
+| `AZURE_*`, `DATABRICKS_*` | Cloud credentials. The storage key reaches Databricks jobs through the secret scope `DATABRICKS_SECRET_SCOPE`, never as a job parameter. |
+| `GROQ_API_KEY`, `GROQ_MODEL` | Monitor AI analysis and the Groq planner fallback (default model `openai/gpt-oss-120b`). |
+| `PLANNER_BACKEND`, `OLLAMA_HOST`, `PLANNER_MODEL`, `OLLAMA_AUTOSTART` | Planner LLM. `OLLAMA_AUTOSTART=0` stops the backend from launching Ollama. |
+| `SLA_SECONDS` | Enables the `sla_breach` anomaly (0 = off). |
+| `DOWNLOAD_CONTAINER_ALLOWLIST`, `MAX_UPLOAD_BYTES`, `ALLOWED_ORIGINS` | Download / upload / CORS limits. |
 
-- **schema**: `columns`, `inferred_types` (col→`string|integer|double|timestamp`),
-  `row_count`, `size_hint` (one of the four buckets), `samples` (3 rows whose
-  values match the columns/types).
-- **config**: `containers`, `containers_to_create`, `datasets`, `stages`
-  (stage 0 `copy`, the rest `notebook`), `execution_order`, `num_containers`,
-  `recommended_settings`, `editable_settings`, `reasoning`.
+## Layout
 
-## What the validator enforces (every row, every rule)
+| Path | API prefix | What it does |
+|---|---|---|
+| `planner_agent/` | `/api/planner` | Turns a prompt + CSV schema into a pipeline plan (fine-tuned Qwen via Ollama; Groq fallback). |
+| `assurance_agent/` | `/api/assurance` | Structural + semantic checks on a plan. |
+| `resource_agent/` | `/api/resource` | Per-stage compute sizing (ML model, heuristic fallback). |
+| `performance_prediction_agent/` | `/api/performance-prediction` | Run duration / outcome forecast (ML model, formula fallback). |
+| `cost_optimization_agent/` | `/api/cost-optimization` | Cost estimate + cheaper-config recommendations (ML model). |
+| `central_manager_agent/` | `/api/manager` | Runs a plan end to end: validate → assure → pre-checks → execute (with retries) → post-assurance → feedback. Also streaming runs and the combined Run Insights API (`/api/manager/combined`). |
+| `executor_agent/` | `/api/executor` | Builds Databricks notebooks, deploys ADF copy pipelines, runs jobs, downloads output. Runs only start via the manager. |
+| `monitor_agent/` | `/api/monitor/*`, `/ws/live` | Polls ADF, stores run history (SQLite), AI analysis, runtime predictions, anomaly events. |
+| `learning_policy_agent/` | `/api/learning` | Learns correction factors from feedback; retrains / rolls back models. |
+| `frontend/` | — | React + Vite dashboard (dev proxy → `127.0.0.1:8000`). |
+| `settings.py`, `app_security.py`, `background.py`, `jsonl_log.py` | — | Config resolution, auth + upload limits, safe background tasks, rotating feedback logs. |
 
-**Structural (S1–S8):**
+## Models
 
-1. `num_containers == len(containers) == len(containers_to_create)`
-2. `len(stages) == num_containers - 1`
-3. `execution_order == [s.name for s in stages]`
-4. stage 0 is `copy`; all others `notebook`
-5. copy stage source/sink datasets and each notebook stage's source/sink
-   containers are the correct consecutive containers
-6. one dataset per container, in order; roles source→intermediate…→sink
-7. every column used in a filter / transform / `group_by` / aggregation column
-   is a real schema column **or** a derived column created earlier (lineage
-   accumulates forward); `sum`/`avg`/`max`/`min` aggregate a numeric column;
-   `count` uses `*`
-8. `samples` keys == columns and each value parses to its declared type
+| Agent | Model | Rebuild |
+|---|---|---|
+| Planner | LoRA on Qwen2.5-7B-Instruct, served by Ollama as `planner-agent` | `planner_agent/model/build_ollama_model.sh` (see `README_OLLAMA.md`) |
+| Resource | `resource_agent/models/resource_models.pkl` | `resource_agent/training/README.md` |
+| Performance | `performance_prediction_agent/models/*.pkl` (gitignored) | `cd performance_prediction_agent && python run_training.py` |
+| Cost optimization | `cost_optimization_agent/models/cost_models.pkl` | `cost_optimization_agent/README.md` |
+| Monitor | Groq-hosted LLM (no local model) | — |
 
-**Quality (F1–F6):**
+`.pkl` files must be trained with the same scikit-learn as `requirements.txt` (1.6.1);
+a mismatch makes the agent fall back to its heuristic.
 
-- **F1 — deterministic settings.** `recommended_settings` is exactly
-  `f(size_hint, has_aggregation)` (table below), equals the per-stage settings
-  (copy `diu`; notebook `num_workers`/`shuffle_partitions`), and is monotone
-  non-decreasing small→medium→large→xlarge. Two rows with the same
-  `(size_hint, has_aggregation)` are guaranteed identical. `row_count` is in the
-  size bucket's range.
-- **F2 — one filter grammar.** Every `filter_condition` is SQL-style
-  (`=`, `!=`, `<`, `<=`, `>`, `>=`, `between … and …`, `in (…)`). Function-call
-  predicates (`equals(`, `upper(` …) are rejected inside filters (derived-column
-  transforms may still use functions).
-- **F3 — prompt ⇄ config exact.** `user_prompt` must equal the canonical render
-  of `config` character-for-character.
-- **F4 — no equality on floats.** No `=`/`!=`/`in` on a `double` column; only
-  range predicates.
-- **F5 — realistic values.** Every sample value and every numeric filter
-  threshold falls within its column's configured range.
-- **F6 — few dead stages.** Dataset-wide pass-through notebook ratio ≤
-  `max_passthrough_ratio` (default 0.25).
+## Data
 
-**Semantic (FA–FE):**
+Runtime state is in `data/` (gitignored):
 
-- **FA — no contradictory filter chains.** Each column's effective constraint is
-  simulated as it flows through the stages (discrete allow/exclude set ∩ numeric
-  interval); a chain that becomes infeasible (e.g. `currency = 'USD'` then
-  `currency in ('CAD','JPY')`, or `amount <= 1467` then `amount > 4025`) is
-  rejected.
-- **FB — no dominated/duplicate ops.** A later same-direction threshold that
-  doesn't tighten the bound (`> 842` then `> 627`) is rejected, as is the same
-  derived column name defined twice in a pipeline.
-- **FC — no identity renames.** A transformation whose RHS is a bare existing
-  column (`x_renamed = x`) is rejected — it copies a column unchanged.
-- **FD — domain-specific ranges.** Ranges can depend on the domain (e.g.
-  `duration_sec` is ≤ 2h for telecom calls but ≤ 24h for pipeline runs) via
-  `DOMAIN_OVERRIDES`; samples and thresholds are bounded to them.
-- **FE — no all-pass-through pipelines.** Every pipeline must contain at least
-  one real operation (filter, derivation, or aggregation) somewhere.
+- `adf_monitor.db` — SQLite (WAL mode): pipeline runs, AI analyses, manager runs, anomaly events, per-pipeline metrics.
+- `manager_feedback.jsonl`, `resource_feedback.jsonl` — per-run feedback the learning loop trains on; rotated at 20 MB (5 archives kept, archives are still read).
+- `ollama.log` — output of the auto-started Ollama server.
 
-### F1 deterministic settings table
+## Planner training data
 
-| size_hint | diu | num_workers | shuffle_partitions | node_type |
-|-----------|-----|-------------|--------------------|-----------|
-| small  | 2  | 1 | 8  | Standard_DS3_v2 |
-| medium | 4  | 2 | 16 | Standard_D4s_v3 |
-| large  | 8  | 4 | 32 | Standard_D8s_v3 |
-| xlarge | 16 | 8 | 64 | Standard_D16s_v3 |
-
-If the pipeline contains an aggregation (shuffle-heavy), `num_workers` and
-`shuffle_partitions` each bump one tier (e.g. small+agg → workers 2,
-shuffle 16). `diu`/`node_type` are unchanged.
-
-## CONFIG knobs (top of `generate_dataset.py`)
-
-| Knob | What it controls |
-|------|------------------|
-| `num_rows` | rows to generate (CLI `--rows` overrides) |
-| `seed` | RNG seed for reproducibility (CLI `--seed` overrides) |
-| `output_path` | output file (CLI `--out` overrides) |
-| `size_dist` | probability weights over the four `size_hint` buckets |
-| `num_containers_dist` | weights over container counts (3–6 ⇒ 2–5 stages) |
-| `container_schemes` | named container sequences: medallion / lakehouse / elt / generic. Add or edit schemes here. |
-| `scheme_weights` | how often each scheme is chosen (only schemes long enough for the drawn container count are eligible) |
-| `agg_prob` | probability the **final** notebook stage is an aggregation |
-| `work_prob` | probability an *earlier* notebook stage does real work (F6: keeps pass-throughs rare and varies which stage works) |
-| `final_work_prob` | probability the final notebook stage does real work |
-| `max_passthrough_ratio` | F6 ceiling — validator fails if the dataset-wide pass-through ratio exceeds this |
-| `processed_time_prob` | how often a work stage also stamps `processed_time` (kept low so it isn't the template crutch) |
-| `op_weights` | relative weights of the non-aggregation work ops (numeric/flag/catint/category filters, unit conversion, rounding, cast, normalization, concat, rename, dedup, sort) |
-| `row_range_by_size` | `row_count` range per size bucket |
-| `value_ranges` | F5 per-column realistic ranges (`(substring, lo, hi)`, first match wins; per-type default otherwise). Imported from `validate_dataset.RANGES`; edit there or override here. Bounds both samples and numeric filter thresholds. |
-| `domain_overrides` | FD per-(domain, column) range overrides for names whose realistic range depends on the domain (keyed by the domain's first column). Imported from `validate_dataset.DOMAIN_OVERRIDES`. |
-| `editable_settings` | master editable lists emitted in every row (imported from `validate_dataset.EDITABLE_SETTINGS`; each must contain the recommended value) |
-| `domains` | the domain catalog. Each domain is `cols` (a list of `(name, type, role)`) plus `pools` (value pools for category columns). |
-
-> Settings themselves are **not** a CONFIG knob anymore — they're the
-> deterministic `expected_settings()` mapping in `validate_dataset.py` (F1).
-> Filter operators and thresholds are derived from each column's type + range,
-> so there's no operator/threshold pool to tune.
-
-### Adding a domain
-
-Append to `CONFIG["domains"]`. Give each column a **role** so the generator only
-emits logical ops:
-
-| Role | Meaning | Ops it enables |
-|------|---------|----------------|
-| `id` | cosmetic key | none (samples only) |
-| `cat` | low-cardinality string (needs a `pools` entry) | category equals/in filter, normalize, group_by |
-| `catint` | code-like int (needs a `pools` entry) | `==`/`in` filter, group_by |
-| `flag` | int 0/1 | `== 0/1` filter |
-| `madd` | additive numeric measure | sum/avg/min/max, threshold filter, unit conversion |
-| `mlvl` | level numeric measure | avg/min/max (no sum), threshold filter, conversion |
-| `name` / `email` / `text` | free strings | concat source; samples only |
-| `ts` | timestamp | samples only |
-
-Make the **first column unique** across domains — the diversity report keys on it.
-
-## Acceptance (verified)
-
-- `generate_dataset.py` → `validate_dataset.py`: **100% of rows pass, 0 violations**.
-- No single domain/shape exceeds ~6% of rows; all four size buckets and all
-  stage counts (2–5) present; all four container schemes used.
-- Reproducible from the seed; `num_rows` configurable (tested at 2,000).
+The planner's fine-tuning dataset generator and validator (`generate_dataset.py`,
+`validate_dataset.py`, `report.py`, `build_finetune_notebook.py`) are documented in
+[DATASET_GENERATOR.md](DATASET_GENERATOR.md).

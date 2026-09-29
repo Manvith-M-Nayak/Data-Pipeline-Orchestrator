@@ -190,7 +190,6 @@ def brute_force_optimal(feat: dict) -> dict:
     best_cost = float("inf")
 
     for node in NODE_TYPES_BY_MEM:
-        rate = NODE_HOURLY_RATES.get(node, 0.28)
         for workers in range(0, MAX_WORKERS + 1):
             w = max(workers, 1)
             dur = estimate_stage_duration(workers, 0, node, feat)

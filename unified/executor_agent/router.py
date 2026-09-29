@@ -1,18 +1,10 @@
-import asyncio
 import datetime
-from typing import Dict
 
 from fastapi import APIRouter, HTTPException
 
 from background import spawn
 
 router = APIRouter()
-
-# Legacy direct-run registry. Kept so /status and /jobs stay valid endpoints
-# for old clients, but no new entries are created — all runs now flow through
-# the Central Manager, which invokes the executor itself.
-_jobs: Dict[str, Dict] = {}
-
 
 @router.post("/run")
 async def run_pipeline():
@@ -87,16 +79,3 @@ async def _notify_monitor(result: dict, elapsed_ms: int):
                 )
     except Exception as e:
         print(f"[monitor notify] non-fatal: {e}")
-
-
-@router.get("/status/{job_id}")
-async def job_status(job_id: str):
-    if job_id not in _jobs:
-        # 410 Gone = job existed but server restarted (vs 404 = never existed)
-        raise HTTPException(status_code=410, detail="Job session expired — server was restarted. Please re-run.")
-    return _jobs[job_id]
-
-
-@router.get("/jobs")
-async def list_jobs():
-    return [{"job_id": k, **{f: v for f, v in v.items() if f != "result"}} for k, v in _jobs.items()]

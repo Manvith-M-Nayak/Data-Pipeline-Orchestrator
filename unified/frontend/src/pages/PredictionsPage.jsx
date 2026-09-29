@@ -29,14 +29,18 @@ export default function PredictionsPage() {
   const [loading, setLoading] = useState(false);
 
   const [syncing, setSyncing] = useState(false);
+  const [error,   setError]   = useState("");
 
   async function syncAndReload() {
     setSyncing(true);
+    setError("");
     try {
       await monitor.sync(48);
       const n = await monitor.getNames();
       setNames(n);
       if (n.length) setChosen(n[0]);
+    } catch (e) {
+      setError(`Sync failed: ${e.message}`);
     } finally {
       setSyncing(false);
     }
@@ -51,13 +55,16 @@ export default function PredictionsPage() {
         // DB empty — auto-sync ADF history so predictions have data
         syncAndReload();
       }
-    });
+    }).catch((e) => setError(`Could not load pipelines: ${e.message}`));
   }, []);
 
   async function load() {
     if (!chosen) return;
     setLoading(true);
-    try { setResult(await monitor.getPrediction(chosen)); } finally { setLoading(false); }
+    setError("");
+    try { setResult(await monitor.getPrediction(chosen)); }
+    catch (e) { setError(`Prediction failed: ${e.message}`); }
+    finally { setLoading(false); }
   }
 
   const p = result?.prediction;
@@ -71,6 +78,7 @@ export default function PredictionsPage() {
   return (
     <div>
       <h1 style={S.title}>Runtime Predictions</h1>
+      {error && <div style={{ color: "#f87171", fontSize: 13, marginBottom: 12 }}>{error}</div>}
       <div style={S.row}>
         <select style={S.select} value={chosen} onChange={(e) => setChosen(e.target.value)}>
           {names.map((n) => <option key={n} value={n}>{n}</option>)}

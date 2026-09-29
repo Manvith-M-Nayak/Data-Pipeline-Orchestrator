@@ -9,7 +9,7 @@ import json
 import sys
 
 NB_PATH = "finetune_qwen_planner.ipynb"
-DATASET = "synthetic_planner_dataset.jsonl"
+DATASET = "planner_config_dataset.jsonl"
 
 
 # ── The system prompt the fine-tuned model is trained against. Kept consistent
@@ -68,7 +68,7 @@ def record_to_messages(rec):
 # ════════════════════════════════════════════════════════════════════════════
 def verify():
     with open(DATASET, encoding="utf-8") as f:
-        data = json.load(f)
+        data = [json.loads(line) for line in f if line.strip()]  # JSONL, like the notebook
     print(f"Loaded {len(data)} records from {DATASET}")
     max_chars = 0
     for rec in data:
@@ -145,7 +145,7 @@ def build_notebook():
         "   conda create -n qwenft python=3.11 -y && conda activate qwenft",
         "   ```",
         "3. **~30 GB free disk** (base model download ~5 GB + checkpoints).",
-        "4. Copy **`synthetic_planner_dataset.jsonl`** next to this notebook.",
+        "4. Copy **`planner_config_dataset.jsonl`** next to this notebook.",
         "5. (Optional) a Hugging Face account/token if the model needs auth (Qwen is public).",
         "",
         "> **Dataset size warning:** 20 records is enough to smoke-test the pipeline but NOT to",
@@ -195,7 +195,7 @@ def build_notebook():
         "## 3. Configuration",
     ))
     cells.append(code(
-        "DATASET_PATH    = 'synthetic_planner_dataset.jsonl'",
+        "DATASET_PATH    = 'planner_config_dataset.jsonl'",
         "BASE_MODEL      = 'unsloth/Qwen2.5-7B-Instruct-bnb-4bit'  # pre-quantized 4-bit",
         "MAX_SEQ_LENGTH  = 2048      # raise to 4096 if the token-stats cell says so",
         "LORA_RANK       = 16",

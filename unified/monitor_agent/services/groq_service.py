@@ -4,7 +4,7 @@ from typing import Dict, List, Any
 
 from groq import AsyncGroq
 
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 
 _ANALYSIS_SCHEMA = """{
   "status_summary": "<one sentence>",
@@ -13,14 +13,6 @@ _ANALYSIS_SCHEMA = """{
   "performance_insights": ["<insight>", ...],
   "suggestions": ["<suggestion>", ...],
   "severity": "low|medium|high"
-}"""
-
-_PREDICTION_SCHEMA = """{
-  "predicted_duration_sec": <number>,
-  "confidence": "low|medium|high",
-  "range_min_sec": <number>,
-  "range_max_sec": <number>,
-  "reasoning": "<one sentence>"
 }"""
 
 _ANOMALY_SCHEMA = """{
@@ -86,30 +78,6 @@ class GroqService:
             "anomalies": [], "root_cause": run.get("message", ""),
             "performance_insights": [], "suggestions": [],
             "severity": "low" if run.get("status") == "Succeeded" else "high",
-        })
-
-    async def predict_runtime(self, pipeline_name: str, historical_runs: List[Dict]) -> Dict:
-        if not historical_runs:
-            return {
-                "predicted_duration_sec": 0, "confidence": "low",
-                "range_min_sec": 0, "range_max_sec": 0,
-                "reasoning": "No historical data available.",
-            }
-        summary = [
-            {"status": r.get("status"), "duration_s": round((r.get("duration_ms") or 0) / 1000, 1)}
-            for r in historical_runs
-        ]
-        text = await self._chat(
-            "You are an ADF performance analyst. Return structured JSON only.",
-            f"Pipeline: {pipeline_name}\nHistory: {json.dumps(summary)}\n\nReturn ONLY:\n{_PREDICTION_SCHEMA}",
-            temperature=0.1,
-        )
-        durations = [r.get("duration_ms", 0) / 1000 for r in historical_runs if r.get("duration_ms")]
-        avg = sum(durations) / len(durations) if durations else 0
-        return self._parse_json(text, {
-            "predicted_duration_sec": round(avg, 1), "confidence": "low",
-            "range_min_sec": round(avg * 0.8, 1), "range_max_sec": round(avg * 1.2, 1),
-            "reasoning": "Fallback to historical average.",
         })
 
     async def explain_duration(

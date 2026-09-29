@@ -392,18 +392,11 @@ class PolicyEngine:
         # unified/data/resource_feedback.jsonl — same _DATA_DIR pattern
         # resource_agent.py itself uses (one level up from its own module dir).
         feedback_path = os.path.join(_AGENT_DIR, "..", "data", "resource_feedback.jsonl")
-        if not os.path.exists(feedback_path):
-            return []
+        from jsonl_log import read_jsonl
 
-        records = []
-        with open(feedback_path) as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    try:
-                        records.append(json.loads(line))
-                    except json.JSONDecodeError:
-                        continue
+        records = read_jsonl(feedback_path)
+        if not records:
+            return []
 
         flags: List[Dict] = []
         for stage_type in ("copy", "notebook"):

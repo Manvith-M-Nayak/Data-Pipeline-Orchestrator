@@ -1,4 +1,3 @@
-import asyncio
 import json
 import os
 import tempfile
@@ -17,7 +16,9 @@ _manager = CentralManager()
 async def start_managed_run(
     csv_file:        UploadFile = File(...),
     pipeline_config: str        = Form(...),
-    schema:          str        = Form(...),
+    # Named input_schema (form field still "schema"): a field called `schema`
+    # shadows pydantic BaseModel.schema in the generated body model.
+    input_schema:    str        = Form(..., alias="schema"),
     user_request:    str        = Form(""),
 ):
     """
@@ -31,9 +32,9 @@ async def start_managed_run(
 
     try:
         config_dict = json.loads(pipeline_config)
-        schema_dict = json.loads(schema)
+        schema_dict = json.loads(input_schema)
     except json.JSONDecodeError as exc:
-        raise HTTPException(status_code=422, detail=f"Invalid JSON: {exc}")
+        raise HTTPException(status_code=422, detail=f"Invalid JSON: {exc}") from exc
 
     # The UI lets users edit execution_groups by hand — repair any data-flow
     # violations (a stage grouped with its dependency) before spending cloud
@@ -147,7 +148,7 @@ async def stream_start(body: dict):
     try:
         return await stream_manager.start(config, schema, file_format, interval_s)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.post("/stream/{stream_id}/data")
@@ -161,7 +162,7 @@ async def stream_add_data(stream_id: str, csv_file: UploadFile = File(...)):
     try:
         return await stream_manager.add_data(stream_id, data, csv_file.filename or "data.csv")
     except KeyError:
-        raise HTTPException(status_code=404, detail="Stream not found")
+        raise HTTPException(status_code=404, detail="Stream not found") from None
 
 
 @router.post("/stream/{stream_id}/tick")
@@ -170,7 +171,7 @@ async def stream_tick(stream_id: str):
     try:
         return await stream_manager.tick(stream_id, reason="manual")
     except KeyError:
-        raise HTTPException(status_code=404, detail="Stream not found")
+        raise HTTPException(status_code=404, detail="Stream not found") from None
 
 
 @router.post("/stream/{stream_id}/stop")
@@ -178,7 +179,7 @@ async def stream_stop(stream_id: str):
     try:
         return await stream_manager.stop(stream_id)
     except KeyError:
-        raise HTTPException(status_code=404, detail="Stream not found")
+        raise HTTPException(status_code=404, detail="Stream not found") from None
 
 
 @router.get("/stream/list")
@@ -191,7 +192,7 @@ async def stream_get(stream_id: str):
     try:
         return stream_manager.get(stream_id)
     except KeyError:
-        raise HTTPException(status_code=404, detail="Stream not found")
+        raise HTTPException(status_code=404, detail="Stream not found") from None
 
 
 @router.get("/stream/{stream_id}/output")
@@ -199,4 +200,4 @@ async def stream_output(stream_id: str, limit: int = 200):
     try:
         return stream_manager.output_preview(stream_id, limit)
     except KeyError:
-        raise HTTPException(status_code=404, detail="Stream not found")
+        raise HTTPException(status_code=404, detail="Stream not found") from None

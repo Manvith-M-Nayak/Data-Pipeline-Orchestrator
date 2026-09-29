@@ -20,7 +20,7 @@ import numpy as np
 from .ml.feature_spec import (
     FEATURE_COLS, BOUNDS, snap_shuffle, stage_features, features_to_vector,
 )
-from .resource_agent import NODE_SPECS, DEFAULT_NODE, MAX_WORKERS, MAX_DIU
+from .resource_agent import NODE_SPECS, DEFAULT_NODE
 
 _MODEL_DIR = os.path.join(os.path.dirname(__file__), "models")
 _BUNDLE_PATH = os.path.join(_MODEL_DIR, "resource_models.pkl")
@@ -58,7 +58,7 @@ class ResourceMLPredictor:
         except Exception as exc:
             cls._bundle = None
             cls._load_error = str(exc)
-            raise MLNotAvailable(f"failed to load {_BUNDLE_PATH}: {exc}")
+            raise MLNotAvailable(f"failed to load {_BUNDLE_PATH}: {exc}") from exc
 
     @classmethod
     def is_available(cls) -> bool:
@@ -117,4 +117,4 @@ class ResourceMLPredictor:
                 "source": "ml_model",
             }
         except Exception as exc:
-            raise MLNotAvailable(f"inference failed: {exc}")
+            raise MLNotAvailable(f"inference failed: {exc}") from exc

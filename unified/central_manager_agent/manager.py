@@ -17,7 +17,6 @@ The Planner is the "brain"; the Manager is the "nervous system".
 import asyncio
 import copy
 import datetime
-import json
 import os
 import time
 import uuid
@@ -372,8 +371,6 @@ class CentralManager:
     # Phase 2b — Cost estimation (Azure, student tier)
     # ────────────────────────────────────────────────────────────────────────
     def estimate_cost(self, state: RunState, predictions: dict) -> dict:
-        plan = state.plan
-        stages = plan.get("stages", [])
         duration_s = predictions["estimated_duration_s"]
         workers = max(predictions["suggested_workers"], 1)
 
@@ -1119,8 +1116,9 @@ class CentralManager:
                     "learning_correction_applied"
                 ),
             }
-            with open(log_path, "a") as f:
-                f.write(json.dumps(record) + "\n")
+            from jsonl_log import append_jsonl
+
+            append_jsonl(log_path, record)
 
             # Resource Agent self-correction: record actual vs predicted per stage type
             self._record_resource_feedback(state, actual_duration_s)
@@ -1380,16 +1378,11 @@ class CentralManager:
         return sorted(out, key=lambda x: x["started_at"], reverse=True)
 
     def get_feedback_history(self) -> list:
-        log_path = os.path.join(_DATA_DIR, "manager_feedback.jsonl")
-        if not os.path.exists(log_path):
-            return []
-        records = []
+        from jsonl_log import read_jsonl
+
         try:
-            with open(log_path) as f:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        records.append(json.loads(line))
+            records = read_jsonl(os.path.join(_DATA_DIR, "manager_feedback.jsonl"))
         except Exception as exc:
             print(f"[Manager] feedback history read failed: {exc}")
+            return []
         return records[-50:]  # last 50

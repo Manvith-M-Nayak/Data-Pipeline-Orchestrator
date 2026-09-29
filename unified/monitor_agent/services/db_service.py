@@ -198,6 +198,22 @@ class DBService:
                 rows = await cur.fetchall()
         return [dict(r) for r in rows]
 
+    async def recent_manager_states(self, limit: int = 200) -> List[Dict]:
+        """Full persisted RunState dicts, newest first."""
+        async with _connect() as db:
+            async with db.execute(
+                "SELECT state_json FROM manager_runs ORDER BY started_at DESC LIMIT ?",
+                (limit,),
+            ) as cur:
+                rows = await cur.fetchall()
+        states = []
+        for (raw,) in rows:
+            try:
+                states.append(json.loads(raw))
+            except (TypeError, ValueError):
+                continue
+        return states
+
     async def mark_interrupted_manager_runs(self) -> int:
         """On startup, fail any run left non-terminal by a crash/restart — its
         asyncio task is gone, so it can never complete."""

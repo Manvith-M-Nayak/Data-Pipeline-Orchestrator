@@ -69,15 +69,19 @@ export default function LogsPage() {
   const [f,       setF]       = useState({ status: "", pipeline_name: "" });
   const [loading, setLoading] = useState(false);
   const [newRuns, setNewRuns] = useState(0); // banner counter for live completions
+  const [error,   setError]   = useState("");
 
   async function load(filters = f) {
     setLoading(true);
     setNewRuns(0);
+    setError("");
     try {
       const params = {};
       if (filters.status)        params.status        = filters.status;
       if (filters.pipeline_name) params.pipeline_name = filters.pipeline_name;
       setLogs(await monitor.getLogs(params));
+    } catch (e) {
+      setError(`Could not load logs: ${e.message}`);
     } finally { setLoading(false); }
   }
 
@@ -94,6 +98,7 @@ export default function LogsPage() {
   return (
     <div>
       <h1 style={S.title}>Run Logs</h1>
+      {error && <div style={{ color: "#f87171", fontSize: 13, marginBottom: 12 }}>{error}</div>}
 
       {newRuns > 0 && (
         <div style={{ background: "#0c1a2e", border: "1px solid #1e3a5f", borderRadius: 8, padding: "9px 14px", marginBottom: 14, fontSize: 13, color: "#38bdf8", display: "flex", alignItems: "center", gap: 10 }}>

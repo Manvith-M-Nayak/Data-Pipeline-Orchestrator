@@ -39,10 +39,8 @@ Integration:
   - Cost Agent will read predicted_total_s in a future milestone.
 """
 
-import json
-import math
 import os
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from typing import Dict, List, Optional, Tuple
 from .ml_predictor import MLPredictor, MLNotAvailable
 
@@ -307,21 +305,13 @@ class PerformancePredictionAgent:
 
     # ── History loading ───────────────────────────────────────────────────────
     def _load_feedback(self) -> List[dict]:
-        if not os.path.exists(_FEEDBACK_LOG):
-            return []
-        records = []
+        from jsonl_log import read_jsonl
+
         try:
-            with open(_FEEDBACK_LOG) as f:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        try:
-                            records.append(json.loads(line))
-                        except json.JSONDecodeError:
-                            pass
+            return read_jsonl(_FEEDBACK_LOG)
         except Exception as exc:
             print(f"[PerfAgent] feedback read failed: {exc}")
-        return records
+            return []
 
     # ── Adjustment factor from history ────────────────────────────────────────
     def _compute_adjustment(

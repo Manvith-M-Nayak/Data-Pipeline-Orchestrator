@@ -15,7 +15,6 @@ across machines. Run python3 run_training.py to regenerate.
 """
 
 import os
-from typing import Dict, List, Optional
 
 import joblib
 import numpy as np
@@ -80,7 +79,7 @@ class MLPredictor:
             cls._duration_model = None
             cls._outcome_model  = None
             cls._encoder        = None
-            raise MLNotAvailable(f"Failed to load model files: {exc}")
+            raise MLNotAvailable(f"Failed to load model files: {exc}") from exc
 
     @classmethod
     def is_available(cls) -> bool:
@@ -207,4 +206,4 @@ class MLPredictor:
                 "source": "ml_model",
             }
         except Exception as exc:
-            raise MLNotAvailable(f"ML inference failed: {exc}")
+            raise MLNotAvailable(f"ML inference failed: {exc}") from exc

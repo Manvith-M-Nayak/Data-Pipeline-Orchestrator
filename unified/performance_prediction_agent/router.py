@@ -8,7 +8,7 @@ Exposes:
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 from .performance_agent import PerformancePredictionAgent, DEFAULT_SLA_TARGET_S
 
@@ -53,28 +53,19 @@ def prediction_history():
     Returns the last 50 entries from manager_feedback.jsonl that have both
     actual_duration_s and predicted_duration_s, for dashboard display.
     """
-    import json, os
+    import os
     _DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
     log_path = os.path.join(_DATA_DIR, "manager_feedback.jsonl")
 
-    if not os.path.exists(log_path):
-        return {"records": [], "total": 0}
+    from jsonl_log import read_jsonl
 
-    records = []
     try:
-        with open(log_path) as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    r = json.loads(line)
-                    if r.get("actual_duration_s") and r.get("predicted_duration_s"):
-                        records.append(r)
-                except json.JSONDecodeError:
-                    pass
+        records = [
+            r for r in read_jsonl(log_path)
+            if r.get("actual_duration_s") and r.get("predicted_duration_s")
+        ]
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     recent = records[-50:]
     return {"records": recent, "total": len(records)}

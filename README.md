@@ -152,19 +152,19 @@ Build the local model with `unified/planner_agent/model/build_ollama_model.sh`
 ### 1. Configure credentials
 
 ```bash
-cp unified/config.example.py unified/config.py
-# fill in Azure, Databricks, Ollama / Groq values
+cp unified/.env.example unified/.env
+# fill in Azure, Databricks, Groq values (.env is gitignored)
 ```
 
 See `SETUP_GUIDE.md` for step-by-step Azure resource creation.
 
-### 2. Start the planner model (Ollama backend)
+### 2. Build the planner model (Ollama backend, once)
 
 ```bash
-ollama serve
-# build the fine-tuned planner model once:
 cd unified/planner_agent/model && ./build_ollama_model.sh
 ```
+
+The backend starts `ollama serve` itself on startup (set `OLLAMA_AUTOSTART=0` to opt out).
 
 ### 3. Run the backend
 
@@ -210,8 +210,10 @@ The Planner generates Databricks PySpark transform stages including:
 
 ## Security notes
 
-- Credentials live in `unified/config.py`, which is gitignored — never commit real secrets.
-  Copy from `config.example.py` and fill in locally (move to a secret store for production).
+- Credentials live in `unified/.env`, which is gitignored — never commit real secrets.
+  The legacy `unified/config.py` is still read as a fallback but is no longer required.
+- Without `API_KEY` the API only answers localhost clients; set it (and `VITE_API_KEY`) for any
+  shared or proxied deployment. The Databricks storage key is passed via a secret scope.
 - Resources are deployed directly to live Azure (no Git integration on the ADF side).
 - Databricks job clusters can drain credit if left running — watch the cost warning in `SETUP_GUIDE.md`.
 

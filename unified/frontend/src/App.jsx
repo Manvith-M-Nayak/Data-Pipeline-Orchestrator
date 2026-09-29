@@ -95,11 +95,15 @@ function CsvBanner() {
 
 function Shell() {
   const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState("");
   const location = useLocation();
 
   async function handleSync() {
     setSyncing(true);
-    try { await monitor.sync(48); } finally { setSyncing(false); }
+    setSyncError("");
+    try { await monitor.sync(48); }
+    catch (e) { setSyncError(e.message || "Sync failed"); }
+    finally { setSyncing(false); }
   }
 
   return (
@@ -114,9 +118,9 @@ function Shell() {
             <TabLink key={to} to={to} label={label} Icon={Icon} exact={exact} />
           ))}
         </nav>
-        <button style={S.syncBtn} onClick={handleSync} disabled={syncing}>
+        <button style={S.syncBtn} onClick={handleSync} disabled={syncing} title={syncError || undefined}>
           <RefreshCw size={12} />
-          {syncing ? "Syncing…" : "Sync (48h)"}
+          {syncing ? "Syncing…" : syncError ? "Sync failed — retry" : "Sync (48h)"}
         </button>
       </header>
       <CsvBanner />

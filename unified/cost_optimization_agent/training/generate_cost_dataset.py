@@ -17,7 +17,6 @@ Usage:
 
 import argparse
 import csv
-import math
 import os
 import random
 import sys
@@ -25,7 +24,6 @@ import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 from resource_agent.ml.feature_spec import (
     stage_features,
-    FEATURE_COLS as SRC_FEATURE_COLS,
 )
 from cost_optimization_agent.ml.feature_spec import (
     FEATURE_COLS,
@@ -34,7 +32,6 @@ from cost_optimization_agent.ml.feature_spec import (
     NODE_TYPES_BY_MEM,
     NODE_HOURLY_RATES,
     BOUNDS,
-    SHUFFLE_TIERS,
     snap_shuffle,
 )
 from resource_agent.resource_agent import NODE_SPECS, DEFAULT_NODE, MAX_WORKERS, MAX_DIU

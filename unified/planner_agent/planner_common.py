@@ -15,7 +15,6 @@ Each stage of a config is either:
   - "notebook" : ADF DatabricksNotebook Activity runs a generated PySpark notebook
 """
 
-import json
 import re
 
 

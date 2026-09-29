@@ -19,12 +19,13 @@ State is in-memory — a server restart clears active streams.
 """
 
 import asyncio
+import csv
 import io
 import json
 import os
 import time
 import uuid
-from typing import Dict, Optional
+from typing import Dict
 
 from background import spawn
 from executor_agent import executor as _ex
@@ -219,17 +220,15 @@ class StreamManager:
                     continue
                 rows.extend(doc if isinstance(doc, list) else [doc])
             else:
-                lines = [l for l in raw.splitlines() if l != ""]
-                if not lines:
+                # csv.reader, not split(","): quoted fields may contain commas.
+                parsed = [r for r in csv.reader(io.StringIO(raw)) if r]
+                if not parsed:
                     continue
                 if header is None:
-                    header = lines[0]
-                    cols = header.split(",")
-                    rows.extend(dict(zip(cols, l.split(","))) for l in lines[1:])
-                elif lines[0] == header:
-                    cols = header.split(",")
-                    rows.extend(dict(zip(cols, l.split(","))) for l in lines[1:])
-                # else: different schema (polluted container) — skip
+                    header = parsed[0]
+                elif parsed[0] != header:
+                    continue  # different schema (polluted container) — skip
+                rows.extend(dict(zip(header, r)) for r in parsed[1:])
         return rows[:limit]
 
 

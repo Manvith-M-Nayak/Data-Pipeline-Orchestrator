@@ -21,8 +21,8 @@ Design:
 
 import copy
 import math
-from dataclasses import dataclass, field, asdict
-from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass, asdict
+from typing import Dict, List, Optional
 
 NODE_HOURLY_RATES: Dict[str, float] = {
     "Standard_DS2_v2": 0.14,
@@ -287,7 +287,6 @@ class CostOptimizationAgent:
         self, rule_name: str, modified_rp: dict, constraints: dict, perf: dict
     ) -> bool:
         deadline_s = constraints.get("deadline_s", 0)
-        priority = constraints.get("priority", "normal")
         predicted_s = perf.get("predicted_total_s", 0)
 
 

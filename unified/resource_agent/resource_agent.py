@@ -45,12 +45,10 @@ Student-tier hard limits (Azure free / trial):
   MAX_TOTAL_MEM_GB = 64   sum of all workers in any parallel group
 """
 
-import json
 import math
 import os
 import threading
-import time
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from typing import Dict, List, Optional, Tuple
 
 _DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
@@ -785,8 +783,10 @@ class ResourceAgent:
                 "predicted_workers":    predicted_workers,
                 "actual_workers":       actual_workers,
             }
-            with _FEEDBACK_LOCK, open(_FEEDBACK_LOG, "a") as f:
-                f.write(json.dumps(record) + "\n")
+            from jsonl_log import append_jsonl
+
+            with _FEEDBACK_LOCK:
+                append_jsonl(_FEEDBACK_LOG, record)
         except Exception as exc:
             print(f"[ResourceAgent] feedback write failed (non-fatal): {exc}")
 
@@ -960,18 +960,10 @@ def _serialize(plan: ResourcePlan) -> dict:
 
 
 def _load_feedback_raw() -> List[dict]:
-    if not os.path.exists(_FEEDBACK_LOG):
-        return []
-    records = []
+    from jsonl_log import read_jsonl
+
     try:
-        with open(_FEEDBACK_LOG) as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    try:
-                        records.append(json.loads(line))
-                    except json.JSONDecodeError:
-                        pass
+        return read_jsonl(_FEEDBACK_LOG)
     except Exception as exc:
         print(f"[ResourceAgent] feedback read failed: {exc}")
-    return records
+        return []

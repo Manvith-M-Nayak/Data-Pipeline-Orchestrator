@@ -428,7 +428,7 @@ else:
     final_real_frac = (oversample_weight * n_real_train) / (n_syn_train + oversample_weight * n_real_train)
     print(f"  Found {n_real} real run(s): {n_real_train} for training, {len(real_test_df)} held out for testing")
     print(f"  Oversample weight: {oversample_weight}x -> real rows are ~{final_real_frac:.1%} of the final training set")
-    print(f"  NOTE: real rows are feature-imputed (see _build_real_feature_rows "
+    print("  NOTE: real rows are feature-imputed (see _build_real_feature_rows "
           "docstring) — row_count/transform_count/agg_count/network_quality/"
           "correction factors are NOT from real telemetry, only stage_count, "
           "complexity, and actual_duration_s are.")
@@ -476,7 +476,7 @@ tiny_sample = pd.DataFrame([{
     "complexity_encoded": encoder.transform(["low"])[0],
 }])
 pred_s = int(np.expm1(reg.predict(tiny_sample[FEATURE_COLS])[0]))
-print(f"\n  Spot check (your 1.1KB file, 2 stages, 15 rows):")
+print("\n  Spot check (your 1.1KB file, 2 stages, 15 rows):")
 print(f"  Model predicts: {pred_s}s  |  Real runs: ~126-144s")
 
 print("\n" + "="*60)

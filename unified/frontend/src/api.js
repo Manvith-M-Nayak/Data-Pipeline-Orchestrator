@@ -60,8 +60,6 @@ export const assurance = {
 // No direct run API — pipeline runs go through the Central Manager
 // (manager.run below), which invokes the executor after its pre-checks.
 export const executor = {
-  status:      (jobId)     => req(`/executor/status/${jobId}`),
-  listJobs:    ()          => req("/executor/jobs"),
   // fetch + blob instead of a plain <a href>: an anchor cannot send x-api-key.
   download: async (container) => {
     const headers = API_KEY ? { "x-api-key": API_KEY } : {};

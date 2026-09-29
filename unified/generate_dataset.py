@@ -34,7 +34,7 @@ import sys
 
 from validate_dataset import (render_prompt, expected_settings, column_range,
                               parse_filter, RANGES, DOMAIN_OVERRIDES,
-                              EDITABLE_SETTINGS, OPWORD)
+                              EDITABLE_SETTINGS)
 
 # ╔══════════════════════════════════════════════════════════════════════════╗
 # ║                              CONFIG                                        ║
