@@ -41,6 +41,7 @@ COST_MODEL_ASSUMPTIONS = {
     "dbu_per_worker_per_hour": 1.5,
     "dbu_price_per_unit": 0.55,
     "adf_activity_price": 0.001,
+    "adf_diu_hour_estimate": 0.25,
     "storage_gb_per_month": 0.018,
     "note": "All costs are estimates. No real billing data was available at build time.",
 }
@@ -105,23 +106,8 @@ class CostOptimizationAgent:
             constraints,
         )
 
-        # ── Fallback: rule-based heuristics ─────────────────────────────
-        if not ml_used:
-            self._suggest_cluster_downsize(
-                plan, performance_prediction, resource_plan, current_cost, suggestions
-            )
-            self._suggest_node_downgrade(
-                plan, performance_prediction, resource_plan, current_cost, suggestions
-            )
-            self._suggest_off_peak(
-                performance_prediction, constraints, current_cost, suggestions
-            )
-            self._suggest_merge_stages(
-                plan, performance_prediction, resource_plan, current_cost, suggestions
-            )
-            self._suggest_shuffle_tuning(
-                plan, performance_prediction, resource_plan, current_cost, suggestions
-            )
+        # Fail closed: legacy heuristics lack candidate runtime/resource validation.
+        # Return the current cost and no recommendation when ML cannot prove safety.
 
         safe = self._enforce_constraints(
             suggestions, constraints, performance_prediction
@@ -138,130 +124,80 @@ class CostOptimizationAgent:
 
     # ── Auto-apply: returns a modified resource_plan with best recommendation applied ──
 
-    def apply_optimization(
-        self,
-        plan: dict,
-        performance_prediction: dict,
-        resource_plan: dict,
-        constraints: Optional[dict] = None,
-    ) -> dict:
-        """
-        Run optimization and return a modified *resource_plan* dict with the
-        best recommendation applied.  The original dicts are not mutated.
+    def apply_optimization(self, plan, performance_prediction, resource_plan, constraints=None):
+        """Apply only a cost-saving candidate that passes runtime/resource checks."""
+        candidate = self._validated_ml_candidate(plan, performance_prediction, resource_plan, constraints or {})
+        return candidate if candidate is not None else copy.deepcopy(resource_plan)
 
-        ML path:  per-stage workers/DIU/node_type/shuffle are updated inline.
-        Rule path: the best-ranked rule-based change is applied.
-
-        Returns the modified resource_plan (or an unmodified deep copy if no
-        valid recommendation exists).
-        """
-        constraints = constraints or {}
+    def _validated_ml_candidate(self, plan, perf, resource_plan, constraints):
+        from cost_optimization_agent.ml_predictor import CostMLPredictor, MLNotAvailable
+        from cost_optimization_agent.ml.feature_spec import estimate_stage_duration
+        from resource_agent.ml.feature_spec import stage_features
+        from resource_agent import NODE_SPECS, MAX_WORKERS, MAX_DIU, MAX_TOTAL_MEM_GB
+        if not CostMLPredictor.is_available():
+            return None
+        stages = {s.get("name"): s for s in plan.get("stages", [])}
         rp = copy.deepcopy(resource_plan)
-
-        # ── Try ML path ────────────────────────────────────────────────────
-        if self._apply_ml_to_resource_plan(plan, performance_prediction, rp):
-            return rp
-
-        # ── Rule path — try each rule on the original resource_plan, keep
-        #    the best one (first that survives constraint enforcement) ────────
-        current_cost = self._estimate_cost(plan, performance_prediction, resource_plan)
-
-        for rule_fn, rule_name in [
-            (self._apply_cluster_downsize, "cluster_downsize"),
-            (self._apply_node_downgrade, "node_downgrade"),
-            (self._apply_shuffle_tuning, "shuffle_tuning"),
-        ]:
-            modified = copy.deepcopy(resource_plan)
-            applied = rule_fn(plan, performance_prediction, modified, constraints)
-            if not applied:
-                continue
-
-            new_cost = self._estimate_cost(plan, performance_prediction, modified)
-            saving_pct = (
-                (1 - new_cost.total_usd / current_cost.total_usd) * 100
-                if current_cost.total_usd > 0
-                else 0
-            )
-            if saving_pct < 3:
-                continue
-
-            safe = self._enforce_constraints_single(
-                rule_name, modified, constraints, performance_prediction
-            )
-            if safe:
-                return modified
-
-        return rp
-
-    def _apply_ml_to_resource_plan(
-        self,
-        plan: dict,
-        perf: dict,
-        rp: dict,
-    ) -> bool:
-        """
-        Run ML predictions and apply optimal configs directly to *rp* (mutated
-        in place).  Returns True if ML was used and at least one allocation
-        changed.
-        """
-        try:
-            from cost_optimization_agent.ml_predictor import (
-                CostMLPredictor,
-                MLNotAvailable,
-            )
-
-            if not CostMLPredictor.is_available():
-                return False
-        except Exception:
-            return False
-
-        stages = plan.get("stages", [])
         allocations = rp.get("allocations", [])
-        alloc_map = {a.get("stage_name"): a for a in allocations}
-        schema = plan.get("schema", {})
-        csv_size_bytes = int(plan.get("csv_size_bytes", 0))
-        n_stages = len(stages)
-
-        any_change = False
-        for i, stage in enumerate(stages):
-            name = stage.get("name", "")
-            current_alloc = alloc_map.get(name)
-            if not current_alloc:
-                continue
+        if not allocations:
+            return None
+        deadline = float(constraints.get("deadline_s", 0) or 0)
+        baseline = float(perf.get("predicted_total_s", 0) or rp.get("estimated_total_s", 0) or 0)
+        if not math.isfinite(deadline) or not math.isfinite(baseline) or baseline <= 0:
+            return None
+        if deadline > 0 and baseline > deadline:
+            return None
+        # Conservatively reserve the baseline's other-stage time for each stage.
+        slack = max(0, deadline - baseline) if deadline else 0
+        ratio = 1.0
+        changed = False
+        for i, alloc in enumerate(allocations):
+            stage = stages.get(alloc.get("stage_name"))
+            if stage is None:
+                return None
+            old_duration = float(alloc.get("duration_s", 0) or 0)
+            if not math.isfinite(old_duration) or old_duration <= 0:
+                return None
             try:
-                opt = CostMLPredictor.predict_optimal_config(
-                    stage, schema, csv_size_bytes, stage_index=i, n_stages=n_stages
-                )
+                opt = CostMLPredictor.predict_optimal_config(stage, plan.get("schema", {}),
+                    int(plan.get("csv_size_bytes", 0)), stage_index=i, n_stages=len(stages),
+                    deadline_s=old_duration + slack if deadline else 0)
             except MLNotAvailable:
-                continue
-
-            for alloc in allocations:
-                if alloc.get("stage_name") == name:
-                    old_workers = alloc.get("workers", 0)
-                    old_node = alloc.get("node_type", _DEFAULT_NODE)
-                    new_workers = opt["workers"]
-                    new_node = opt["node_type"]
-
-                    if alloc.get("stage_type") == "copy":
-                        old_diu = alloc.get("diu", 2)
-                        new_diu = opt["diu"]
-                        if new_diu < old_diu:
-                            alloc["diu"] = new_diu
-                            alloc["memory_gb"] = opt["memory_gb"]
-                            any_change = True
-                    elif new_workers < old_workers or new_node != old_node:
-                        alloc["workers"] = new_workers
-                        alloc["node_type"] = new_node
-                        alloc["shuffle_partitions"] = opt["shuffle_partitions"]
-                        alloc["memory_gb"] = opt["memory_gb"]
-                        any_change = True
-                    break
-
-        if any_change:
-            peak = max((a.get("workers", 0) for a in allocations), default=0)
-            rp["peak_concurrent_workers"] = peak
-
-        return any_change
+                return None
+            if not 0 <= opt["workers"] <= MAX_WORKERS or not 0 <= opt["diu"] <= MAX_DIU:
+                return None
+            feat = stage_features(stage, plan.get("schema", {}), int(plan.get("csv_size_bytes", 0)), i, len(stages))
+            if feat["row_count"] <= 0 or feat["csv_size_mb"] <= 0:
+                return None
+            before = estimate_stage_duration(alloc.get("workers", 0), alloc.get("diu", 0), alloc.get("node_type", _DEFAULT_NODE), feat)
+            after = estimate_stage_duration(opt["workers"], opt["diu"], opt["node_type"], feat)
+            # Do not claim better timing than either calibrated scaling or the labeler's estimate.
+            duration = max(old_duration * after / before, after)
+            if not math.isfinite(duration):
+                return None
+            memory = float(alloc.get("memory_gb", 0) or 0)
+            capacity = opt["diu"] * 1.5 if feat["stage_is_copy"] else 4 + max(1, opt["workers"]) * NODE_SPECS[opt["node_type"]]["memory_gb"]
+            if not math.isfinite(memory) or memory < 0 or memory > capacity or capacity > MAX_TOTAL_MEM_GB:
+                return None
+            ratio = max(ratio, duration / old_duration)
+            changed |= any(alloc.get(k) != opt[k] for k in ("workers", "diu", "node_type", "shuffle_partitions"))
+            alloc.update({k: opt[k] for k in ("workers", "diu", "node_type", "shuffle_partitions")})
+            alloc["memory_gb"] = max(memory, opt["memory_gb"])
+            if alloc["memory_gb"] > capacity:
+                return None
+            alloc["duration_s"] = duration
+        # Without an explicit deadline, never automatically trade away runtime.
+        projected = baseline * ratio
+        if projected > (deadline if deadline > 0 else baseline):
+            return None
+        # Unknown execution grouping: reserve for the worst case (all simultaneous).
+        if sum(a.get("workers", 0) for a in allocations) > MAX_WORKERS or sum(a.get("memory_gb", 0) for a in allocations) > MAX_TOTAL_MEM_GB:
+            return None
+        rp["estimated_total_s"] = projected
+        rp["peak_concurrent_workers"] = sum(a.get("workers", 0) for a in allocations)
+        old_cost = self._estimate_cost(plan, perf, resource_plan).total_usd
+        new_cost = self._estimate_cost(plan, {**perf, "predicted_total_s": projected}, rp).total_usd
+        return rp if changed and old_cost > 0 and new_cost <= old_cost * .97 else None
 
     def _apply_cluster_downsize(self, plan, perf, rp, constraints) -> bool:
         allocations = rp.get("allocations", [])
@@ -354,8 +290,6 @@ class CostOptimizationAgent:
         priority = constraints.get("priority", "normal")
         predicted_s = perf.get("predicted_total_s", 0)
 
-        if priority == "critical":
-            return True
 
         if deadline_s > 0 and predicted_s > 0:
             if "downsize" in rule_name or "downgrade" in rule_name:
@@ -366,131 +300,20 @@ class CostOptimizationAgent:
 
     # ── ML Primary Path ──────────────────────────────────────────────────────
 
-    def _try_ml_suggestions(
-        self,
-        plan: dict,
-        perf: dict,
-        resource_plan: dict,
-        current_cost: CostBreakdown,
-        suggestions: List[OptimizationSuggestion],
-        constraints: dict,
-    ) -> bool:
-        """Try ML predictions. Returns True if ML was used."""
-        try:
-            from cost_optimization_agent.ml_predictor import (
-                CostMLPredictor,
-                MLNotAvailable,
-            )
-
-            if not CostMLPredictor.is_available():
-                return False
-        except Exception:
+    def _try_ml_suggestions(self, plan, perf, resource_plan, current_cost, suggestions, constraints):
+        candidate = self._validated_ml_candidate(plan, perf, resource_plan, constraints)
+        if candidate is None:
             return False
-
-        stages = plan.get("stages", [])
-        allocations = resource_plan.get("allocations", [])
-        alloc_map = {a.get("stage_name"): a for a in allocations}
-        schema = plan.get("schema", {})
-        csv_size_bytes = int(plan.get("csv_size_bytes", 0))
-        n_stages = len(stages)
-
-        ml_allocations = copy.deepcopy(allocations)
-        total_saving = 0.0
-
-        for i, stage in enumerate(stages):
-            name = stage.get("name", "")
-            current_alloc = alloc_map.get(name)
-            if not current_alloc:
-                continue
-
-            try:
-                opt = CostMLPredictor.predict_optimal_config(
-                    stage, schema, csv_size_bytes, stage_index=i, n_stages=n_stages
-                )
-            except MLNotAvailable:
-                continue
-
-            for ml_alloc in ml_allocations:
-                if ml_alloc.get("stage_name") == name:
-                    old_workers = ml_alloc.get("workers", 0)
-                    old_node = ml_alloc.get("node_type", _DEFAULT_NODE)
-                    new_workers = opt["workers"]
-                    new_node = opt["node_type"]
-
-                    if ml_alloc.get("stage_type") == "copy":
-                        old_diu = ml_alloc.get("diu", 2)
-                        new_diu = opt["diu"]
-                        if new_diu < old_diu:
-                            ml_alloc["diu"] = new_diu
-                            ml_alloc["memory_gb"] = opt["memory_gb"]
-                    elif new_workers < old_workers or new_node != old_node:
-                        ml_alloc["workers"] = new_workers
-                        ml_alloc["node_type"] = new_node
-                        ml_alloc["shuffle_partitions"] = opt["shuffle_partitions"]
-                        ml_alloc["memory_gb"] = opt["memory_gb"]
-                    break
-
-        new_cost = self._estimate_cost(
-            plan,
-            perf,
-            resource_plan,
-            override_cluster={
-                "allocations": ml_allocations,
-                "peak_concurrent_workers": max(
-                    a.get("workers", 0) for a in ml_allocations
-                ),
-            },
-        )
-        saving_pct = (
-            round((1 - new_cost.total_usd / current_cost.total_usd) * 100, 1)
-            if current_cost.total_usd > 0
-            else 0
-        )
-
-        if saving_pct >= 3:
-            changes = []
-            for i, stage in enumerate(stages):
-                name = stage.get("name", "")
-                old_a = alloc_map.get(name)
-                new_a = next(
-                    (a for a in ml_allocations if a.get("stage_name") == name), None
-                )
-                if not old_a or not new_a:
-                    continue
-                if old_a.get("workers", 0) != new_a.get("workers", 0):
-                    changes.append(
-                        f"{name}: {old_a.get('workers', 0)}w->{new_a.get('workers', 0)}w"
-                    )
-                if old_a.get("diu", 0) != new_a.get("diu", 0):
-                    changes.append(
-                        f"{name}: {old_a.get('diu', 0)}DIU->{new_a.get('diu', 0)}DIU"
-                    )
-                if old_a.get("node_type") != new_a.get("node_type"):
-                    changes.append(
-                        f"{name}: {old_a.get('node_type', '?')}->{new_a.get('node_type', '?')}"
-                    )
-
-            reason = "ML model predicted cost-optimal config: " + "; ".join(changes[:3])
-            if len(changes) > 3:
-                reason += f" (+{len(changes) - 3} more)"
-
-            suggestions.append(
-                OptimizationSuggestion(
-                    change="; ".join(changes[:2])
-                    if changes
-                    else "apply ML-recommended resource adjustments",
-                    estimated_saving=f"~{saving_pct}%",
-                    trade_off="negligible runtime impact — model optimizes for cost within feasible configs",
-                    reason=reason,
-                    new_cost=new_cost,
-                    risk_level="low",
-                    value_score=0.0,
-                    source="ml",
-                )
-            )
-            return True
-
-        return False
+        duration = candidate["estimated_total_s"]
+        new_cost = self._estimate_cost(plan, {**perf, "predicted_total_s": duration}, candidate)
+        saving = round((1 - new_cost.total_usd / current_cost.total_usd) * 100, 1)
+        suggestions.append(OptimizationSuggestion(
+            change="apply validated ML resource configuration",
+            estimated_saving=f"~{saving}%",
+            trade_off=f"Estimated runtime {duration:.1f}s; synthetic estimates require production validation",
+            reason="Candidate passed deadline, memory, worker and cost checks",
+            new_cost=new_cost, risk_level="medium", source="ml"))
+        return True
 
     # ── Cost Model ───────────────────────────────────────────────────────────
 
@@ -519,28 +342,23 @@ class CostOptimizationAgent:
         )
         duration_h = max(predicted_duration_s / 3600.0, 1 / 3600.0)
 
-        notebook_workers = 0
-        total_workers = resource_plan.get("peak_concurrent_workers", 0)
-        if override_cluster:
-            total_workers = override_cluster.get(
-                "peak_concurrent_workers", total_workers
-            )
-
+        compute_cost = dbu_cost = adf_cost = 0.0
+        if not allocations and stages:
+            allocations = [{"stage_type": st.get("type", "notebook"),
+                            "workers": resource_plan.get("peak_concurrent_workers", 1),
+                            "diu": 1} for st in stages]
         for alloc in allocations:
-            if alloc.get("stage_type") == "notebook":
-                notebook_workers = max(notebook_workers, alloc.get("workers", 0))
-        notebook_workers = max(notebook_workers, total_workers, 1)
-
-        node_type = recommended.get("node_type", _DEFAULT_NODE)
-        if override_cluster and override_cluster.get("node_type"):
-            node_type = override_cluster["node_type"]
-        node_rate = NODE_HOURLY_RATES.get(node_type, _DEFAULT_NODE_RATE)
-
-        compute_cost = notebook_workers * node_rate * duration_h
-        dbu_cost = notebook_workers * 1.5 * 0.55 * duration_h
-
-        copy_stages = sum(1 for s in stages if s.get("type") == "copy")
-        adf_cost = copy_stages * 0.001
+            seconds = float(alloc.get("duration_s", predicted_duration_s) or predicted_duration_s)
+            hours = max(seconds, 0) / 3600
+            if alloc.get("stage_type") == "copy":
+                adf_cost += .001 + max(1, alloc.get("diu", 1)) * .25 * hours
+                continue
+            node = alloc.get("node_type", recommended.get("node_type", _DEFAULT_NODE))
+            if override_cluster and override_cluster.get("node_type"):
+                node = override_cluster["node_type"]
+            workers = max(1, alloc.get("workers", 0))
+            compute_cost += workers * NODE_HOURLY_RATES.get(node, _DEFAULT_NODE_RATE) * hours
+            dbu_cost += workers * 1.5 * .55 * hours
 
         file_size_mb = performance_prediction.get("throughput_mb_per_s", 0) or 0
         if file_size_mb and predicted_duration_s > 0:
@@ -878,14 +696,12 @@ class CostOptimizationAgent:
             if priority == "critical" and "off-peak" in s.change.lower():
                 continue
             if deadline_s > 0 and predicted_s > 0:
-                if "cluster" in s.change.lower() or "node" in s.change.lower():
+                if s.source != "ml":
                     new_duration = predicted_s * (1 + 0.20)
                     if new_duration > deadline_s:
                         continue
             safe.append(s)
 
-        if not safe and suggestions:
-            safe.append(suggestions[0])
         return safe
 
     # ── Ranking ─────────────────────────────────────────────────────────────

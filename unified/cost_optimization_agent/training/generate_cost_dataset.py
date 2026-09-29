@@ -1,8 +1,8 @@
 """
 Generate the Cost Optimization Agent's supervised training set.
 
-Each row = one pipeline STAGE described by the same 16 features as the
-Resource Agent's model, labelled with the *cost-optimal compute configuration*
+Each row = one pipeline STAGE described by 16 workload features plus its
+deadline, labelled with the *cost-optimal compute configuration*
 found by deadline-aware brute-force search over feasible (workers, node, shuffle)
 combos.
 
@@ -136,96 +136,28 @@ def _estimate_stage_cost_s(workers, node_type, duration_s, is_copy):
 
 
 def _deadline_aware_optimal(feat, deadline_s):
-    """Find the cheapest config that finishes within deadline_s.
-
-    Without a deadline, the cheapest node always wins (cost is invariant to
-    worker count).  Deadlines force bigger/faster nodes for large datasets.
-    """
-    is_copy = feat["stage_is_copy"]
-
-    if is_copy:
-        best = None
-        best_cost = float("inf")
-        for diu in range(1, MAX_DIU + 1):
-            dur = _estimate_stage_duration_s(0, DEFAULT_NODE, feat)
-            cost = _estimate_stage_cost_s(0, DEFAULT_NODE, dur, True)
+    """Return a feasible cheapest label, or None when the deadline is impossible."""
+    from cost_optimization_agent.ml.feature_spec import estimate_stage_cost, estimate_stage_duration
+    best, best_cost = None, float("inf")
+    is_copy = bool(feat["stage_is_copy"])
+    for node in ([DEFAULT_NODE] if is_copy else NODE_TYPES_BY_MEM):
+        for units in range(1, (MAX_DIU if is_copy else MAX_WORKERS) + 1):
+            workers, diu = (0, units) if is_copy else (units, 0)
+            duration = estimate_stage_duration(workers, diu, node, feat)
+            if deadline_s > 0 and duration > deadline_s:
+                continue
+            memory = diu * 1.5 if is_copy else 4 + workers * NODE_SPECS[node]["memory_gb"]
+            if memory > BOUNDS["opt_memory_gb"][1]:
+                continue
+            cost = estimate_stage_cost(workers, diu, node, duration, is_copy)
             if cost < best_cost:
                 best_cost = cost
-                best = {
-                    "opt_workers": 0,
-                    "opt_diu": diu,
-                    "opt_memory_gb": round(diu * 1.5, 2),
-                    "opt_shuffle_partitions": SHUFFLE_TIERS[0],
-                    "opt_node_type": DEFAULT_NODE,
-                }
-        return best or {
-            "opt_workers": 0,
-            "opt_diu": 2,
-            "opt_memory_gb": 3.0,
-            "opt_shuffle_partitions": 8,
-            "opt_node_type": DEFAULT_NODE,
-        }
-
-    best = None
-    best_cost = float("inf")
-
-    for node in NODE_TYPES_BY_MEM:
-        for workers in range(1, MAX_WORKERS + 1):
-            dur = _estimate_stage_duration_s(workers, node, feat)
-            if dur > deadline_s:
-                continue  # doesn't meet deadline
-
-            cost = _estimate_stage_cost_s(workers, node, dur, False)
-            mem_gb = min(
-                BOUNDS["opt_memory_gb"][1],
-                4.0 + workers * NODE_SPECS[node]["memory_gb"],
-            )
-            shuffle = snap_shuffle(
-                (feat["csv_size_mb"] / 128.0)
-                * (1.0 + 0.5 * feat["has_groupby"] + 0.3 * feat["has_join"])
-            )
-
-            if cost < best_cost:
-                best_cost = cost
-                best = {
-                    "opt_workers": workers,
-                    "opt_diu": 0,
-                    "opt_memory_gb": round(mem_gb, 2),
-                    "opt_shuffle_partitions": int(shuffle),
-                    "opt_node_type": node,
-                }
-
-    # Fallback: if no config meets deadline, pick cheapest overall
-    if best is None:
-        for node in NODE_TYPES_BY_MEM:
-            workers = 1
-            dur = _estimate_stage_duration_s(workers, node, feat)
-            cost = _estimate_stage_cost_s(workers, node, dur, False)
-            mem_gb = min(
-                BOUNDS["opt_memory_gb"][1],
-                4.0 + workers * NODE_SPECS[node]["memory_gb"],
-            )
-            shuffle = snap_shuffle(
-                (feat["csv_size_mb"] / 128.0)
-                * (1.0 + 0.5 * feat["has_groupby"] + 0.3 * feat["has_join"])
-            )
-            if cost < best_cost:
-                best_cost = cost
-                best = {
-                    "opt_workers": workers,
-                    "opt_diu": 0,
-                    "opt_memory_gb": round(mem_gb, 2),
-                    "opt_shuffle_partitions": int(shuffle),
-                    "opt_node_type": node,
-                }
-
-    return best or {
-        "opt_workers": 1,
-        "opt_diu": 0,
-        "opt_memory_gb": 8.0,
-        "opt_shuffle_partitions": 8,
-        "opt_node_type": DEFAULT_NODE,
-    }
+                best = {"opt_workers": workers, "opt_diu": diu,
+                        "opt_memory_gb": memory,
+                        "opt_shuffle_partitions": 8 if is_copy else snap_shuffle(
+                            feat["csv_size_mb"] / 128 * (1 + .5 * feat["has_groupby"] + .3 * feat["has_join"])),
+                        "opt_node_type": node}
+    return best
 
 
 def _emit_pipeline(rng, writer):
@@ -257,6 +189,7 @@ def _emit_pipeline(rng, writer):
             is_final = nb_idx == n_notebook - 1
             stages.append(_make_notebook_stage(rng, is_final))
 
+    written = 0
     for i, stage in enumerate(stages):
         csv_size_bytes = int(row_count * 140.0)
         feat = stage_features(
@@ -268,25 +201,19 @@ def _emit_pipeline(rng, writer):
         # - Moderate deadline (300s)  → mid-range nodes
         # - Tight deadline (120s)     → bigger/faster nodes needed
         # - Very tight (60s)          → largest nodes
-        deadline_s = rng.choice([60, 120, 180, 300, 600])
+        deadline_s = rng.choice([0, 60, 120, 180, 300, 600])
 
         labels = _deadline_aware_optimal(feat, deadline_s)
 
-        # Add Gaussian noise to numeric targets
-        noise_std = {
-            "opt_workers": 0.35,
-            "opt_diu": 0.45,
-            "opt_memory_gb": 0.40,
-            "opt_shuffle_partitions": 3.5,
-        }
-        for key, std in noise_std.items():
-            labels[key] = round(max(0, labels[key] + rng.gauss(0, std)), 2)
-
+        if labels is None:
+            continue  # Infeasible cases must never become valid training targets.
+        feat["deadline_s"] = deadline_s
         feat_row = {c: feat[c] for c in FEATURE_COLS}
         row = {**feat_row, **labels}
         writer.writerow(row)
+        written += 1
 
-    return n_stages
+    return written
 
 
 def generate(csv_path: str, num_rows: int, seed: int):

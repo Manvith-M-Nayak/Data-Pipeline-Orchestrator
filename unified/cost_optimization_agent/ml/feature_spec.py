@@ -48,6 +48,7 @@ FEATURE_COLS = [
     "stage_index",
     "n_stages",
     "is_final_stage",
+    "deadline_s",
 ]
 
 TARGET_COLS = [
@@ -115,7 +116,8 @@ def estimate_stage_cost(
         rate = NODE_HOURLY_RATES.get(node_type, 0.28)
         compute = w * rate * duration_h
         dbu = w * 1.5 * 0.55 * duration_h
-    adf = 0.001 if is_copy else 0.0
+    # Approximate DIU-hour charge plus activity fee; not a live Azure quote.
+    adf = 0.001 + max(diu, 1) * 0.25 * duration_h if is_copy else 0.0
     return compute + dbu + adf
 
 
@@ -137,7 +139,7 @@ def estimate_stage_duration(
 
     rows = max(feat["row_count"], 1)
     w = max(workers, 1)
-    cores = 4
+    cores = NODE_SPECS.get(node_type, NODE_SPECS[DEFAULT_NODE])["cpu"]
 
     work_mult = 1.0
     work_mult += 0.08 * feat["transform_count"]

@@ -1,0 +1,138 @@
+{
+  "runtime": {
+    "numpy": "2.2.6",
+    "sklearn": "1.6.1"
+  },
+  "model_available": true,
+  "load_error": null,
+  "bundle": {
+    "sklearn_version": "1.6.1",
+    "trained_rows": 30000,
+    "feature_cols": [
+      "stage_is_copy",
+      "csv_size_mb",
+      "row_count",
+      "column_count",
+      "size_hint_ord",
+      "transform_count",
+      "agg_count",
+      "has_filter",
+      "has_join",
+      "has_groupby",
+      "has_aggregation",
+      "has_distinct",
+      "has_sort",
+      "stage_index",
+      "n_stages",
+      "is_final_stage",
+      "deadline_s"
+    ]
+  },
+  "fresh_synthetic_rows": 5000,
+  "fresh_metrics": {
+    "opt_workers": {
+      "mae": 0.027683023965016543,
+      "r2": 0.9615953410516671,
+      "rounded_accuracy": 0.9924
+    },
+    "opt_diu": {
+      "mae": 0.007824981084750462,
+      "r2": 0.9924643241385437,
+      "rounded_accuracy": 0.996
+    },
+    "opt_memory_gb": {
+      "mae": 1.0805018853806145,
+      "r2": 0.9713296599333399,
+      "rounded_accuracy": 0.611
+    },
+    "opt_shuffle_partitions": {
+      "mae": 0.35144599106842245,
+      "r2": 0.9783833134234269,
+      "rounded_accuracy": 0.945
+    }
+  },
+  "node_balanced_accuracy": 0.9939154005973179,
+  "prediction": {
+    "workers": 1,
+    "diu": 0,
+    "memory_gb": 32.22,
+    "shuffle_partitions": 8,
+    "node_type": "Standard_DS4_v2",
+    "source": "ml_model"
+  },
+  "tight_deadline_optimize": {
+    "estimated_cost": {
+      "compute_usd": 0.093333,
+      "databricks_dbu_usd": 0.1375,
+      "adf_usd": 0.0,
+      "storage_usd": 0.0,
+      "total_usd": 0.230833,
+      "currency": "USD"
+    },
+    "recommendations": [],
+    "chosen_option": null,
+    "optimization_source": "heuristic"
+  },
+  "tight_deadline_applied": {
+    "allocations": [
+      {
+        "stage_name": "transform",
+        "stage_type": "notebook",
+        "workers": 4,
+        "node_type": "Standard_D8s_v3",
+        "memory_gb": 64,
+        "duration_s": 150
+      }
+    ],
+    "peak_concurrent_workers": 4,
+    "estimated_total_s": 150
+  },
+  "input_preserved": true,
+  "labeler_duration_before": 141.09375,
+  "labeler_duration_after": 141.09375,
+  "deadline_labels_same_features": {
+    "60": null,
+    "151": null,
+    "300": {
+      "opt_workers": 1,
+      "opt_diu": 0,
+      "opt_memory_gb": 32.0,
+      "opt_shuffle_partitions": 8,
+      "opt_node_type": "Standard_DS4_v2"
+    },
+    "600": {
+      "opt_workers": 1,
+      "opt_diu": 0,
+      "opt_memory_gb": 32.0,
+      "opt_shuffle_partitions": 8,
+      "opt_node_type": "Standard_DS4_v2"
+    }
+  },
+  "empty_plan": {
+    "estimated_cost": {
+      "compute_usd": 0.0,
+      "databricks_dbu_usd": 0.0,
+      "adf_usd": 0.0,
+      "storage_usd": 0.0,
+      "total_usd": 0.0,
+      "currency": "USD"
+    },
+    "recommendations": [],
+    "chosen_option": null,
+    "optimization_source": "heuristic"
+  },
+  "rejected_suggestion_reintroduced": false,
+  "node_change_costs": [
+    0.230833,
+    0.160833
+  ],
+  "copy_only_cost": {
+    "compute_usd": 0.0,
+    "databricks_dbu_usd": 0.0,
+    "adf_usd": 0.167667,
+    "storage_usd": 0.0,
+    "total_usd": 0.167667,
+    "currency": "USD"
+  },
+  "missing_model_fallback": "heuristic"
+}

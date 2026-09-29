@@ -73,6 +73,7 @@ class CostMLPredictor:
         csv_size_bytes: int = 0,
         stage_index: int = 0,
         n_stages: int = 1,
+        deadline_s: float = 0,
     ) -> dict:
         """
         Predict the cost-optimal compute configuration for one stage.
@@ -83,7 +84,8 @@ class CostMLPredictor:
         cls._ensure_loaded()
         try:
             feat = stage_features(stage, schema, csv_size_bytes, stage_index, n_stages)
-            X = np.array(features_to_vector(feat), dtype=float).reshape(1, -1)
+            feat["deadline_s"] = float(deadline_s)
+            X = np.array([feat[c] for c in FEATURE_COLS], dtype=float).reshape(1, -1)
 
             reg = cls._bundle["regressors"]
             workers = int(
