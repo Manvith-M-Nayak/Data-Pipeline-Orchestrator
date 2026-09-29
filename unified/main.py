@@ -99,13 +99,24 @@ async def lifespan(app: FastAPI):
             print(f"[startup] marked {n} interrupted manager run(s) as failed")
     except Exception as exc:
         print(f"[startup] interrupted-run sweep skipped: {exc}")
-    spawn(ensure_ollama(), name="ollama.ensure")
-    spawn(monitor_service.start_polling(), name="monitor.start_polling")
-    spawn(
-        monitor_service.backfill_missing_analyses(limit=75),
-        name="monitor.backfill_missing_analyses",
-    )
+    tasks = [
+        spawn(ensure_ollama(), name="ollama.ensure"),
+        spawn(monitor_service.start_polling(), name="monitor.start_polling"),
+        spawn(
+            monitor_service.backfill_missing_analyses(limit=75),
+            name="monitor.backfill_missing_analyses",
+        ),
+    ]
     yield
+    # ── Shutdown: stop the loops we started, close live sockets ─────────────
+    # (Ollama is deliberately left running — see planner_agent/ollama_launcher.)
+    from central_manager_agent.stream_manager import stream_manager
+
+    await stream_manager.shutdown()
+    for t in tasks:
+        t.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
+    await monitor_service.close_clients()
 
 
 app = FastAPI(title="Unified Agent Backend", version="1.0.0", lifespan=lifespan)

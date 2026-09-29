@@ -29,13 +29,26 @@ class MonitorService:
         self.ws_clients: Set[WebSocket] = set()
 
     async def _broadcast(self, payload: Dict[str, Any]):
+        # Iterate a snapshot: websocket_live adds/removes clients while we
+        # await a send, which would otherwise raise "Set changed size during
+        # iteration". A stalled client is dropped instead of blocking the poll.
+        text = json.dumps(payload)
         dead = set()
-        for ws in self.ws_clients:
+        for ws in list(self.ws_clients):
             try:
-                await ws.send_text(json.dumps(payload))
+                await asyncio.wait_for(ws.send_text(text), timeout=5)
             except Exception:
                 dead.add(ws)
         self.ws_clients -= dead
+
+    async def close_clients(self):
+        """Close every live WebSocket (server shutdown)."""
+        for ws in list(self.ws_clients):
+            try:
+                await ws.close(code=1001)
+            except Exception:
+                pass
+        self.ws_clients.clear()
 
     async def start_polling(self):
         while True:

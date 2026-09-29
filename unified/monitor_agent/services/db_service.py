@@ -10,6 +10,17 @@ _DEFAULT_DB = os.path.normpath(os.path.join(
 ))
 DB_PATH = os.getenv("DB_PATH", _DEFAULT_DB)
 
+# How long a connection waits for another writer's lock before raising
+# "database is locked". Several writers run concurrently (monitor poll, manager
+# phase persistence, anomaly events), so waiting briefly is the right default.
+BUSY_TIMEOUT_S = 10.0
+
+
+def _connect():
+    """Open a connection with the busy timeout. WAL mode itself is persistent
+    in the database file and is switched on once in initialize()."""
+    return aiosqlite.connect(DB_PATH, timeout=BUSY_TIMEOUT_S)
+
 
 class DBService:
     def __init__(self):
@@ -18,7 +29,11 @@ class DBService:
             os.makedirs(db_dir, exist_ok=True)
 
     async def initialize(self):
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with _connect() as db:
+            # WAL: readers never block the writer and vice versa, so the 20s
+            # monitor poll and run-state writes stop colliding.
+            await db.execute("PRAGMA journal_mode=WAL")
+            await db.execute("PRAGMA synchronous=NORMAL")
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS pipeline_runs (
                     run_id        TEXT PRIMARY KEY,
@@ -135,7 +150,7 @@ class DBService:
             return
         plan = state.get("plan") or {}
         stage_count = len(plan.get("stages", []))
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with _connect() as db:
             await db.execute(
                 """
                 INSERT INTO manager_runs
@@ -157,7 +172,7 @@ class DBService:
             await db.commit()
 
     async def get_manager_run(self, run_id: str) -> Optional[Dict]:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with _connect() as db:
             async with db.execute(
                 "SELECT state_json FROM manager_runs WHERE run_id=?", (run_id,)
             ) as cur:
@@ -170,7 +185,7 @@ class DBService:
             return None
 
     async def list_manager_runs(self, limit: int = 100) -> List[Dict]:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with _connect() as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 """
@@ -187,7 +202,7 @@ class DBService:
         """On startup, fail any run left non-terminal by a crash/restart — its
         asyncio task is gone, so it can never complete."""
         placeholders = ",".join("?" * len(self._MANAGER_TERMINAL))
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with _connect() as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 f"SELECT run_id, state_json FROM manager_runs "
@@ -212,7 +227,7 @@ class DBService:
             return len(rows)
 
     async def upsert_run(self, run: Dict[str, Any]):
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with _connect() as db:
             await db.execute(
                 """
                 INSERT INTO pipeline_runs
@@ -234,7 +249,7 @@ class DBService:
     async def save_analysis(
         self, run_id: str, pipeline_name: str, analysis: Dict, explanation: str
     ):
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with _connect() as db:
             await db.execute(
                 """
                 INSERT INTO pipeline_analyses
@@ -265,7 +280,7 @@ class DBService:
         self, run_id: str, pipeline_name: str,
         elapsed_sec: float, avg_sec: float, p95_sec: float, groq_verdict: str
     ):
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with _connect() as db:
             await db.execute(
                 """
                 INSERT INTO anomaly_log (run_id, pipeline_name, elapsed_sec, avg_sec, p95_sec, groq_verdict)
@@ -276,7 +291,7 @@ class DBService:
             await db.commit()
 
     async def get_historical_stats(self, pipeline_name: str) -> Dict:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with _connect() as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 """
@@ -318,7 +333,7 @@ class DBService:
             params.append(run_id)
         where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
         params.append(limit)
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with _connect() as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 f"""
@@ -335,14 +350,14 @@ class DBService:
         return [dict(r) for r in rows]
 
     async def analysis_exists(self, run_id: str) -> bool:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with _connect() as db:
             async with db.execute(
                 "SELECT 1 FROM pipeline_analyses WHERE run_id=?", (run_id,)
             ) as cur:
                 return await cur.fetchone() is not None
 
     async def get_runs_missing_analysis(self, limit: int = 50) -> List[Dict]:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with _connect() as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 """
@@ -361,7 +376,7 @@ class DBService:
         self, run_id: str, pipeline_name: str, kind: str,
         severity: str, detail: str, metrics: Dict,
     ):
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with _connect() as db:
             await db.execute(
                 """
                 INSERT INTO anomaly_events
@@ -381,7 +396,7 @@ class DBService:
             where = "WHERE kind=?"
             params.append(kind)
         params.append(limit)
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with _connect() as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 f"SELECT * FROM anomaly_events {where} "
@@ -396,7 +411,7 @@ class DBService:
         cost_usd: Optional[float], rows_written: Optional[int],
         retries: int, status: str,
     ):
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with _connect() as db:
             await db.execute(
                 """
                 INSERT OR REPLACE INTO run_metrics
@@ -416,7 +431,7 @@ class DBService:
         """Prior runs' metrics, newest first (baseline source). Successful runs
         only unless include_failed."""
         status_clause = "" if include_failed else "AND status='ok'"
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with _connect() as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 f"""
@@ -430,7 +445,7 @@ class DBService:
         return [dict(r) for r in rows]
 
     async def get_last_schema(self, pipeline_name: str) -> Optional[List[str]]:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with _connect() as db:
             async with db.execute(
                 "SELECT columns_json FROM pipeline_schemas WHERE pipeline_name=?",
                 (pipeline_name,),
@@ -439,7 +454,7 @@ class DBService:
         return json.loads(row[0]) if row else None
 
     async def save_schema(self, pipeline_name: str, columns: List[str]):
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with _connect() as db:
             await db.execute(
                 """
                 INSERT INTO pipeline_schemas (pipeline_name, columns_json, updated_at)
@@ -452,7 +467,7 @@ class DBService:
             await db.commit()
 
     async def get_anomaly_log(self, limit: int = 100) -> List[Dict]:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with _connect() as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM anomaly_log ORDER BY logged_at DESC LIMIT ?", (limit,)
@@ -463,7 +478,7 @@ class DBService:
     async def get_historical_runs_for_prediction(
         self, pipeline_name: str, limit: int = 30
     ) -> List[Dict]:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with _connect() as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 """
@@ -478,7 +493,7 @@ class DBService:
         return [dict(r) for r in rows]
 
     async def get_known_pipeline_names(self) -> List[str]:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with _connect() as db:
             async with db.execute(
                 "SELECT DISTINCT pipeline_name FROM pipeline_runs ORDER BY pipeline_name"
             ) as cur:

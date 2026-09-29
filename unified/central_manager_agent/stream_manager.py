@@ -26,9 +26,13 @@ import time
 import uuid
 from typing import Dict, Optional
 
+from background import spawn
 from executor_agent import executor as _ex
 
 _OUTPUT_EXTS = (".csv", ".json", ".jsonl", ".ndjson")
+# Stopped streams stay readable (status, output preview) for this long, then
+# are dropped so _streams/_locks don't grow for the life of the process.
+STOPPED_TTL_S = 3600
 
 
 class StreamManager:
@@ -51,6 +55,7 @@ class StreamManager:
         source = stream_stages[0].get("source_container") or (clist[0] if clist else None)
         sink = stream_stages[0].get("sink_container") or (clist[-1] if clist else None)
 
+        self._prune_stopped()
         sid = uuid.uuid4().hex[:8]
         self._streams[sid] = {
             "stream_id": sid,
@@ -70,7 +75,9 @@ class StreamManager:
         }
         self._locks[sid] = asyncio.Lock()
         if interval_s and int(interval_s) > 0:
-            self._tasks[sid] = asyncio.ensure_future(self._poll_loop(sid))
+            task = spawn(self._poll_loop(sid), name=f"stream.poll:{sid}")
+            task.add_done_callback(lambda t, sid=sid: self._tasks.pop(sid, None))
+            self._tasks[sid] = task
         return self.get(sid)
 
     async def _poll_loop(self, sid: str):
@@ -125,10 +132,27 @@ class StreamManager:
     async def stop(self, sid: str) -> dict:
         st = self._require(sid)
         st["active"] = False
+        st["stopped_at"] = time.time()
         t = self._tasks.pop(sid, None)
         if t:
             t.cancel()
         return self.get(sid)
+
+    def _prune_stopped(self):
+        cutoff = time.time() - STOPPED_TTL_S
+        for sid in [k for k, st in self._streams.items()
+                    if not st.get("active") and not st.get("running")
+                    and st.get("stopped_at", 0) < cutoff]:
+            self._streams.pop(sid, None)
+            self._locks.pop(sid, None)
+
+    async def shutdown(self):
+        """Stop every stream's poll loop (server shutdown)."""
+        for sid in list(self._tasks):
+            st = self._streams.get(sid)
+            if st:
+                st["active"] = False
+            self._tasks.pop(sid).cancel()
 
     # ── reads ───────────────────────────────────────────────────────────────
     def get(self, sid: str) -> dict:
@@ -140,6 +164,7 @@ class StreamManager:
         )}
 
     def list(self) -> list:
+        self._prune_stopped()
         return [self.get(sid) for sid in self._streams]
 
     def output_preview(self, sid: str, limit: int = 200) -> dict:
