@@ -72,6 +72,7 @@ from monitor_agent.routers import predictions as mon_predictions
 from monitor_agent.routers import anomalies as mon_anomalies
 
 from planner_agent.router import router as planner_router
+from planner_agent.ollama_launcher import ensure_ollama
 from executor_agent.router import router as executor_router
 from central_manager_agent.router import router as manager_router
 from resource_agent.router import router as resource_router
@@ -98,6 +99,7 @@ async def lifespan(app: FastAPI):
             print(f"[startup] marked {n} interrupted manager run(s) as failed")
     except Exception as exc:
         print(f"[startup] interrupted-run sweep skipped: {exc}")
+    spawn(ensure_ollama(), name="ollama.ensure")
     spawn(monitor_service.start_polling(), name="monitor.start_polling")
     spawn(
         monitor_service.backfill_missing_analyses(limit=75),
