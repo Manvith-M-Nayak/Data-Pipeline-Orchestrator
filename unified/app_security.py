@@ -5,16 +5,19 @@ Cross-cutting API security helpers.
   * read_upload_capped — streams an UploadFile into memory with a hard size cap
     so a large upload cannot exhaust RAM (DoS).
 
-Both are opt-in via environment variables so local development stays friction
-free while production can lock things down:
+Configured via environment variables:
 
-  API_KEY                        enable auth when set (any non-empty value)
+  API_KEY                        require a matching x-api-key header when set.
+                                 When unset, the API only answers loopback
+                                 clients (127.0.0.1 / ::1) — local dev keeps
+                                 working, but nothing is exposed on the network.
   ALLOWED_ORIGINS                comma-separated CORS allowlist
   MAX_UPLOAD_BYTES               reject uploads larger than this (default 100 MB)
   DOWNLOAD_CONTAINER_ALLOWLIST   comma-separated containers the download
                                  endpoint may read (empty = no restriction)
 """
 
+import hmac
 import os
 
 from fastapi import HTTPException, UploadFile
@@ -39,32 +42,63 @@ async def read_upload_capped(upload: UploadFile, max_bytes: int = MAX_UPLOAD_BYT
         chunk = await upload.read(_CHUNK)
         if not chunk:
             break
-        buf.extend(chunk)
-        if len(buf) > max_bytes:
+        if len(buf) + len(chunk) > max_bytes:
             raise HTTPException(
                 status_code=413,
                 detail=f"Upload exceeds the {max_bytes}-byte limit",
             )
+        buf.extend(chunk)
     return bytes(buf)
+
+
+_LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
+
+
+def is_loopback(client) -> bool:
+    return bool(client) and client.host in _LOOPBACK_HOSTS
+
+
+def api_key_matches(provided, expected: str) -> bool:
+    """Constant-time compare so the key cannot be recovered via response timing."""
+    if not provided or not expected:
+        return False
+    return hmac.compare_digest(provided.encode(), expected.encode())
 
 
 class APIKeyMiddleware(BaseHTTPMiddleware):
     """Require a matching ``x-api-key`` header on every non-public request.
 
-    Only wraps HTTP requests — WebSocket connections bypass Starlette HTTP
-    middleware, so ``/ws/live`` stays open (read-only monitor events).
-    Preflight ``OPTIONS`` requests are allowed through so CORS still works.
+    With no API key configured, only loopback clients are served. Preflight
+    ``OPTIONS`` requests are allowed through so CORS still works. WebSockets
+    bypass HTTP middleware — ``/ws/live`` checks access itself via
+    ``websocket_allowed``.
     """
 
-    def __init__(self, app, api_key: str):
+    def __init__(self, app, api_key: str = ""):
         super().__init__(app)
         self._api_key = api_key
 
     async def dispatch(self, request, call_next):
         if request.method == "OPTIONS" or request.url.path.startswith(_PUBLIC_PREFIXES):
             return await call_next(request)
-        if request.headers.get("x-api-key") != self._api_key:
+        if not self._api_key:
+            if not is_loopback(request.client):
+                return JSONResponse(
+                    {"detail": "API_KEY not configured; only local requests are allowed"},
+                    status_code=403,
+                )
+            return await call_next(request)
+        if not api_key_matches(request.headers.get("x-api-key"), self._api_key):
             return JSONResponse(
                 {"detail": "Invalid or missing API key"}, status_code=401
             )
         return await call_next(request)
+
+
+def websocket_allowed(websocket, api_key: str) -> bool:
+    """Same policy as APIKeyMiddleware, for WebSockets. Browsers cannot set
+    headers on a WebSocket, so the key is accepted as ``?api_key=``."""
+    if not api_key:
+        return is_loopback(websocket.client)
+    provided = websocket.headers.get("x-api-key") or websocket.query_params.get("api_key")
+    return api_key_matches(provided, api_key)

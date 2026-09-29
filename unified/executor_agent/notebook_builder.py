@@ -9,13 +9,14 @@ blob container, and returns a short JSON exit value back to ADF.
 Transformations authored in ADF-DSL (e.g. `total = qty * price`) are converted
 to safe PySpark expressions so columns resolve at runtime via col("...").
 
-The generated notebook takes four widget-based parameters supplied by the
-ADF DatabricksNotebook activity at runtime:
-    storage_account, storage_key, run_id, stage_name
+The generated notebook takes widget-based job parameters at runtime:
+    secret_scope, secret_key, run_id, stage_name
+The storage key itself is read with dbutils.secrets.get from that scope.
 Source / sink / transforms / filter are baked into the notebook at build time
 because they are fixed per stage.
 """
 
+import ast
 import re
 
 
@@ -183,7 +184,33 @@ def _convert_expr(expr: str) -> str:
     return re.sub(r'\x00(\d+)\x00', _unstash, protected)
 
 
+def _pystr(value: str) -> str:
+    """Escape a captured value for embedding inside a double-quoted Python
+    literal in generated notebook source — without this a quote in planner
+    output breaks out of the string and injects code into the notebook."""
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
 def _convert_filter(expr: str) -> str:
+    """Convert a filter_condition and validate the result on EVERY path.
+
+    The converted string is written verbatim into a notebook that runs on
+    Databricks with storage credentials in scope, so each branch's output is
+    checked by _invalid_pyspark_reason before it is returned.
+    """
+    result = _convert_filter_raw(expr)
+    bad = _invalid_pyspark_reason(result)
+    if bad is not None:
+        raise UnsupportedTransformError(
+            f"filter_condition {expr!r} could not be converted to a valid "
+            f"PySpark expression ({bad}; got: {result!r}). Use a supported form, "
+            f"e.g. \"col is not null\", \"col = value\", \"col > n\", "
+            f"\"col like '%x%'\", \"col in (...)\", \"col between a and b\"."
+        )
+    return result
+
+
+def _convert_filter_raw(expr: str) -> str:
     """Convert a filter_condition into a PySpark boolean expression string.
 
     Handles two grammars:
@@ -211,13 +238,14 @@ def _convert_filter(expr: str) -> str:
         vals = []
         for it in items.split(","):
             it = it.strip()
-            vals.append(it if re.fullmatch(_NUM, it) else '"' + it.strip("'\"") + '"')
+            vals.append(it if re.fullmatch(_NUM, it) else '"' + _pystr(it.strip("'\"")) + '"')
         return f'col("{c}").isin({", ".join(vals)})'
 
     # SQL-style: col LIKE 'a%' / '%s' / '%x%' → startswith / endswith / contains
     m = re.match(r"^(\w+)\s+(not\s+)?like\s+'([^']+)'$", e, re.IGNORECASE)
     if m:
         c, neg, pat = m.groups()
+        pat = _pystr(pat)
         if pat.startswith("%") and pat.endswith("%") and len(pat) > 2:
             cond = f'col("{c}").contains("{pat[1:-1]}")'
         elif pat.endswith("%"):
@@ -258,18 +286,12 @@ def _convert_filter(expr: str) -> str:
         (r"^(\w+)\s*(==|!=)\s*'([^']+)'$",          r'col("\1") \2 "\3"'),
     ]
     for pattern, replacement in patterns:
-        if re.match(pattern, e, re.IGNORECASE):
-            return re.sub(pattern, replacement, e, flags=re.IGNORECASE)
-    result = _convert_expr(e)
-    bad = _invalid_pyspark_reason(result)
-    if bad is not None:
-        raise UnsupportedTransformError(
-            f"filter_condition {expr!r} could not be converted to a valid "
-            f"PySpark expression ({bad}; got: {result!r}). Use a supported form, "
-            f"e.g. \"col is not null\", \"col = value\", \"col > n\", "
-            f"\"col like '%x%'\", \"col in (...)\", \"col between a and b\"."
-        )
-    return result
+        m = re.match(pattern, e, re.IGNORECASE)
+        if m:
+            # Expand \N by hand so every captured value is escaped first.
+            groups = [_pystr(g or "") for g in m.groups()]
+            return re.sub(r"\\(\d)", lambda g: groups[int(g.group(1)) - 1], replacement)
+    return _convert_expr(e)
 
 
 def _invalid_pyspark_reason(expr: str):
@@ -280,11 +302,20 @@ def _invalid_pyspark_reason(expr: str):
     fails/skips at build time instead of crashing a paid cloud run.
     """
     try:
-        compile(expr, "<pyspark_expr>", "eval")
+        tree = ast.parse(expr, mode="eval")
     except SyntaxError:
         return "invalid syntax"
     if re.search(r"\b(null|true|false)\b", expr):
         return "unconverted SQL literal (null/true/false)"
+    # Only column expressions may reach the notebook: bare names must be known
+    # PySpark helpers, and no private/dunder attribute access or lambdas.
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id not in _PYSPARK_KEEP_BARE:
+            return f"disallowed name {node.id!r}"
+        if isinstance(node, ast.Attribute) and node.attr.startswith("_"):
+            return f"disallowed attribute {node.attr!r}"
+        if isinstance(node, (ast.Lambda, ast.NamedExpr, ast.Starred)):
+            return "disallowed construct"
     return None
 
 
@@ -351,8 +382,9 @@ def build_notebook_source(stage: dict, storage_account: str, file_format: str = 
     Generate a Databricks notebook (.py source format) for a notebook stage.
 
     The notebook:
-      1. Pulls widget params: storage_key, run_id, stage_name
-      2. Configures Spark to read/write wasbs:// with the supplied account key
+      1. Pulls widget params (secret_scope, secret_key, run_id, stage_name)
+         and reads the storage key from the Databricks secret scope
+      2. Configures Spark to read/write wasbs:// with that account key
       3. Reads all CSV and JSON (array / NDJSON) blobs from stage['source_container']
       4. Applies transformations (ADF-DSL → PySpark via _convert_expr)
       5. Applies optional filter_condition
@@ -413,11 +445,16 @@ def build_notebook_source(stage: dict, storage_account: str, file_format: str = 
         "import pandas as pd\n"
         "from azure.storage.blob import BlobServiceClient\n"
         "\n"
-        'dbutils.widgets.text("storage_key", "", "Azure Storage Account Key")\n'
+        'dbutils.widgets.text("secret_scope", "", "Secret scope holding the storage key")\n'
+        'dbutils.widgets.text("secret_key", "", "Secret name of the storage key")\n'
         'dbutils.widgets.text("run_id", "", "Run ID")\n'
         'dbutils.widgets.text("stage_name", "", "Stage Name")\n'
         "\n"
-        'storage_key = dbutils.widgets.get("storage_key")\n'
+        "# Storage key comes from a Databricks secret scope, never a job parameter,\n"
+        "# so it does not appear in run history or the Jobs UI.\n"
+        'storage_key = dbutils.secrets.get(\n'
+        '    scope=dbutils.widgets.get("secret_scope"), key=dbutils.widgets.get("secret_key")\n'
+        ')\n'
         'run_id      = dbutils.widgets.get("run_id")\n'
         'stage_name  = dbutils.widgets.get("stage_name")\n'
         "\n"
@@ -659,11 +696,16 @@ def build_stream_notebook_source(stage: dict, storage_account: str, file_format:
         "import pandas as pd\n"
         "from azure.storage.blob import BlobServiceClient\n"
         "\n"
-        'dbutils.widgets.text("storage_key", "", "Azure Storage Account Key")\n'
+        'dbutils.widgets.text("secret_scope", "", "Secret scope holding the storage key")\n'
+        'dbutils.widgets.text("secret_key", "", "Secret name of the storage key")\n'
         'dbutils.widgets.text("run_id", "", "Run ID")\n'
         'dbutils.widgets.text("stage_name", "", "Stage Name")\n'
         "\n"
-        'storage_key = dbutils.widgets.get("storage_key")\n'
+        "# Storage key comes from a Databricks secret scope, never a job parameter,\n"
+        "# so it does not appear in run history or the Jobs UI.\n"
+        'storage_key = dbutils.secrets.get(\n'
+        '    scope=dbutils.widgets.get("secret_scope"), key=dbutils.widgets.get("secret_key")\n'
+        ')\n'
         'run_id      = dbutils.widgets.get("run_id")\n'
         'stage_name  = dbutils.widgets.get("stage_name")\n'
         "\n"

@@ -22,6 +22,7 @@ from typing import Dict, List, Optional
 
 _AGENT_DIR = os.path.dirname(os.path.abspath(__file__))
 _DEFAULT_VERSIONS_DIR = os.path.join(_AGENT_DIR, "versions")
+_PROJECT_DIR = os.path.realpath(os.path.dirname(_AGENT_DIR))
 
 
 class SafetyManager:
@@ -64,6 +65,10 @@ class SafetyManager:
 
     def rollback(self, version_id: str) -> Dict:
         """Restore every item in a snapshot to its original location."""
+        # version_id comes from the API — refuse anything that is not a plain
+        # directory name inside versions_dir (no "..", no separators).
+        if not version_id or version_id != os.path.basename(version_id) or version_id in (".", ".."):
+            raise FileNotFoundError(f"No such version: {version_id}")
         vdir = os.path.join(self.versions_dir, version_id)
         manifest_path = os.path.join(vdir, "manifest.json")
         if not os.path.exists(manifest_path):
@@ -74,8 +79,11 @@ class SafetyManager:
 
         restored = []
         for item in manifest["items"]:
-            src = os.path.join(vdir, item["name"])
-            dst = item["original_path"]
+            src = os.path.join(vdir, os.path.basename(item["name"]))
+            dst = os.path.realpath(item["original_path"])
+            # A tampered manifest must not point rmtree/copy outside the project.
+            if os.path.commonpath([dst, _PROJECT_DIR]) != _PROJECT_DIR or dst == _PROJECT_DIR:
+                raise ValueError(f"Refusing to restore outside the project: {dst}")
             if os.path.isdir(src):
                 if os.path.exists(dst):
                     shutil.rmtree(dst)

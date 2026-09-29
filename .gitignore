@@ -56,3 +56,12 @@ CENTRAL_PLANNER_OVERVIEW.md
 MONITOR_AGENT_DETAILED_OVERVIEW.md
 PLANNER_MODEL_LEARN.md
 AGENTS_PROGRESS_REPORT.md
+
+# ── Local-only notes / scratch tooling (unified/) ────────────
+SCREENSHOTS/
+unified/ANOMALIES_NOTES.md
+unified/EXECUTOR_AGENT_NOTES.md
+unified/PLANNER_AGENT_NOTES.md
+unified/PLANNER_MODEL_BEGINNER_NOTES.md
+unified/eval_live_planner.py
+unified/seed_anomalies.py

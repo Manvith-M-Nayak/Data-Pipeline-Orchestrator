@@ -62,7 +62,20 @@ export const assurance = {
 export const executor = {
   status:      (jobId)     => req(`/executor/status/${jobId}`),
   listJobs:    ()          => req("/executor/jobs"),
-  downloadUrl: (container) => `${BASE}/executor/download/${encodeURIComponent(container)}`,
+  // fetch + blob instead of a plain <a href>: an anchor cannot send x-api-key.
+  download: async (container) => {
+    const headers = API_KEY ? { "x-api-key": API_KEY } : {};
+    const res = await fetch(`${BASE}/executor/download/${encodeURIComponent(container)}`, { headers });
+    if (!res.ok) throw new Error(`Download failed: ${res.status} ${res.statusText}`);
+    const name = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") || "")?.[1]
+      || `${container}-output`;
+    const url = URL.createObjectURL(await res.blob());
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(url);
+  },
 };
 
 // ── Resource Agent ────────────────────────────────────────────────────────────
@@ -181,7 +194,9 @@ function _openSocket() {
     return;
   }
   const proto = window.location.protocol === "https:" ? "wss" : "ws";
-  _ws = new WebSocket(`${proto}://${window.location.host}/ws/live`);
+  // Browsers can't set headers on a WebSocket, so the key goes in the query.
+  const qs = API_KEY ? `?api_key=${encodeURIComponent(API_KEY)}` : "";
+  _ws = new WebSocket(`${proto}://${window.location.host}/ws/live${qs}`);
 
   _ws.onmessage = (e) => {
     let data;

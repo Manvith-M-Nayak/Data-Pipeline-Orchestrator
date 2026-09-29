@@ -10,7 +10,9 @@ planner_common; this module only owns the Groq API call and its prompt.
 import json
 import requests
 from urllib3.exceptions import ProtocolError, HTTPError as HTTPErrorFromUrllib3
-from config import GROQ_API_KEY
+import settings
+
+GROQ_API_KEY = settings.get("GROQ_API_KEY")
 
 from .planner_common import (
     DEFAULT_EDITABLE_SETTINGS,

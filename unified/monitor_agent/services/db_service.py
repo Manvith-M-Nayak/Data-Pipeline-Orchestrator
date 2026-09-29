@@ -74,6 +74,43 @@ class DBService:
                     updated_at   TEXT DEFAULT (datetime('now'))
                 )
             """)
+            # Real-time anomaly events: one row per detected anomaly KIND per
+            # run (a run can raise several — e.g. slow_runtime + sla_breach).
+            # Written by monitor_agent/services/anomaly_detector.py.
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS anomaly_events (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id        TEXT,
+                    pipeline_name TEXT,
+                    kind          TEXT,      -- slow_runtime|failure|timeout|...
+                    severity      TEXT,      -- low|medium|high
+                    detail        TEXT,
+                    metrics_json  TEXT,      -- the numbers behind the verdict
+                    detected_at   TEXT DEFAULT (datetime('now'))
+                )
+            """)
+            # Per-run metrics history — baseline source for cost/duration
+            # comparisons (cost_spike, cold_start gap, etc.).
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS run_metrics (
+                    run_id        TEXT PRIMARY KEY,
+                    pipeline_name TEXT,
+                    duration_s    REAL,
+                    cost_usd      REAL,
+                    rows_written  INTEGER,
+                    retries       INTEGER,
+                    status        TEXT,
+                    created_at    TEXT DEFAULT (datetime('now'))
+                )
+            """)
+            # Last-seen input schema per pipeline — schema_drift detection.
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS pipeline_schemas (
+                    pipeline_name TEXT PRIMARY KEY,
+                    columns_json  TEXT,
+                    updated_at    TEXT DEFAULT (datetime('now'))
+                )
+            """)
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_runs_pipeline ON pipeline_runs(pipeline_name)"
             )
@@ -259,6 +296,7 @@ class DBService:
         self,
         status: Optional[str] = None,
         pipeline_name: Optional[str] = None,
+        run_id: Optional[str] = None,
         limit: int = 100,
     ) -> List[Dict]:
         conditions, params = [], []
@@ -268,6 +306,9 @@ class DBService:
         if pipeline_name:
             conditions.append("r.pipeline_name=?")
             params.append(pipeline_name)
+        if run_id:
+            conditions.append("r.run_id=?")
+            params.append(run_id)
         where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
         params.append(limit)
         async with aiosqlite.connect(DB_PATH) as db:
@@ -307,6 +348,98 @@ class DBService:
             ) as cur:
                 rows = await cur.fetchall()
         return [dict(r) for r in rows]
+
+    # ── Real-time anomaly events (anomaly_detector.py) ───────────────────────
+    async def log_anomaly_event(
+        self, run_id: str, pipeline_name: str, kind: str,
+        severity: str, detail: str, metrics: Dict,
+    ):
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                """
+                INSERT INTO anomaly_events
+                    (run_id, pipeline_name, kind, severity, detail, metrics_json)
+                VALUES (?,?,?,?,?,?)
+                """,
+                (run_id, pipeline_name, kind, severity, detail,
+                 json.dumps(metrics or {})),
+            )
+            await db.commit()
+
+    async def get_anomaly_events(
+        self, kind: Optional[str] = None, limit: int = 100
+    ) -> List[Dict]:
+        where, params = "", []
+        if kind:
+            where = "WHERE kind=?"
+            params.append(kind)
+        params.append(limit)
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                f"SELECT * FROM anomaly_events {where} "
+                f"ORDER BY detected_at DESC LIMIT ?",
+                params,
+            ) as cur:
+                rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+    async def save_run_metrics(
+        self, run_id: str, pipeline_name: str, duration_s: float,
+        cost_usd: Optional[float], rows_written: Optional[int],
+        retries: int, status: str,
+    ):
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                """
+                INSERT OR REPLACE INTO run_metrics
+                    (run_id, pipeline_name, duration_s, cost_usd,
+                     rows_written, retries, status)
+                VALUES (?,?,?,?,?,?,?)
+                """,
+                (run_id, pipeline_name, duration_s, cost_usd,
+                 rows_written, retries, status),
+            )
+            await db.commit()
+
+    async def get_metric_history(
+        self, pipeline_name: str, exclude_run_id: str = "", limit: int = 50
+    ) -> List[Dict]:
+        """Prior successful runs' metrics, newest first (baseline source)."""
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                """
+                SELECT * FROM run_metrics
+                WHERE pipeline_name=? AND run_id != ? AND status='ok'
+                ORDER BY created_at DESC LIMIT ?
+                """,
+                (pipeline_name, exclude_run_id, limit),
+            ) as cur:
+                rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+    async def get_last_schema(self, pipeline_name: str) -> Optional[List[str]]:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                "SELECT columns_json FROM pipeline_schemas WHERE pipeline_name=?",
+                (pipeline_name,),
+            ) as cur:
+                row = await cur.fetchone()
+        return json.loads(row[0]) if row else None
+
+    async def save_schema(self, pipeline_name: str, columns: List[str]):
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                """
+                INSERT INTO pipeline_schemas (pipeline_name, columns_json, updated_at)
+                VALUES (?,?,datetime('now'))
+                ON CONFLICT(pipeline_name) DO UPDATE SET
+                    columns_json=excluded.columns_json, updated_at=datetime('now')
+                """,
+                (pipeline_name, json.dumps(columns)),
+            )
+            await db.commit()
 
     async def get_anomaly_log(self, limit: int = 100) -> List[Dict]:
         async with aiosqlite.connect(DB_PATH) as db:

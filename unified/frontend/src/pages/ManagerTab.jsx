@@ -825,8 +825,8 @@ export default function ManagerTab() {
                   <span>Pipeline completed successfully</span>
                   {mgrState.executor_result.sink_container && (
                     <a
-                      href={executor.downloadUrl(mgrState.executor_result.sink_container)}
-                      download
+                      href="#"
+                      onClick={(e) => { e.preventDefault(); executor.download(mgrState.executor_result.sink_container).catch((err) => alert(err.message)); }}
                       style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 12px", background: "#0ea5e9", color: "#fff", borderRadius: 8, fontSize: 12, fontWeight: 600, textDecoration: "none" }}
                     >
                       <Download size={12} /> Download output

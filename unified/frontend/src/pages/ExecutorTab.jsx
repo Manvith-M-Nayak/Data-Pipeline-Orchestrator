@@ -397,8 +397,8 @@ export default function ExecutorTab() {
                     </div>
                     {jobState.status === "completed" && (jobState.result?.sink_container) && (
                       <a
-                        href={executor.downloadUrl(jobState.result.sink_container)}
-                        download
+                        href="#"
+                        onClick={(e) => { e.preventDefault(); executor.download(jobState.result.sink_container).catch((err) => alert(err.message)); }}
                         style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 14px",
                           background: "#0ea5e9", color: "#fff", borderRadius: 8, fontSize: 12,
                           fontWeight: 600, textDecoration: "none" }}

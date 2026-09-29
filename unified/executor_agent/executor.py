@@ -17,17 +17,24 @@ Flow:
 import os
 import time
 import base64
+import threading
 import traceback
 import requests
 from concurrent.futures import ThreadPoolExecutor
 
-from config import (
-    AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET,
-    AZURE_SUBSCRIPTION_ID, AZURE_RESOURCE_GROUP, AZURE_DATA_FACTORY,
-    AZURE_STORAGE_ACCOUNT, AZURE_STORAGE_KEY,
-    DATABRICKS_HOST, DATABRICKS_TOKEN,
-    DATABRICKS_NOTEBOOK_BASE,
-)
+import settings
+
+AZURE_TENANT_ID          = settings.get("AZURE_TENANT_ID")
+AZURE_CLIENT_ID          = settings.get("AZURE_CLIENT_ID")
+AZURE_CLIENT_SECRET      = settings.get("AZURE_CLIENT_SECRET")
+AZURE_SUBSCRIPTION_ID    = settings.get("AZURE_SUBSCRIPTION_ID")
+AZURE_RESOURCE_GROUP     = settings.get("AZURE_RESOURCE_GROUP")
+AZURE_DATA_FACTORY       = settings.get("AZURE_DATA_FACTORY")
+AZURE_STORAGE_ACCOUNT    = settings.get("AZURE_STORAGE_ACCOUNT")
+AZURE_STORAGE_KEY        = settings.get("AZURE_STORAGE_KEY")
+DATABRICKS_HOST          = settings.get("DATABRICKS_HOST")
+DATABRICKS_TOKEN         = settings.get("DATABRICKS_TOKEN")
+DATABRICKS_NOTEBOOK_BASE = settings.get("DATABRICKS_NOTEBOOK_BASE", "/Shared/unified_orchestrator")
 
 from .notebook_builder import (
     build_notebook_source,
@@ -197,12 +204,55 @@ def upload_notebook(workspace_path: str, source: str):
 
 
 # ────────────────────────────────────────────────────────────────────────────
+# Databricks secret scope — holds the storage key so it is never sent as a
+# job parameter (parameters are visible in run history and the Jobs UI).
+# ────────────────────────────────────────────────────────────────────────────
+DBX_SECRET_SCOPE       = settings.get("DATABRICKS_SECRET_SCOPE", "unified-orchestrator")
+DBX_STORAGE_SECRET_KEY = settings.get("DATABRICKS_STORAGE_SECRET_KEY", "azure-storage-key")
+_secret_lock  = threading.Lock()
+_secret_ready = False
+
+
+def dbx_ensure_storage_secret():
+    """Create the secret scope (if missing) and store the storage key in it.
+    Runs once per process; later calls are no-ops."""
+    global _secret_ready
+    with _secret_lock:
+        if _secret_ready:
+            return
+        r = requests.post(
+            _dbx_url("/api/2.0/secrets/scopes/create"),
+            headers=_dbx_headers(), json={"scope": DBX_SECRET_SCOPE}, timeout=30,
+        )
+        if r.status_code != 200 and "RESOURCE_ALREADY_EXISTS" not in r.text:
+            # Standard-tier workspaces require the scope to be manageable by "users".
+            r = requests.post(
+                _dbx_url("/api/2.0/secrets/scopes/create"),
+                headers=_dbx_headers(),
+                json={"scope": DBX_SECRET_SCOPE, "initial_manage_principal": "users"},
+                timeout=30,
+            )
+            if r.status_code != 200 and "RESOURCE_ALREADY_EXISTS" not in r.text:
+                raise RuntimeError(
+                    f"Secret scope create '{DBX_SECRET_SCOPE}' failed: {r.status_code} {r.text[:300]}"
+                )
+        r = requests.post(
+            _dbx_url("/api/2.0/secrets/put"),
+            headers=_dbx_headers(),
+            json={"scope": DBX_SECRET_SCOPE, "key": DBX_STORAGE_SECRET_KEY,
+                  "string_value": AZURE_STORAGE_KEY},
+            timeout=30,
+        )
+        if r.status_code != 200:
+            raise RuntimeError(f"Secret put failed: {r.status_code} {r.text[:300]}")
+        _secret_ready = True
+        print(f"   Storage key stored in secret scope '{DBX_SECRET_SCOPE}'")
+
+
+# ────────────────────────────────────────────────────────────────────────────
 # Databricks Jobs API 2.1
 # ────────────────────────────────────────────────────────────────────────────
-try:
-    from config import DATABRICKS_CLUSTER_ID as _DBX_CLUSTER_ID
-except ImportError:
-    _DBX_CLUSTER_ID = ""
+_DBX_CLUSTER_ID = settings.get("DATABRICKS_CLUSTER_ID")
 
 
 def dbx_create_job(job_name: str, notebook_path: str, parameters: dict) -> int:
@@ -271,6 +321,33 @@ def _dbx_fetch_error(run_body: dict) -> str:
     return "\n".join(errors) if errors else ""
 
 
+def _dbx_fetch_exit(run_body: dict) -> dict:
+    """Parse the notebook's dbutils.notebook.exit(...) JSON from a successful
+    run via jobs/runs/get-output. Returns {} when unavailable — callers treat
+    it as best-effort telemetry (rows_written etc.), never a failure."""
+    import json as _json
+    for task in run_body.get("tasks", []):
+        task_run_id = task.get("run_id")
+        if not task_run_id:
+            continue
+        try:
+            r = requests.get(
+                _dbx_url(f"/api/2.1/jobs/runs/get-output?run_id={task_run_id}"),
+                headers=_dbx_headers(),
+                timeout=20,
+            )
+            if r.status_code != 200:
+                continue
+            raw = (r.json().get("notebook_output") or {}).get("result", "")
+            if raw:
+                doc = _json.loads(raw)
+                if isinstance(doc, dict):
+                    return doc
+        except (requests.RequestException, ValueError):
+            continue
+    return {}
+
+
 def dbx_poll_run(run_id: int, poll_interval: int = 10, timeout: int = 1800) -> dict:
     """Poll jobs/runs/get until TERMINATED. Returns {result_state, state_message, error, run_page_url}."""
     url = _dbx_url(f"/api/2.1/jobs/runs/get?run_id={run_id}")
@@ -328,8 +405,13 @@ def dbx_poll_run(run_id: int, poll_interval: int = 10, timeout: int = 1800) -> d
 
     # For failures, fetch the actual notebook error (traceback) from task output
     error_detail = ""
+    notebook_exit: dict = {}
     if result_state not in ("SUCCESS",):
         error_detail = _dbx_fetch_error(final_body)
+    else:
+        # On success, read the notebook's exit JSON (rows_written etc.) so the
+        # anomaly detector can flag zero-output runs.
+        notebook_exit = _dbx_fetch_exit(final_body)
 
     combined_msg = state_message
     if error_detail:
@@ -345,6 +427,7 @@ def dbx_poll_run(run_id: int, poll_interval: int = 10, timeout: int = 1800) -> d
         "error":         error_detail,
         "run_page_url":  final_body.get("run_page_url", ""),
         "run_id":        run_id,
+        "notebook_exit": notebook_exit,
     }
 
 
@@ -600,6 +683,7 @@ def execute_pipeline(
     run_tag = str(int(time.time()))
     mode = (pipeline_config.get("mode") or "batch").lower()
     streaming = mode == "streaming"
+    stage_rows: dict = {}   # stage name -> rows_written (from notebook exit JSON)
 
     stages          = pipeline_config.get("stages", [])
     copy_stages     = [s for s in stages if s.get("type") == "copy"]
@@ -684,6 +768,7 @@ def execute_pipeline(
     if compute_stages:
         _step(f"Uploading {len(compute_stages)} notebook(s) to Databricks workspace")
         ensure_workspace_dir(DATABRICKS_NOTEBOOK_BASE)
+        dbx_ensure_storage_secret()
         for stage in compute_stages:
             wpath = f"{DATABRICKS_NOTEBOOK_BASE.rstrip('/')}/{stage['name']}"
             upload_notebook(wpath, notebook_sources[stage["name"]])
@@ -750,7 +835,8 @@ def execute_pipeline(
             """Create job, run, poll, delete. Returns (stage_name, poll_result)."""
             nb_path    = notebook_paths[stage["name"]]
             parameters = {
-                "storage_key": AZURE_STORAGE_KEY,
+                "secret_scope": DBX_SECRET_SCOPE,
+                "secret_key":   DBX_STORAGE_SECRET_KEY,
                 "run_id":      f"{run_tag}-{stage['name']}",
                 "stage_name":  stage["name"],
             }
@@ -773,6 +859,11 @@ def execute_pipeline(
                 with ThreadPoolExecutor(max_workers=min(len(group), MAX_PARALLEL_STAGES)) as pool:
                     results = list(pool.map(_run_stage, [nb_by_name[n] for n in group]))
 
+            for n, p in results:
+                rw = (p.get("notebook_exit") or {}).get("rows_written")
+                if isinstance(rw, int):
+                    stage_rows[n] = rw
+
             failures = [(n, p) for n, p in results if p["result_state"] != "SUCCESS"]
             if failures:
                 name, poll = failures[0]
@@ -792,12 +883,20 @@ def execute_pipeline(
     containers = pipeline_config.get("containers_to_create", [])
     sink_container = containers[-1] if containers else None
 
+    # rows_written = output of the LAST compute stage that reported one (the
+    # final sink's row count). None when no stage reported (e.g. copy-only).
+    rows_written = None
+    for s in compute_stages:
+        if s["name"] in stage_rows:
+            rows_written = stage_rows[s["name"]]
+
     return {
         "status":         "ok",
         "run_id":         adf_run_id or f"dbx-{run_tag}",
         "mode":           mode,
         "stages":         [s["name"] for s in stages],
         "sink_container": sink_container,
+        "rows_written":   rows_written,
         "result": {
             "copy_stages":     len(copy_stages),
             "notebook_stages": len(notebook_stages),

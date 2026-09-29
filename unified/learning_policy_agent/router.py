@@ -89,3 +89,5 @@ def rollback(body: RollbackRequest):
         return agent.rollback(body.version_id)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))

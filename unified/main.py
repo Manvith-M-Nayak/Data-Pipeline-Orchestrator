@@ -13,6 +13,7 @@ import csv
 import io
 import json
 import os
+import re
 from contextlib import asynccontextmanager
 
 # Load a .env file (if present) into the environment BEFORE any service reads
@@ -27,7 +28,7 @@ except ImportError:
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 
-from app_security import APIKeyMiddleware, read_upload_capped
+from app_security import APIKeyMiddleware, read_upload_capped, websocket_allowed
 from background import spawn
 from performance_prediction_agent.router import router as perf_router
 from learning_policy_agent.router import router as learning_router
@@ -108,15 +109,15 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Unified Agent Backend", version="1.0.0", lifespan=lifespan)
 
 # ── Auth ─────────────────────────────────────────────────────────────────────
-# Enforced only when API_KEY is set, so local dev stays frictionless. Added
-# before CORS so CORS remains the outermost layer (handles preflight OPTIONS).
+# Always installed. With API_KEY set, every request needs a matching x-api-key;
+# without it, only loopback clients are served. Added before CORS so CORS
+# remains the outermost layer (handles preflight OPTIONS).
 _API_KEY = os.getenv("API_KEY", "").strip()
-if _API_KEY:
-    app.add_middleware(APIKeyMiddleware, api_key=_API_KEY)
-else:
+app.add_middleware(APIKeyMiddleware, api_key=_API_KEY)
+if not _API_KEY:
     print(
-        "[security] WARNING: API_KEY not set — API authentication is DISABLED. "
-        "Set the API_KEY env var to require an x-api-key header on all requests."
+        "[security] API_KEY not set — serving loopback (localhost) clients only. "
+        "Set API_KEY to allow remote clients with an x-api-key header."
     )
 
 # ── CORS ─────────────────────────────────────────────────────────────────────
@@ -359,8 +360,10 @@ async def download_output(container: str):
     from fastapi.responses import Response
     from azure.storage.blob import BlobServiceClient
     from fastapi import HTTPException
-    import config as _cfg
+    import settings
 
+    if not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])?", container):
+        raise HTTPException(status_code=400, detail="Invalid container name")
     if _DOWNLOAD_ALLOWLIST and container not in _DOWNLOAD_ALLOWLIST:
         raise HTTPException(
             status_code=403, detail=f"Container '{container}' is not downloadable"
@@ -368,8 +371,8 @@ async def download_output(container: str):
 
     conn = (
         f"DefaultEndpointsProtocol=https;"
-        f"AccountName={_cfg.AZURE_STORAGE_ACCOUNT};"
-        f"AccountKey={_cfg.AZURE_STORAGE_KEY};"
+        f"AccountName={settings.get('AZURE_STORAGE_ACCOUNT')};"
+        f"AccountKey={settings.get('AZURE_STORAGE_KEY')};"
         f"EndpointSuffix=core.windows.net"
     )
     client = BlobServiceClient.from_connection_string(conn)
@@ -447,6 +450,9 @@ async def download_output(container: str):
 
 @app.websocket("/ws/live")
 async def websocket_live(websocket: WebSocket):
+    if not websocket_allowed(websocket, _API_KEY):
+        await websocket.close(code=1008)
+        return
     await websocket.accept()
     monitor_service.ws_clients.add(websocket)
     try:

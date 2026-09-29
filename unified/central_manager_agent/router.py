@@ -70,9 +70,18 @@ async def start_managed_run(
             try:
                 state = _manager.get_state_dict(run_id) or {}
                 result = state.get("executor_result")
+                elapsed_ms = int((time.time() - start) * 1000)
                 if result:
                     from executor_agent.router import _notify_monitor
-                    await _notify_monitor(result, int((time.time() - start) * 1000))
+                    await _notify_monitor(result, elapsed_ms)
+                # Real-time anomaly classification — runs for EVERY finished
+                # run (also failures with no executor result) and persists
+                # detected kinds to the anomaly_events table.
+                try:
+                    from monitor_agent.services.anomaly_detector import detect_and_store
+                    await detect_and_store(state, result, elapsed_ms, schema_dict)
+                except Exception as exc:
+                    print(f"[manager] anomaly detect non-fatal: {exc}")
             except Exception as exc:
                 print(f"[manager] monitor notify non-fatal: {exc}")
         finally:
