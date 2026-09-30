@@ -43,7 +43,7 @@ const S = {
     fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6,
   },
   tag:     (color) => ({
-    padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 700,
+    padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 700,
     background: `color-mix(in srgb, ${color} 13%, transparent)`, color: color, marginRight: 4,
   }),
   recRow:  {

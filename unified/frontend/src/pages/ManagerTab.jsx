@@ -67,7 +67,7 @@ const S = {
     background: severity === "error" ? "var(--bad-soft)" : severity === "warn" ? "var(--warn-soft)" : "transparent",
   }),
   tag: (severity) => ({
-    fontSize: 10, fontWeight: 700, borderRadius: 4, padding: "2px 6px", flexShrink: 0,
+    fontSize: 11, fontWeight: 700, borderRadius: 4, padding: "2px 6px", flexShrink: 0,
     background:
       severity === "ok"    ? "var(--ok-soft)" :
       severity === "error" ? "var(--bad-soft)" :
@@ -143,7 +143,7 @@ function PhaseBar({ currentStatus, currentPhase }) {
                 )}
               </div>
               <span style={{
-                fontSize: 10, fontWeight: isActive ? 700 : 400,
+                fontSize: 11, fontWeight: isActive ? 700 : 400,
                 color: isActive ? p.color : isDone ? "var(--ok)" : "var(--text-4)",
               }}>
                 {p.label}
@@ -174,7 +174,7 @@ function DecisionLog({ decisions }) {
     <div style={{ maxHeight: 240, overflowY: "auto", borderRadius: 8, border: "1px solid var(--divider)" }}>
       {decisions.map((d, i) => (
         <div key={i} style={S.decisionRow(d.severity)}>
-          <span style={{ fontSize: 10, color: "var(--text-4)", flexShrink: 0, paddingTop: 2, minWidth: 72 }}>
+          <span style={{ fontSize: 11, color: "var(--text-4)", flexShrink: 0, paddingTop: 2, minWidth: 72 }}>
             {d.ts?.slice(11, 19)}
           </span>
           <span style={S.tag(d.severity)}>{d.severity?.toUpperCase()}</span>
@@ -257,8 +257,8 @@ function PredictionsCard({ predictions, cost, resourcePlan }) {
                   ? <span>{a.workers}w · {a.memory_gb}GB · {a.cpu}vCPU</span>
                   : <span>{a.diu} DIU</span>}
                 <span style={{ color: "var(--text-3)" }}>~{a.duration_s}s</span>
-                {a.right_sized && <span style={{ color: "var(--ok)", fontSize: 10 }}>✔ right-sized</span>}
-                {a.contention_adjusted && <span style={{ color: "var(--warn)", fontSize: 10 }}>⚠ adjusted</span>}
+                {a.right_sized && <span style={{ color: "var(--ok)", fontSize: 11 }}>✔ right-sized</span>}
+                {a.contention_adjusted && <span style={{ color: "var(--warn)", fontSize: 11 }}>⚠ adjusted</span>}
               </div>
             </div>
           ))}
@@ -299,7 +299,7 @@ function ParallelismCard({ parallelism }) {
       </div>
       {parallelism.execution_groups.map((group, i) => (
         <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-          <span style={{ fontSize: 10, color: "var(--text-4)", minWidth: 48 }}>Group {i + 1}</span>
+          <span style={{ fontSize: 11, color: "var(--text-4)", minWidth: 48 }}>Group {i + 1}</span>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             {group.map((name) => (
               <span key={name} style={{
@@ -313,7 +313,7 @@ function ParallelismCard({ parallelism }) {
             ))}
           </div>
           {group.length > 1 && (
-            <span style={{ fontSize: 10, color: "var(--violet)" }}>parallel</span>
+            <span style={{ fontSize: 11, color: "var(--violet)" }}>parallel</span>
           )}
         </div>
       ))}

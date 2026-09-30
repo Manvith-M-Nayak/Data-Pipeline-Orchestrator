@@ -29,7 +29,7 @@ const C = {
   th:     { padding: "8px 10px", textAlign: "left", color: "var(--text-3)", borderBottom: "1px solid var(--border)", fontWeight: 600, fontSize: 11, textTransform: "uppercase" },
   td:     { padding: "7px 10px", borderBottom: "1px solid var(--divider)", color: "var(--text-2)", fontFamily: "monospace" },
   typeBadge: (t) => ({
-    display: "inline-block", padding: "1px 7px", borderRadius: 10, fontSize: 10, fontWeight: 700,
+    display: "inline-block", padding: "1px 7px", borderRadius: 10, fontSize: 11, fontWeight: 700,
     background: t === "integer" ? "var(--accent-soft)" : t === "double" ? "var(--violet-soft)" : "var(--ok-soft)",
     color:      t === "integer" ? "var(--accent)" : t === "double" ? "var(--violet)" : "var(--ok)",
   }),

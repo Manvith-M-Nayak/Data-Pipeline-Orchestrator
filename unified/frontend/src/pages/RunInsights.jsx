@@ -20,14 +20,14 @@ const S = {
   kv:     { display: "flex", flexDirection: "column", gap: 6 },
   kvRow:  { display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--text-2)", borderBottom: "1px solid var(--divider)", paddingBottom: 5 },
   kvVal:  { color: "var(--text)", fontWeight: 600 },
-  th:     { textAlign: "left", padding: "8px 10px", fontSize: 10, color: "var(--text-3)", borderBottom: "1px solid var(--border)", textTransform: "uppercase", letterSpacing: 0.5 },
+  th:     { textAlign: "left", padding: "8px 10px", fontSize: 11, color: "var(--text-3)", borderBottom: "1px solid var(--border)", textTransform: "uppercase", letterSpacing: 0.5 },
   td:     { padding: "8px 10px", fontSize: 12, borderBottom: "1px solid var(--divider)", verticalAlign: "top" },
   decisionRow: (sev) => ({
     display: "flex", gap: 8, padding: "6px 8px", borderBottom: "1px solid var(--divider)", alignItems: "flex-start",
     background: sev === "error" ? "var(--bad-soft)" : sev === "warn" ? "var(--warn-soft)" : "transparent",
   }),
   tag: (sev) => ({
-    fontSize: 9, fontWeight: 700, borderRadius: 4, padding: "2px 5px", flexShrink: 0,
+    fontSize: 11, fontWeight: 700, borderRadius: 4, padding: "2px 5px", flexShrink: 0,
     background: sev === "ok" ? "var(--ok-soft)" : sev === "error" ? "var(--bad-soft)" : sev === "warn" ? "var(--warn-soft)" : "var(--surface)",
     color: sev === "ok" ? "var(--ok)" : sev === "error" ? "var(--bad)" : sev === "warn" ? "var(--warn)" : "var(--text-3)",
   }),
@@ -112,13 +112,13 @@ function DecisionLog({ decisions }) {
       <div style={{ borderRadius: 8, border: "1px solid var(--divider)", overflow: "hidden" }}>
         {shown.map((d, i) => (
           <div key={i} style={S.decisionRow(d.severity)}>
-            <span style={{ fontSize: 9, color: "var(--text-4)", flexShrink: 0, paddingTop: 2, minWidth: 64 }}>
+            <span style={{ fontSize: 11, color: "var(--text-4)", flexShrink: 0, paddingTop: 2, minWidth: 64 }}>
               {d.ts?.slice(11, 19)}
             </span>
             <span style={S.tag(d.severity)}>{d.severity?.toUpperCase()}</span>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 11, color: "var(--text)", fontWeight: 600 }}>{d.action}</div>
-              <div style={{ fontSize: 10, color: "var(--text-3)", marginTop: 1 }}>
+              <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 1 }}>
                 {d.reason}{d.outcome ? <span style={{ color: "var(--text-2)" }}> → {d.outcome}</span> : null}
               </div>
             </div>
@@ -279,7 +279,7 @@ function RunDetail({ runId, onBack }) {
               {(data.resource_plan?.allocations || []).length > 0 && (
                 <div style={{ marginTop: 8, borderTop: "1px solid var(--divider)", paddingTop: 8 }}>
                   {data.resource_plan.allocations.map((a) => (
-                    <div key={a.stage_name} style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "var(--text-2)", padding: "3px 0" }}>
+                    <div key={a.stage_name} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--text-2)", padding: "3px 0" }}>
                       <span style={{ color: "var(--text)", fontWeight: 600 }}>{a.stage_name}</span>
                       <span>{a.stage_type === "notebook" ? `${a.workers}w · ${a.memory_gb}GB` : `${a.diu} DIU`} · ~{a.duration_s}s</span>
                     </div>
@@ -439,10 +439,10 @@ function RunDetail({ runId, onBack }) {
               </div>
               {data.parallelism.execution_groups.map((group, i) => (
                 <div key={i} style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 4 }}>
-                  <span style={{ fontSize: 9, color: "var(--text-4)", minWidth: 40 }}>G{i + 1}</span>
+                  <span style={{ fontSize: 11, color: "var(--text-4)", minWidth: 40 }}>G{i + 1}</span>
                   {group.map((name) => (
                     <span key={name} style={{
-                      padding: "1px 6px", borderRadius: 4, fontSize: 10,
+                      padding: "1px 6px", borderRadius: 4, fontSize: 11,
                       background: group.length > 1 ? "var(--violet-soft)" : "var(--surface)",
                       color: group.length > 1 ? "var(--violet)" : "var(--text-3)",
                     }}>{name}</span>
@@ -606,7 +606,7 @@ export default function RunInsights() {
                     <td style={{ ...S.td, fontFamily: "monospace", fontSize: 11 }}>{r.run_id?.slice(0, 8)}…</td>
                     <td style={S.td}>
                       <span style={{
-                        padding: "2px 6px", borderRadius: 8, fontSize: 10, fontWeight: 700,
+                        padding: "2px 6px", borderRadius: 8, fontSize: 11, fontWeight: 700,
                         background: r.status === "completed" ? "var(--ok-soft)" : r.status === "failed" ? "var(--bad-soft)" : "var(--surface)",
                         color: r.status === "completed" ? "var(--ok)" : r.status === "failed" ? "var(--bad)" : "var(--text-2)",
                       }}>{r.status}</span>
@@ -614,7 +614,7 @@ export default function RunInsights() {
                     <td style={S.td}>{r.stage_count}</td>
                     <td style={S.td}>
                       {r.actual_duration_s ? `${r.actual_duration_s}s` : "—"}
-                      {r.predicted_duration_s != null && <span style={{ color: "var(--text-3)", fontSize: 10 }}> (pred: {r.predicted_duration_s}s)</span>}
+                      {r.predicted_duration_s != null && <span style={{ color: "var(--text-3)", fontSize: 11 }}> (pred: {r.predicted_duration_s}s)</span>}
                     </td>
                     <td style={S.td}>{r.cost_estimate_usd != null ? `$${r.cost_estimate_usd}` : "—"}</td>
                     <td style={S.td}>{r.actual_cost_usd != null ? `$${r.actual_cost_usd}` : "—"}</td>
@@ -624,7 +624,7 @@ export default function RunInsights() {
                       ) : "—"}
                     </td>
                     <td style={S.td}>{r.prediction_source || "—"}</td>
-                    <td style={{ ...S.td, fontSize: 10, color: "var(--text-4)" }}>{(r.started_at || "").slice(0, 16)}</td>
+                    <td style={{ ...S.td, fontSize: 11, color: "var(--text-4)" }}>{(r.started_at || "").slice(0, 16)}</td>
                   </tr>
                 ))}
               </tbody>

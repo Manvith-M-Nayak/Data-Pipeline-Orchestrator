@@ -39,7 +39,7 @@ const S = {
     fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6,
   },
   tag:     (color) => ({
-    padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 700,
+    padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 700,
     background: `color-mix(in srgb, ${color} 13%, transparent)`, color: color, marginRight: 4,
   }),
   bar:     (pct, color) => ({
@@ -212,7 +212,7 @@ function LiveAnalysis({ allocations, feasible, violations, warnings, execGroups 
                 <span key={name} style={S.tag(group.length > 1 ? "var(--accent)" : "var(--text-3)")}>{name}</span>
               ))}
               {group.length > 1 && (
-                <span style={{ fontSize: 10, color: "var(--accent)" }}>parallel</span>
+                <span style={{ fontSize: 11, color: "var(--accent)" }}>parallel</span>
               )}
             </div>
           ))}

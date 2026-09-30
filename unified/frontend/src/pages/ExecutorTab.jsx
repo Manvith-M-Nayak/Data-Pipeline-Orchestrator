@@ -49,7 +49,7 @@ const C = {
   execStep: (state) => ({
     display: "flex", alignItems: "center", gap: 12, padding: "9px 0",
     borderBottom: "1px solid var(--divider)",
-    opacity: state === "pending" ? 0.3 : 1, transition: "opacity 0.3s",
+    opacity: state === "pending" ? 0.6 : 1, transition: "opacity 0.3s",
   }),
   execDot: (state) => ({
     width: 10, height: 10, borderRadius: "50%", flexShrink: 0,
@@ -154,23 +154,32 @@ export default function ExecutorTab() {
     setError("Session expired — server was restarted. Click Run Pipeline to start again.");
   }
 
+  // Apply one manager status snapshot to this tab's job view. Returns true
+  // while the run is still in progress.
+  const _applyStatus = useCallback((raw) => {
+    const s = mapManagerState(raw);
+    setJobState(s);
+    if (s.step) {
+      const st = s.step.toLowerCase();
+      for (let i = STEP_MATCHERS.length - 1; i >= 0; i--) {
+        if (STEP_MATCHERS[i](st)) { setExecStep(i); break; }
+      }
+    }
+    if (s.status !== "running") {
+      clearInterval(pollRef.current);
+      setRunning(false);
+      setExecStep(EXEC_STEPS.length - 1);
+      return false;
+    }
+    return true;
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Extracted poll tick — takes explicit jobId to avoid stale closure
   const _startPolling = useCallback((jid) => {
     clearInterval(pollRef.current);
     pollRef.current = setInterval(async () => {
       try {
-        const s = mapManagerState(await manager.status(jid));
-        setJobState(s);
-        if (s.step) {
-          const st = s.step.toLowerCase();
-          for (let i = STEP_MATCHERS.length - 1; i >= 0; i--) {
-            if (STEP_MATCHERS[i](st)) { setExecStep(i); break; }
-          }
-        }
-        if (s.status !== "running") {
-          clearInterval(pollRef.current);
-          setRunning(false);
-          setExecStep(EXEC_STEPS.length - 1);
+        if (!_applyStatus(await manager.status(jid))) {
           // Backend _notify_monitor handles DB sync; this is best-effort UI refresh
           monitor.sync(2).catch(() => {});
         }
@@ -191,6 +200,39 @@ export default function ExecutorTab() {
     }
     return () => clearInterval(pollRef.current);
   }, []); // eslint-disable-line
+
+  // Follow runs started anywhere — the Central Manager tab, another window.
+  // Every run goes through the manager, so its run list is the source of truth;
+  // when nothing is running here, attach to the newest live run.
+  const [attachedFrom, setAttachedFrom] = useState(false);
+  const busyRef = useRef(false);
+  busyRef.current = running;
+  const jobIdRef = useRef(jobId);
+  jobIdRef.current = jobId;
+  useEffect(() => {
+    let alive = true;
+    async function discover() {
+      if (busyRef.current) return;
+      try {
+        const runs = await manager.listRuns();
+        const live = (runs || []).find((r) => !MGR_TERMINAL.includes(r.status));
+        if (!alive || !live || busyRef.current) return;
+        const st = await manager.status(live.run_id);
+        if (!alive || busyRef.current) return;
+        setError("");
+        // A different run than the one this tab started → it came from elsewhere.
+        if (live.run_id !== jobIdRef.current) setAttachedFrom(true);
+        setJobId(live.run_id);
+        if (_applyStatus(st)) {
+          setRunning(true);
+          _startPolling(live.run_id);
+        }
+      } catch { /* backend down — try again next tick */ }
+    }
+    discover();
+    const t = setInterval(discover, 4000);
+    return () => { alive = false; clearInterval(t); };
+  }, [_applyStatus, _startPolling]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Monitor WS
   const onWs = useCallback((data) => {
@@ -222,7 +264,7 @@ export default function ExecutorTab() {
 
   async function handleRun() {
     if (!csvFile || !savedPlan) return;
-    setError(""); setRunning(true); setExecStep(0); setJobState(null);
+    setError(""); setRunning(true); setExecStep(0); setJobState(null); setAttachedFrom(false);
 
     try {
       const res = await manager.run(csvFile, savedPlan.config, savedSchema || {}, plannerPrompt || "");
@@ -239,7 +281,7 @@ export default function ExecutorTab() {
 
   function reset() {
     // Keep csvFile — user likely wants to run the same file again
-    setRunning(false); setJobId(null);
+    setRunning(false); setJobId(null); setAttachedFrom(false);
     setJobState(null); setExecStep(-1); setError(""); setMonEvents([]);
   }
 
@@ -356,10 +398,27 @@ export default function ExecutorTab() {
         </div>
       )}
 
-      {/* Run + execution progress */}
-      {savedPlan && (
+      {/* Run + execution progress — also shown for a run followed from the
+          Central Manager, even when this browser holds no plan */}
+      {(savedPlan || running || jobState) && (
         <div style={C.card}>
           <div style={C.cardHdr}><Zap size={16} color="var(--warn)" />Execution</div>
+
+          {attachedFrom && jobId && (
+            <div style={{
+              display: "flex", alignItems: "center", gap: 8, margin: "8px 0 14px",
+              padding: "8px 12px", borderRadius: 8, fontSize: 12.5,
+              background: "var(--accent-soft)", border: "1px solid var(--accent-line)", color: "var(--text-2)",
+            }}>
+              <Activity size={14} color="var(--accent)" />
+              Following run <span style={{ fontFamily: "var(--font-mono)", color: "var(--text)" }}>{jobId.slice(0, 8)}</span>,
+              started from the Central Manager.
+              <button onClick={() => navigate("/manager")}
+                style={{ marginLeft: "auto", background: "none", border: 0, color: "var(--accent)", cursor: "pointer", fontSize: 12.5, fontWeight: 500 }}>
+                Open in Manager →
+              </button>
+            </div>
+          )}
 
           {!running && !jobState && (
             <>
@@ -394,7 +453,8 @@ export default function ExecutorTab() {
                     <div key={i} style={C.execStep(state)}>
                       <div style={{
                         ...C.execDot(state),
-                        background: failed && execStep === i ? "var(--bad)" : undefined,
+                        // override only for the failed step — `undefined` here used to wipe the dot colour
+                        ...(failed && execStep === i ? { background: "var(--bad)" } : null),
                       }} />
                       <span style={C.execLabel(state)}>{liveLabel}</span>
                       {state === "running" && !failed && <Spinner />}
@@ -448,7 +508,7 @@ export default function ExecutorTab() {
             </>
           )}
 
-          {jobState && (
+          {jobState && !running && (
             <div style={C.btnRow}>
               <button style={C.btnPrimary(false)} onClick={reset}><RotateCcw size={13} /> Run again</button>
             </div>

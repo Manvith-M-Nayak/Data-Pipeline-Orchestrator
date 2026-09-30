@@ -108,7 +108,7 @@ export default function LiveDashboard() {
                   <div style={{ fontWeight: 700, fontSize: 14, color: "var(--violet)", display: "flex", alignItems: "center", gap: 6 }}>
                     <Zap size={13} /> Databricks Pipeline
                   </div>
-                  <span style={{ fontSize: 10, color: "var(--text-4)" }}>{j.job_id.slice(0, 8)}…</span>
+                  <span style={{ fontSize: 11, color: "var(--text-4)" }}>{j.job_id.slice(0, 8)}…</span>
                 </div>
                 <div style={{ fontSize: 12, color: "var(--text-2)", marginBottom: 6 }}>{j.step || "Running…"}</div>
               </div>

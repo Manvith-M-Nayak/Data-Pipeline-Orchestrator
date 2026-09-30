@@ -39,7 +39,7 @@ const S = {
     fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6,
   },
   tag:     (color) => ({
-    padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 700,
+    padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 700,
     background: `color-mix(in srgb, ${color} 13%, transparent)`, color: color, marginRight: 4,
   }),
   bar:     (pct, color) => ({
@@ -294,7 +294,7 @@ function HistorySection({ history }) {
                 <span style={{ fontSize: 12, color: "var(--text)", fontWeight: 600 }}>
                   {r.run_id ? r.run_id.slice(0, 8) : `Run ${i + 1}`}
                 </span>
-                <span style={{ fontSize: 10, color: "var(--text-4)" }}>
+                <span style={{ fontSize: 11, color: "var(--text-4)" }}>
                   {r.complexity || "—"} · {r.stage_count || "?"} stage(s)
                   {r.ts ? ` · ${r.ts.slice(0, 16).replace("T", " ")}` : ""}
                 </span>

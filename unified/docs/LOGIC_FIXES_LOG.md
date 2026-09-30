@@ -23,6 +23,7 @@ records:
 | 11 | Streaming: single-stage merge fixed + multi-stage streaming, user-selectable; AND/OR filters | bug + feature (user request) | Done |
 | 12 | Frontend review: wrong fields, dead features, demo data, failure display, lint | 17 issues (user request) | Done |
 | 13 | Redesign 1/4: design system, light + dark themes, sidebar shell | feature (user request) | Done |
+| 13.1 | Text contrast; Executor tab follows runs started in the Central Manager | user request + 1 bug | Done |
 
 ---
 
@@ -824,4 +825,54 @@ The redesign is split into stages:
 The pages still use their own inline layouts (headers with pill badges, varying
 widths). Stages 16 onward rebuild them on the shared components; this stage only
 guarantees that both themes are correct everywhere.
+
+
+## Stage 13.1 — Readable text; Executor follows Central Manager runs
+
+The user asked for two things:
+- "make the text more visible";
+- when a pipeline is executing from the Central Manager, show it in the Executor tab too.
+
+### Text contrast
+
+Measured against the three backgrounds (surface, page, inset), worst case:
+
+| Token | Light before → after | Dark before → after |
+|---|---|---|
+| `--text-2` | 8.65 → 11.36 : 1 | 9.80 → 12.24 : 1 |
+| `--text-3` | 4.52 → 6.71 : 1 | 5.09 → 7.98 : 1 |
+| `--text-4` | **2.58** → 4.71 : 1 | **2.88** → 5.78 : 1 |
+
+`--text-4` previously failed WCAG AA (4.5 : 1). Much of the page text maps to it
+(the old `#475569`), so it looked washed out. Every text level now passes AA in both
+themes.
+
+Other readability fixes:
+- **Small labels:** 24 pages used 9–10 px labels; these are raised to 11 px.
+- **Executor pending steps:** opacity raised from 0.3 to 0.6.
+
+### Executor follows Manager runs
+
+Every run goes through the Central Manager, so its run list is the source of truth.
+
+- **Attaching:** while the Executor tab is not running anything itself, it polls `GET /manager/runs` every 4 s. When a run is in progress, it attaches to it: it shows the status immediately, polls every 3 s, advances the step list, and shows the result and download link when the run finishes.
+- **Banner:** a run the tab did not start itself shows "Following run xxxxxxxx, started from the Central Manager", with a link to open it in the Manager.
+- **No plan in this browser:** the Execution card now also shows when this browser holds no plan but a run is being followed.
+- **"Run again"** is hidden while a run is live.
+- **Refactor:** the poll tick is split into `_applyStatus()`, used by both the poller and attaching.
+- **Other direction:** the Manager tab already attached to runs started from the Executor.
+
+**Bug found while testing.** The step dots never rendered. The failed-step override
+set `background: undefined`, which wiped the dot colour on every row. Now it overrides
+only for the failed step.
+
+### Verification
+
+- **Lint and build:** ESLint reports 0 problems, and `vite build` passes.
+- **Browser:** tested without starting a real cloud run. I stubbed `fetch` for `/api/manager/runs` and `/api/manager/status/<id>` with a fake live run.
+  - **Live:** the Executor attached within one tick, showed the banner, and advanced to "Running notebook stage group 1/1" with earlier steps done.
+  - **Completion:** after switching the stub to `completed`, it showed "Pipeline completed successfully", Download output and Run again.
+  - **Dots:** now visible, green when done.
+  - **Cleanup:** the test's `exec_*` keys were removed from `localStorage` afterwards.
+- **Light theme:** Run Insights, labels readable.
 
