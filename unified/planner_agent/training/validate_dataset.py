@@ -583,9 +583,7 @@ def classify_transforms(stages):
             kinds.append("filter"); any_op = True
         for t in s.get("transformations", []):
             tl = t.lower()
-            if t.startswith("processed_time"):
-                kinds.append("timestamp_stamp")
-            elif "upper(" in tl or "lower(" in tl:
+            if "upper(" in tl or "lower(" in tl:
                 kinds.append("normalize")
             elif "round(" in tl:
                 kinds.append("round")

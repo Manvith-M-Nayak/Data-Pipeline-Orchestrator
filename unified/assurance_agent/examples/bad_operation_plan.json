@@ -18,7 +18,7 @@
       "type": "notebook",
       "source_container": "raw",
       "sink_container": "gold",
-      "transformations": ["processed_time = currentTimestamp()"],
+      "transformations": [],
       "filter_condition": null,
       "aggregation": {
         "group_by": ["category"],

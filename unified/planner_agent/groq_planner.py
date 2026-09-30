@@ -16,6 +16,7 @@ GROQ_API_KEY = settings.get("GROQ_API_KEY")
 GROQ_MODEL = settings.get("GROQ_MODEL", "openai/gpt-oss-120b")
 
 from .planner_common import (
+    strip_auto_timestamp,
     DEFAULT_EDITABLE_SETTINGS,
     MAX_CONTAINERS,
     _build_datasets,
@@ -100,7 +101,7 @@ Write transformations as 'output_column = expression' strings. Supported:
   - iifNull(col, default), isNull(col), coalesce(col, default)
   - year(col), month(col), dayOfMonth(col), currentTimestamp()
   - Arithmetic: col1 + col2, col1 * col2 / 100
-  - ALWAYS include: processed_time = currentTimestamp()
+  - Only add transformations the user asked for — never add extra columns.
 
 === FILTER SYNTAX ===
 For row filters, set "filter_condition" on the notebook stage (ONE condition
@@ -128,7 +129,7 @@ Rules for aggregation:
   - count may use "*" for a row count, or a column name.
   - group_by columns AND aggregated columns MUST exist in the CSV columns above.
   - After aggregation the ONLY surviving columns are the group_by columns plus the
-    aliases — downstream stages may reference only those (and processed_time).
+    aliases — downstream stages may reference only those.
   - Aggregation runs AFTER transformations and filter within the same stage.
   - Omit "aggregation" entirely (or set null) for stages that do not group.
 
@@ -147,7 +148,7 @@ already-produced) source container and write to DIFFERENT sink containers
 1. First stage (stage0 → stage1) MUST be type "copy". No transformations.
 2. Subsequent stages MUST be type "notebook".
 3. Preserve user-provided column names and function names EXACTLY. Do not fix typos.
-4. Always add processed_time = currentTimestamp() to every notebook stage.
+4. A notebook stage may have no transformations if it only filters or aggregates.
 5. Output ONLY a valid JSON object. No markdown, no backticks, no commentary.
 
 === JSON OUTPUT FORMAT ===
@@ -229,6 +230,7 @@ Design the complete unified ADF+Databricks pipeline configuration JSON:
                     break
 
         config = json.loads(raw.strip())
+        config = strip_auto_timestamp(config, user_prompt)
 
         config.setdefault("recommended_settings", rec)
         config.setdefault("editable_settings", DEFAULT_EDITABLE_SETTINGS)

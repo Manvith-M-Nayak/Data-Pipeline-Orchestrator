@@ -19,7 +19,7 @@
       "type": "notebook",
       "source_container": "bronze",
       "sink_container": "bronze",
-      "transformations": ["processed_time = currentTimestamp()"],
+      "transformations": [],
       "filter_condition": null,
       "num_workers": 0,
       "shuffle_partitions": 8
@@ -27,5 +27,5 @@
   ],
   "execution_order": ["Ingest_Raw_To_Bronze", "Stamp_Bronze"],
   "num_containers": 2,
-  "reasoning": "Passthrough ingest plus a processed_time stamp. No aggregation."
+  "reasoning": "Passthrough ingest only. No aggregation."
 }

@@ -49,7 +49,7 @@ class AssuranceAgent:
         semantic_result = None
         if run_semantic and structural_results[0].passed:
             parsed = json.loads(plan) if isinstance(plan, str) else plan
-            semantic_result = check_intent(user_request, parsed)
+            semantic_result = check_intent(user_request, parsed, schema=schema)
 
         # 3. overall status
         overall = "pass" if structural_pass else "fail"

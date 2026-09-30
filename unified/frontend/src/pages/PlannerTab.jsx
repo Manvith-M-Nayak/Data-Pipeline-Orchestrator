@@ -237,10 +237,10 @@ export default function PlannerTab() {
   // ── execution flow (concurrency) editing ──────────────────────────────────
   const cfg = plan?.config;
 
-  // A notebook stage that only adds processed_time does nothing useful.
+  // A notebook stage with no operations just copies its input forward.
   const isPassThrough = (s) =>
     s.type === "notebook" &&
-    !(s.transformations || []).some((t) => t && !t.includes("processed_time")) &&
+    !(s.transformations || []).some((t) => t && t.trim()) &&
     !s.filter_condition &&
     !(s.aggregation?.aggregations?.length);
   const passThroughStages = (cfg?.stages || []).filter(isPassThrough);
@@ -534,7 +534,7 @@ export default function PlannerTab() {
 
           <div style={C.stageGrid}>
             {(plan.config?.stages || []).map((s, i) => {
-              const transforms = (s.transformations || []).filter((t) => t && !t.includes("processed_time"));
+              const transforms = (s.transformations || []).filter((t) => t && t.trim());
               const srcSink = (s.source_container && s.sink_container)
                 ? `${s.source_container} → ${s.sink_container}` : null;
               return (
@@ -564,7 +564,7 @@ export default function PlannerTab() {
                       )}
                       {isPassThrough(s) && (
                         <div style={{ ...C.stageDetail, color: "#f59e0b" }}>
-                          Pass-through — copies data unchanged (adds processed_time only)
+                          Pass-through — copies data unchanged
                         </div>
                       )}
                     </>

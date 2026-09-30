@@ -20,7 +20,6 @@
       "source_container": "bronze",
       "sink_container": "gold",
       "transformations": [
-        "processed_time = currentTimestamp()",
         "revenue = price * quantity"
       ],
       "filter_condition": "price > 0 AND quantity > 0",

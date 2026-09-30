@@ -420,10 +420,6 @@ def build_notebook_source(stage: dict, storage_account: str, file_format: str = 
             pyspark_transforms.append(("_skipped", f"# skipped malformed transform: {raw!r}"))
             continue
         col_name, rhs = parsed
-        # When aggregating, a row-level processed_time is dropped by groupBy;
-        # it is re-added after the aggregation instead.
-        if has_agg and col_name == "processed_time":
-            continue
         rhs_pyspark = _convert_expr(rhs)
         # A hallucinated transform (e.g. "null? : null") would crash the
         # Databricks job — skip it at build time instead.
@@ -551,7 +547,6 @@ def build_notebook_source(stage: dict, storage_account: str, file_format: str = 
             f"df = df.groupBy({group_args}).agg(\n"
             f"    {agg_args},\n"
             ")\n"
-            'df = df.withColumn("processed_time", current_timestamp())\n'
             'print(f"[{stage_name}] after aggregation: {df.count()} groups")\n'
         )
     else:
@@ -612,8 +607,6 @@ def _stage_compute_cells(stage: dict):
             pyspark_transforms.append(("_skipped", f"# skipped malformed transform: {raw!r}"))
             continue
         col_name, rhs = parsed
-        if has_agg and col_name == "processed_time":
-            continue
         rhs_pyspark = _convert_expr(rhs)
         bad = _invalid_pyspark_reason(rhs_pyspark)
         if bad:
@@ -651,7 +644,6 @@ def _stage_compute_cells(stage: dict):
             f"df = df.groupBy({group_args}).agg(\n"
             f"    {agg_args},\n"
             ")\n"
-            'df = df.withColumn("processed_time", current_timestamp())\n'
             'print(f"[{stage_name}] after aggregation: {df.count()} groups")\n'
         )
     else:

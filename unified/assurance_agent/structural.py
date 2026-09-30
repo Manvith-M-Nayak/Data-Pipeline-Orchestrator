@@ -169,9 +169,8 @@ class StructuralValidator:
                     if a.get("alias"):
                         known.add(a["alias"])     # alias creates a column
 
-            # An aggregation collapses the frame: only the group_by columns,
-            # the aggregation aliases, and the re-added processed_time survive
-            # into later stages. Without this reset, a downstream stage
+            # An aggregation collapses the frame: only the group_by columns
+            # and the aggregation aliases survive into later stages. Without this reset, a downstream stage
             # referencing a dropped column would pass validation falsely.
             if isinstance(agg, dict) and (agg.get("group_by") or agg.get("aggregations")):
                 survivors = set(agg.get("group_by") or [])
@@ -179,7 +178,6 @@ class StructuralValidator:
                     a["alias"] for a in (agg.get("aggregations") or [])
                     if isinstance(a, dict) and a.get("alias")
                 }
-                survivors.add("processed_time")
                 known = survivors
 
         if violations:

@@ -122,7 +122,7 @@ The Planner emits a JSON config with these keys:
       "source": "raw", "sink": "bronze", "diu": 4 },
     { "name": "Transform_Bronze_to_Silver", "type": "notebook",
       "source": "bronze", "sink": "silver",
-      "transformations": ["processed_time = currentTimestamp()", "name = upper(name)"],
+      "transformations": ["name = upper(name)"],
       "num_workers": 2, "shuffle_partitions": 16 }
   ],
   "execution_order": ["Ingest_Raw_to_Bronze", "Transform_Bronze_to_Silver"],

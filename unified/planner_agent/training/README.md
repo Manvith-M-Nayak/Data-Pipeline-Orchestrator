@@ -146,7 +146,6 @@ shuffle 16). `diu`/`node_type` are unchanged.
 | `work_prob` | probability an *earlier* notebook stage does real work (F6: keeps pass-throughs rare and varies which stage works) |
 | `final_work_prob` | probability the final notebook stage does real work |
 | `max_passthrough_ratio` | F6 ceiling — validator fails if the dataset-wide pass-through ratio exceeds this |
-| `processed_time_prob` | how often a work stage also stamps `processed_time` (kept low so it isn't the template crutch) |
 | `op_weights` | relative weights of the non-aggregation work ops (numeric/flag/catint/category filters, unit conversion, rounding, cast, normalization, concat, rename, dedup, sort) |
 | `row_range_by_size` | `row_count` range per size bucket |
 | `value_ranges` | F5 per-column realistic ranges (`(substring, lo, hi)`, first match wins; per-type default otherwise). Imported from `validate_dataset.RANGES`; edit there or override here. Bounds both samples and numeric filter thresholds. |

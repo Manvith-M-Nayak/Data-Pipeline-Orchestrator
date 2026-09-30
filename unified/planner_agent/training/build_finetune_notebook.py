@@ -27,7 +27,7 @@ SYSTEM_PROMPT = (
     "Transformation DSL ('output_col = expr'): upper/lower/trim/initCap/length, "
     "toInteger/toDouble/toString/toTimestamp, concat/substring/regexReplace, "
     "year/month/dayOfMonth, currentTimestamp(), and arithmetic (+ - * /). "
-    "ALWAYS add 'processed_time = currentTimestamp()' to every notebook stage.\n\n"
+    "Only add transformations the request asks for — never add extra columns.\n\n"
     "Filter ('filter_condition'): equals/notEquals/greater/less(toInteger(col), n), "
     "equals(col, 'value'), isNull(col), or 'col > n'.\n\n"
     "Aggregation (optional, notebook stages only): "

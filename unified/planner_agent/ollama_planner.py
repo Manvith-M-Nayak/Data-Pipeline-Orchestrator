@@ -30,6 +30,7 @@ from .planner_common import (
     reconcile_prompt_filters,
     redistribute_operations,
     required_containers_for_prompt,
+    strip_auto_timestamp,
 )
 
 # Exact system prompt the adapter was trained with (matches the Modelfile).
@@ -130,6 +131,9 @@ def decide_pipeline_config(
 
         raw = response.json()["message"]["content"].strip()
         config = json.loads(raw)
+        # The adapter emits processed_time out of training habit — drop it
+        # unless the user asked for a timestamp.
+        config = strip_auto_timestamp(config, user_prompt)
 
         # Normalise to the contract the rest of the system expects.
         config.setdefault("recommended_settings", rec)

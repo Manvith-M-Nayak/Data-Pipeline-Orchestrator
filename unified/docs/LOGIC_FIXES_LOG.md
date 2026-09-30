@@ -17,6 +17,9 @@ records:
 | 5 | Learned expected duration — replaces the fixed time limit ("SLA") everywhere | design change (user request) | Done |
 | 6 | User-facing bugs — model reload, missing-run detection, ragged CSV, streams, planner | M5, M6, M7, M8 (rest), 3 Low | Done |
 | 7 | Remaining low-severity items | Low list (analytics, assurance order, contention, monitor duplicates, learning cycle, deploy gate, dead code, single-worker) | Done |
+| 8 | Semantic (intent) check false flags — reported on `zv.csv` | user report | Done |
+| 9 | Remove the auto-added `processed_time` column everywhere | user request | Done |
+| 10 | Planner self-verifies (assurance as a library); intent check leaves the run path | design change (user request) | Pending |
 
 ---
 
@@ -462,3 +465,121 @@ This stage also settles the open decision from stage 4: the Cost agent now gets 
 - **One server process only.** This is documented, not changed (stage 7).
 - **The Cost agent needs history.** It only trades runtime for savings once a pipeline has 3 comparable completed runs (stage 5, by design).
 - **Frontend changes were checked by build and by running `req()` under Node, not by clicking through a browser.** Cloud behaviour was tested with mocks; no real Azure/Databricks runs were made during these stages.
+
+---
+
+## Stage 8 — Semantic intent check: false flags
+
+**Commit message:** `fix(assurance): give the intent check real columns and plan operations; drop hallucinated and no-op issues`
+
+### Problem (reported by the user on `data/zv.csv`)
+
+The check returned:
+
+> FLAGGED — "The filter_condition 'predator = 1' is incorrect; it should be 'is_predator = 1'. Additionally, there are no transformations needed…"
+
+Both claims were wrong:
+- `zv.csv` has a column literally named `predator`.
+- The "unnecessary transformation" was the `processed_time = currentTimestamp()` step the planner adds automatically (removed in stage 9).
+
+**Root cause:** `check_intent` sent qwen2.5-7b only the user request and the raw plan JSON — never the dataset's columns — so the model invented a "correct" name. Live testing then showed three more failure modes of the 7B model:
+- it reported a filter as **missing** while reading raw JSON that contained it;
+- it flagged the **mandatory ingest copy** stage as "unnecessary";
+- it "suggested" changes that were **already in the plan**: re-stating the same aggregation, renaming only an output column, or "Add `sum of price`" when the stage already computed it.
+
+### Changes (`assurance_agent/semantic.py`, `assurance_agent/orchestrator.py`)
+
+| Change | Why |
+|---|---|
+| `check_intent(..., schema=None)` sends `DATASET_COLUMNS` (name → type); the orchestrator passes the schema it already has. The prompt says names in that list are correct as written and must never be "corrected". | The model can't know real column names otherwise. |
+| The raw plan JSON is replaced by `PLAN_OPERATIONS` (`plan_operations(plan)`): one plain line per stage. Filters read "filter (keep rows where): predator = 1"; aggregations read "aggregate — for each distinct legs: count the rows (output column n)". | The 7B model misread the raw JSON (containers, datasets, settings) and "count(*) as n"; the plain lines fixed both. |
+| The ingest copy stage and empty stages are labelled `[infrastructure]`, and the prompt says they never count as a mismatch. | The model flagged the required ADF ingest as "unnecessary". |
+| **Guard 1:** an issue whose quoted expressions reference a column that is in neither the data nor the plan (transform outputs, aggregation aliases) is discarded. SQL and English words (`group`, `by`, `distinct`, …) are never treated as columns. | Deterministic protection against hallucinated columns. |
+| **Guard 2** (`_is_noop_suggestion`): an issue is discarded when its "fix" is a stage's existing operation (verbatim or with only the output column renamed), or an "add/include/keep X" where every quoted X is already in the plan's operations. | A fix that changes nothing is not a mismatch. |
+| If every issue is discarded, `flagged` becomes `false`, and the reasoning says what was discarded and why (e.g. "…columns not in the data or the plan…: is_predator"). | Transparent: nothing is hidden silently. |
+
+**Tried and reverted:** an extra prompt rule ("counting per X needs a group by") confused the 7B model: 12/21 correct, with correct plans now rejected. It was removed; the plain aggregation wording fixed the same case instead.
+
+### Verification (live qwen2.5:7b-instruct via Ollama, 3 runs per case)
+
+| Case | Expected | Result |
+|---|---|---|
+| Predators, `predator = 1` (**the reported case**) | pass | pass ×3 |
+| Same plus an empty pass-through stage | pass | pass ×3 |
+| Aquatic predators, two filters | pass | pass ×3 |
+| Count per legs, correct group-by | pass | pass ×3 |
+| Shipped example `valid_plan.json` (revenue per category and region) | pass | pass ×3 |
+| Predators, but filters `aquatic = 1` | flag | flag ×3 |
+| Predators and no venom, venom filter missing | flag | flag ×3 |
+| Count per legs, but a filter instead of a group-by | flag | flag ×3 |
+| Shipped example `intent_mismatch_plan.json` | flag | flag ×3 |
+
+**27/27 correct.** The progression while fixing: 15/18 → 12/21 (reverted rule) → 15/21 → 18/21 → 21/21 → 27/27.
+
+- **Replay of the reported result through the guard:** `flagged false`, "Discarded 1 issue(s)… is_predator".
+- **The API end to end** (`POST /api/assurance/validate`, reported case): overall `pass`, intent "The plan matches the user request."
+- **Genuine issues still get through:** "use 'aquatic = 1'", "add filter 'venomous = 0'", "group by tail instead", and "add `sum of discount`" are all kept.
+- **Regressions:**
+  - the integration test passes, and so do the teammate's 13 cost tests;
+  - `ruff` is clean;
+  - the backend has no tracebacks, and all 25 GET endpoints return 200;
+  - the `assurance_agent` examples behave as designed.
+
+### Notes
+
+- **The check stays probabilistic and advisory.** It doesn't block runs unless `block_on_intent` is set. These results come from a fixed test set, not a guarantee.
+- **Mistakes during testing:** one run passed `None` as the request (a regex in my test failed), and the model then invented requirements. It was re-run with the real request; the results above use that re-run.
+
+---
+
+## Stage 9 — Remove the automatic `processed_time` column
+
+**Commit message:** `refactor(planner): stop auto-adding a processed_time column to every stage`
+
+### Why
+
+- **The planner added a column nobody asked for.** It appended `processed_time = currentTimestamp()` to every notebook stage, and the Groq prompt told the model to do the same. The notebook builder then **re-added** it after every aggregation.
+- **The intent check rightly flagged it** as an unnecessary transformation. In the real run history it caused most of the false flags (10 of 11 runs were flagged, mostly citing "unnecessary transformations").
+- **The user asked for it to be removed everywhere.**
+
+### Design decision
+
+- **Model output is cleaned, not just new plans.** The fine-tuned planner learned the habit from its training data (488 dataset rows contain it), so it still emits the transform. `strip_auto_timestamp(config, user_prompt)` removes exactly `processed_time = currentTimestamp()` from model output.
+- **A real request is kept.** The step stays **unless the user's prompt asks for a timestamp / processing time**, so an explicit request isn't silently dropped.
+- **Saved plans are not rewritten.** The executor runs a plan as given; plans saved before this change still contain the step until they are re-planned.
+
+### Changes
+
+| File | Change |
+|---|---|
+| `planner_agent/planner_common.py` | **New:** `strip_auto_timestamp()` (with the `_AUTO_TIMESTAMP_RE` / `_TIMESTAMP_REQUEST_RE` patterns). **Removed** the automatic timestamp from: default stages (`_build_stages`), the streaming default, redistribution, padding stages (`enforce_container_count`), and the `_structural_validate` append. The filters that ignored it are simplified (`_stage_op_load`, the copy-stage operations check). Pass-through stages now have `transformations: []`. |
+| `planner_agent/ollama_planner.py`, `groq_planner.py` | Both call `strip_auto_timestamp` right after parsing model output. **The Groq prompt:** "ALWAYS include processed_time" → "Only add transformations the user asked for — never add extra columns"; the "Always add processed_time" rule is replaced; the "(and processed_time)" survivor note is removed. |
+| `executor_agent/notebook_builder.py` | The batch and stream builders no longer skip it before an aggregation and no longer **re-add** it after `groupBy`. |
+| `assurance_agent/structural.py` | `processed_time` is no longer treated as surviving an aggregation. |
+| `frontend/src/pages/PlannerTab.jsx` | Shows every transform, so a requested timestamp is visible. "Pass-through" means no operations; the label reads "copies data unchanged". |
+| `assurance_agent/examples/*.json` (5 plans), root `README.md` | Timestamp transforms removed from the example plans. Minimal text edits — a first attempt re-serialized the JSON (154-line diff), so the files were restored from `HEAD` via `git show` and edited as text instead (10-line diff). |
+| **Training tools** (`planner_agent/training/`) | `generate_dataset.py`: `processed_time_prob` and the stamping code removed. `validate_dataset.py`: the `timestamp_stamp` classification removed. `build_finetune_notebook.py`: the fine-tune prompt says "never add extra columns" instead of "ALWAYS add processed_time". `eval_live_planner.py` (local): the `processed_time` pass criterion is now `no_auto_timestamp`. `README.md`: config row removed. |
+| `finetune_qwen_planner.ipynb` | Regenerated from the builder. The diff also includes the dataset-path and JSONL-loading fixes made to the builder in an earlier session (the notebook had never been regenerated after them). |
+
+### Verification
+
+- **Planner:**
+  - the default plan contains no timestamp;
+  - Ollama output that includes the timestamp (mocked HTTP), prompt "keep predators and uppercase the name" → only `upper_name = upper(name)` is kept;
+  - the prompt "…add a processing time timestamp" → the timestamp is **kept**;
+  - padded to 5 containers → no timestamp; the two added stages are true pass-throughs (`[]`);
+  - the streaming conversion contains no timestamp.
+- **Notebook:** the aggregation notebook no longer references `processed_time` and compiles.
+- **Training data:** generating 400 rows gives **0** with `processed_time`, and the validator passes (0 violations). The builder's `--verify` passes.
+- **Assurance:**
+  - every example still passes or fails for its intended reason;
+  - live qwen: your `zv.csv` case passes ×2, `valid_plan` passes ×2, `intent_mismatch_plan` is flagged ×2.
+- **Regressions:**
+  - the integration test passes, and so do the teammate's 13 cost tests;
+  - `ruff` is clean, and the frontend builds;
+  - the backend has no tracebacks, and all 25 GET endpoints return 200.
+
+### Not changed (flagged for the user)
+
+- **Old prototype folders at the repo root.** `py_files/`, `databricks/`, `planner_finetune/` and `resource_finetune/` still add `processed_time`, but no code in `unified/` imports them; only three docs mention them.
+- **The fine-tuned adapter and existing datasets are unchanged.** The model keeps the habit until it's retrained on newly generated data; the planner strips its output meanwhile.

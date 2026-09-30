@@ -8,7 +8,7 @@ regardless of which LLM generated it:
   - container naming conventions + Azure-safe normalization
   - recommended / editable resource settings
   - deterministic default config (the fallback when the LLM is unreachable)
-  - structural validation (stage types, processed_time, aggregation, container names)
+  - structural validation (stage types, aggregation, container names)
 
 Each stage of a config is either:
   - "copy"     : ADF Copy Activity moves blob-to-blob as-is (ingestion)
@@ -19,6 +19,28 @@ import re
 
 
 MAX_CONTAINERS = 10
+
+# The planner used to stamp every notebook stage with this transform. It adds a
+# column the user never asked for (and the intent check rightly called it
+# unnecessary), so it is no longer generated. The fine-tuned model still emits
+# it out of habit (its training data had it), so model output is cleaned too —
+# unless the user's prompt actually asks for a timestamp.
+_AUTO_TIMESTAMP_RE = re.compile(r"^\s*processed_time\s*=\s*current_?timestamp\s*\(\s*\)\s*$", re.I)
+_TIMESTAMP_REQUEST_RE = re.compile(r"processed[_\s]?time|processing\s+time|time\s*stamp", re.I)
+
+
+def strip_auto_timestamp(config: dict, user_prompt=None) -> dict:
+    """Remove the automatic `processed_time = currentTimestamp()` transform from
+    every stage, unless the prompt asks for a timestamp / processing time."""
+    if user_prompt and _TIMESTAMP_REQUEST_RE.search(str(user_prompt)):
+        return config
+    for s in config.get("stages", []) or []:
+        if isinstance(s.get("transformations"), list):
+            s["transformations"] = [
+                t for t in s["transformations"]
+                if not (isinstance(t, str) and _AUTO_TIMESTAMP_RE.match(t))
+            ]
+    return config
 
 
 CONTAINER_NAMING_CONVENTIONS = [
@@ -112,7 +134,7 @@ def _build_stages(clist: list, rec: dict) -> list:
                 "type": "notebook",
                 "source_container": src_container,
                 "sink_container":   sink_container,
-                "transformations":  ["processed_time = currentTimestamp()"],
+                "transformations":  [],
                 "filter_condition": None,
                 "num_workers":        rec["num_workers"],
                 "shuffle_partitions": rec["shuffle_partitions"],
@@ -143,8 +165,6 @@ def to_streaming_plan(config: dict, container_names: list = None) -> dict:
             filter_condition = s.get("filter_condition")
         if aggregation is None and s.get("aggregation"):
             aggregation = s.get("aggregation")
-    if not merged_transforms:
-        merged_transforms = ["processed_time = currentTimestamp()"]
 
     # Isolate each streaming pipeline in its own containers. Reusing fixed names
     # (e.g. "ingest"/"transform") across different datasets pollutes the source
@@ -233,9 +253,7 @@ def _stage_op_load(s: dict) -> int:
     """How many meaningful operations a notebook stage performs."""
     if s.get("type") != "notebook":
         return 0
-    transforms = [t for t in (s.get("transformations") or [])
-                  if t and "processed_time" not in t]
-    load = len(transforms)
+    load = len([t for t in (s.get("transformations") or []) if t and str(t).strip()])
     if s.get("filter_condition"):
         load += 1
     if (s.get("aggregation") or {}).get("aggregations"):
@@ -404,13 +422,12 @@ def redistribute_operations(config: dict, user_prompt: str = None) -> dict:
                 tgt["filter_condition"] = src["filter_condition"]
                 src["filter_condition"] = None
             else:
-                transforms = [t for t in (src.get("transformations") or [])
-                              if t and "processed_time" not in t]
+                transforms = [t for t in (src.get("transformations") or []) if t and str(t).strip()]
                 if len(transforms) < 2:
                     continue
                 half = len(transforms) // 2
-                src["transformations"] = transforms[:half] + ["processed_time = currentTimestamp()"]
-                tgt["transformations"] = transforms[half:] + ["processed_time = currentTimestamp()"]
+                src["transformations"] = transforms[:half]
+                tgt["transformations"] = transforms[half:]
             print(f"   Redistributing work: '{src.get('name')}' → '{tgt.get('name')}'")
             moved_any = True
     return config
@@ -455,7 +472,7 @@ def enforce_container_count(
     The fine-tuned (Ollama) model has a fixed contract and picks its own stage
     count, so a user request for N containers must be enforced afterwards:
       - model produced fewer  → extend the chain with pass-through notebook
-        stages (processed_time only) until the count matches
+        stages (no operations) until the count matches
       - model produced more   → trim trailing stages and rewire the last kept
         stage to the final container
       - container_names given → positional rename across the whole config
@@ -495,7 +512,7 @@ def enforce_container_count(
                 "type": "notebook",
                 "source_container": src,
                 "sink_container":   new_name,
-                "transformations":  ["processed_time = currentTimestamp()"],
+                "transformations":  [],
                 "filter_condition": None,
                 "num_workers":        rec["num_workers"],
                 "shuffle_partitions": rec["shuffle_partitions"],
@@ -800,7 +817,7 @@ def _normalize_identifiers(config: dict) -> dict:
 
 
 def _structural_validate(config: dict, schema: dict = None, custom_settings: dict = None) -> dict:
-    """Enforce first-stage=copy, later-stages=notebook, processed_time presence,
+    """Enforce first-stage=copy, later-stages=notebook,
     validate any aggregation blocks, and normalize container names to Azure-safe.
 
     custom_settings: explicit user choices — they raise the size-based
@@ -842,7 +859,7 @@ def _structural_validate(config: dict, schema: dict = None, custom_settings: dic
     # user operation is silently dropped by the executor.
     if stages and stages[0].get("type") == "copy" and clist:
         s0 = stages[0]
-        _s0_ops = [t for t in (s0.get("transformations") or []) if t and "processed_time" not in t]
+        _s0_ops = [t for t in (s0.get("transformations") or []) if t and str(t).strip()]
         if _s0_ops or s0.get("filter_condition") or (s0.get("aggregation") or {}).get("aggregations"):
             print(f"   Copy stage '{s0.get('name')}' carries operations — converting to notebook")
             s0["type"] = "notebook"
@@ -928,10 +945,7 @@ def _structural_validate(config: dict, schema: dict = None, custom_settings: dic
                 s["sink_container"] = snk
 
         if s.get("type") == "notebook":
-            transforms = [t for t in s.get("transformations", []) if t and t.strip()]
-            if not any("processed_time" in t for t in transforms):
-                transforms.append("processed_time = currentTimestamp()")
-            s["transformations"] = transforms
+            s["transformations"] = [t for t in s.get("transformations", []) if t and t.strip()]
             s.setdefault("filter_condition", None)
             s.setdefault("num_workers", 0)
             s.setdefault("shuffle_partitions", 8)

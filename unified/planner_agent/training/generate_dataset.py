@@ -64,7 +64,6 @@ CONFIG = {
     "max_passthrough_ratio": 0.25,
 
     "agg_prob": 0.30,           # chance the FINAL stage is an aggregation
-    "processed_time_prob": 0.06,
 
     "op_weights": {
         "filter_measure": 1.6, "filter_flag": 0.8, "filter_catint": 0.7,
@@ -497,9 +496,8 @@ def build_record(domain_name, D, rng):
     work_kinds = []
 
     # Track constraints so no column is filtered twice (FA/FB), no derived name
-    # repeats (FB), and processed_time is stamped at most once.
+    # repeats (FB).
     derived_names, filtered_cols = set(), set()
-    pt_used = False
 
     def register(transforms, filt):
         for t in transforms:
@@ -521,10 +519,6 @@ def build_record(domain_name, D, rng):
                 transforms, filt, agg = pick_nonconflicting_op(D, rng, derived_names, filtered_cols)
                 if transforms or filt:
                     work_kinds.append("transform")
-            if (transforms or filt) and not pt_used and agg is None \
-                    and rng.random() < CONFIG["processed_time_prob"]:
-                transforms = list(transforms) + ["processed_time = currentTimestamp()"]
-                pt_used = True
         register(transforms, filt)
         nb_specs.append([src, snk, transforms, filt, agg])
 
