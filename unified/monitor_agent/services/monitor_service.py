@@ -26,6 +26,10 @@ class MonitorService:
         # remains slow, and keeps the warning visible in live updates
         self._anomaly_verdicts: Dict[str, str] = {}
         self._sem     = asyncio.Semaphore(ANALYSIS_CONCURRENCY)
+        # run_ids being fetched/analyzed right now. The poll loop,
+        # sync_historical (after every managed run) and the startup backfill
+        # can all pick up the same finished run — analyze it once.
+        self._in_flight: Set[str] = set()
         self.ws_clients: Set[WebSocket] = set()
 
     async def _broadcast(self, payload: Dict[str, Any]):
@@ -102,6 +106,9 @@ class MonitorService:
 
     async def _handle_completed_run(self, run: Dict):
         run_id, pipeline_name = run.get("runId"), run.get("pipelineName", "")
+        if run_id in self._in_flight:
+            return
+        self._in_flight.add(run_id)
         try:
             final     = await self._adf.get_pipeline_run(run_id)
             activities = await self._adf.get_activity_runs(run_id)
@@ -109,12 +116,24 @@ class MonitorService:
             await self._db.upsert_run(final)
         except Exception as exc:
             print(f"[monitor] completed-run fetch failed for {run_id}: {exc}")
+            self._in_flight.discard(run_id)
             return
         spawn(
-            self._analyze(run_id, pipeline_name, final, activities, stats)
+            self._analyze(run_id, pipeline_name, final, activities, stats, owned=True)
         )
 
-    async def _analyze(self, run_id, pipeline_name, run, activities, stats):
+    async def _analyze(self, run_id, pipeline_name, run, activities, stats, owned=False):
+        """owned=True: the caller already claimed run_id in _in_flight."""
+        if not owned:
+            if run_id in self._in_flight:
+                return
+            self._in_flight.add(run_id)
+        try:
+            await self._analyze_locked(run_id, pipeline_name, run, activities, stats)
+        finally:
+            self._in_flight.discard(run_id)
+
+    async def _analyze_locked(self, run_id, pipeline_name, run, activities, stats):
         async with self._sem:
             try:
                 analysis    = await self._groq.analyze_pipeline_run(run, activities, stats)
@@ -141,6 +160,17 @@ class MonitorService:
     async def backfill_missing_analyses(self, limit: int = 50):
         await asyncio.sleep(5)
         for run in await self._db.get_runs_missing_analysis(limit):
+            if run["run_id"].startswith("dbx-"):
+                # Databricks records are written by the executor, not ADF —
+                # asking ADF for them always failed, so they were never
+                # re-analyzed. Analyze from the stored record instead.
+                try:
+                    record = json.loads(run.get("raw_json") or "{}")
+                    stats = await self._db.get_historical_stats(run["pipeline_name"])
+                    spawn(self._analyze(run["run_id"], run["pipeline_name"], record, [], stats))
+                except Exception:
+                    pass
+                continue
             try:
                 full  = await self._adf.get_pipeline_run(run["run_id"])
                 acts  = await self._adf.get_activity_runs(run["run_id"])

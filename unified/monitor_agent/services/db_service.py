@@ -216,7 +216,12 @@ class DBService:
 
     async def mark_interrupted_manager_runs(self) -> int:
         """On startup, fail any run left non-terminal by a crash/restart — its
-        asyncio task is gone, so it can never complete."""
+        asyncio task is gone, so it can never complete.
+
+        Assumes ONE server process: with `uvicorn --workers N`, a starting
+        worker would fail runs another worker is still executing. The run
+        registry, executor resource locks, streams and monitor polling are all
+        per-process too — run a single worker (see unified/README.md)."""
         placeholders = ",".join("?" * len(self._MANAGER_TERMINAL))
         async with _connect() as db:
             db.row_factory = aiosqlite.Row

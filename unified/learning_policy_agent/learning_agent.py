@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
 from typing import Dict, Optional
 
@@ -58,11 +59,15 @@ class LearningPolicyAgent:
         runs a full learning cycle every CYCLE_EVERY_N_RUNS runs (learning
         happens between runs, retraining in a background thread).
         """
-        self._bump_runs_since_cycle()
-        cs = self._load_cycle_state()
-        if cs.get("runs_since_cycle", 0) < CYCLE_EVERY_N_RUNS:
-            return None
-        return self.run_cycle(background_retrain=background)
+        # Serialized: concurrent runs finishing together would otherwise lose
+        # counter increments (read-modify-write on a file) or both start a
+        # cycle. The cycle itself is quick; retraining runs in its own thread.
+        with _CYCLE_LOCK:
+            self._bump_runs_since_cycle()
+            cs = self._load_cycle_state()
+            if cs.get("runs_since_cycle", 0) < CYCLE_EVERY_N_RUNS:
+                return None
+            return self.run_cycle(background_retrain=background)
 
     # ---------------------------------------------------------------- cycle
 
@@ -159,6 +164,9 @@ class LearningPolicyAgent:
 
     def _reset_cycle_counter(self):
         self._save_cycle_state({"runs_since_cycle": 0})
+
+
+_CYCLE_LOCK = threading.Lock()
 
 
 # ── Shared singleton ─────────────────────────────────────────────────────────

@@ -89,6 +89,9 @@ FEATURE_COLS = [
 # Real-run CSV exported by the Learning & Policy Update Agent before a
 # retrain (see learning_policy_agent/retraining_manager.py: export_real_runs).
 REAL_RUNS_CSV = os.path.join("data", "real_runs.csv")
+# Held-out set this run evaluates on. The Learning agent's deploy gate scores
+# the PREVIOUS model on the same rows, so old and new MAE are comparable.
+HOLDOUT_CSV = os.path.join("data", "holdout_test.csv")
 
 # ── Dynamic real-data blending knobs ─────────────────────────────────────
 # Below this many usable real rows, skip blending entirely — too few rows
@@ -434,6 +437,8 @@ else:
           "complexity, and actual_duration_s are.")
 
 print(f"\nFinal train: {len(X_train):,} rows | Final test: {len(X_test):,} rows")
+os.makedirs(os.path.dirname(HOLDOUT_CSV), exist_ok=True)
+X_test.assign(actual_duration_s=yd_test.values).to_csv(HOLDOUT_CSV, index=False)
 print(f"Failure examples in train: {(yo_train=='failure').sum():,}")
 print(f"Failure examples in test:  {(yo_test=='failure').sum():,}")
 

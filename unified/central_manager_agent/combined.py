@@ -128,6 +128,11 @@ async def combined_analytics(limit: int = Query(default=200, ge=1, le=1000)):
 
     # ── Feedback records ──────────────────────────────────────────────────
     feedback = _feedback_records()
+    if db is not None:
+        # Same window as manager_runs (limited by `limit`) — otherwise totals
+        # mix "last N runs" with "all feedback ever".
+        window = {r.get("run_id") for r in manager_runs}
+        feedback = [r for r in feedback if r.get("run_id") in window]
     feedback_by_run = {r.get("run_id"): r for r in feedback}
 
     # ── Monitor pipeline runs ─────────────────────────────────────────────
@@ -136,9 +141,12 @@ async def combined_analytics(limit: int = Query(default=200, ge=1, le=1000)):
         monitor_runs = await db.get_pipeline_runs(limit=limit)
 
     # ── Anomalies ─────────────────────────────────────────────────────────
-    anomalies = []
+    anomalies, ai_verdicts = [], []
     if db is not None:
-        anomalies = await db.get_anomaly_log(limit=limit)
+        # Classified anomaly events (anomaly_detector); the legacy
+        # anomaly_log only holds Groq verdicts on live slow runs.
+        anomalies = await db.get_anomaly_events(limit=limit)
+        ai_verdicts = await db.get_anomaly_log(limit=limit)
 
     # ── Compute aggregates ────────────────────────────────────────────────
     total_runs = len(manager_runs)
@@ -147,8 +155,13 @@ async def combined_analytics(limit: int = Query(default=200, ge=1, le=1000)):
     in_progress = total_runs - completed - failed
 
     # Duration accuracy (predicted vs actual)
+    # Only runs whose pipeline completed: aborted or failed runs log abort
+    # time / retry backoff, not a duration comparable with the prediction.
     duration_ratios = []
     for fb in feedback:
+        # "feedback" = success in records logged before the final_status fix.
+        if fb.get("final_status") not in ("completed", "feedback") or fb.get("executed") is False:
+            continue
         pred = fb.get("predicted_duration_s") or fb.get("perf_predicted_total_s")
         actual = fb.get("actual_duration_s")
         if pred and actual and pred > 0:
@@ -263,9 +276,10 @@ async def combined_analytics(limit: int = Query(default=200, ge=1, le=1000)):
         },
         "resource": {
             "total_predictions": total_runs,
-            "feasible_plans": sum(
-                1 for fb in feedback if fb.get("complexity") is not None
-            ),
+            # resource_feasible is logged since the logic fixes; older
+            # records lack it and are not counted either way.
+            "feasible_plans": sum(1 for fb in feedback if fb.get("resource_feasible") is True),
+            "infeasible_plans": sum(1 for fb in feedback if fb.get("resource_feasible") is False),
         },
         "performance_prediction": {
             "ml_predictions": ml_predictions,
@@ -285,6 +299,7 @@ async def combined_analytics(limit: int = Query(default=200, ge=1, le=1000)):
         "monitor": {
             "total_pipeline_runs": len(monitor_runs),
             "anomalies_detected": len(anomalies),
+            "ai_slow_run_verdicts": len(ai_verdicts),
         },
     }
 

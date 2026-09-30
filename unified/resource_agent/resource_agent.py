@@ -486,12 +486,10 @@ class ResourceAgent:
         """
         alloc_map = {a.stage_name: a for a in allocations}
         new_groups: List[List[str]] = []
-        overflow:   List[str]       = []
 
         for group in execution_groups:
-            # Combine any spillover from previous group's overflow
-            combined = overflow + group
-            overflow = []
+            combined = list(group)
+            overflow: List[str] = []
 
             # Check combined workers
             group_workers = sum(
@@ -562,8 +560,10 @@ class ResourceAgent:
             else:
                 new_groups.append(combined)
 
-        if overflow:
-            new_groups.append(overflow)
+            # A spilled stage runs in its own group right after this one — not
+            # merged into the next group, whose stages may depend on it.
+            if overflow:
+                new_groups.append(overflow)
 
         # Filter empty groups
         new_groups = [g for g in new_groups if g]

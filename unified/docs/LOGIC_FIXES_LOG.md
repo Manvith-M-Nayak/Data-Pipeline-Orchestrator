@@ -16,7 +16,7 @@ records:
 | 4 | Execution — concurrent-run isolation, executor issues | H7, H8, M4, run-id collisions, retries | Done |
 | 5 | Learned expected duration — replaces the fixed time limit ("SLA") everywhere | design change (user request) | Done |
 | 6 | User-facing bugs — model reload, missing-run detection, ragged CSV, streams, planner | M5, M6, M7, M8 (rest), 3 Low | Done |
-| 7 | Remaining low-severity items | Low list (analytics, assurance order, contention, monitor duplicates, learning cycle, deploy gate, dead code) | Pending |
+| 7 | Remaining low-severity items | Low list (analytics, assurance order, contention, monitor duplicates, learning cycle, deploy gate, dead code, single-worker) | Done |
 
 ---
 
@@ -392,3 +392,73 @@ This stage also settles the open decision from stage 4: the Cost agent now gets 
 
 - **Wrong attribute name.** My first version of `_structural_failures` read `c.name`, but `assurance_agent.result.CheckResult` calls the field `check`. The stream test raised `AttributeError`. The "unknown column" case had passed only because it failed before reaching that attribute. Fixed and re-tested.
 - **Model timestamp touched.** The M5 test updated the timestamp of the real `performance_prediction_agent/models/duration_regressor.pkl` (via `os.utime`) to prove the reload. The contents are unchanged, and `.pkl` files are gitignored.
+
+---
+
+## Stage 7 — Remaining low-severity items
+
+**Commit message:** `fix: order-aware assurance, accurate analytics, dedupe monitor analyses, fair retrain gate, remove dead cost code`
+
+### Changes
+
+| Finding | Change |
+|---|---|
+| **Combined analytics.** The duration ratio included failed/aborted runs; `feasible_plans` counted any run with a `complexity`; `anomalies_detected` used the legacy Groq log; manager runs were windowed but feedback wasn't. | `combined.py`: feedback is limited to the same run window; the duration ratio uses only successful, executed runs ("completed", or the legacy "feedback" status); `feasible_plans` / `infeasible_plans` count the new `resource_feasible` value, which the manager now records; `anomalies_detected` counts `anomaly_events` and `ai_slow_run_verdicts` counts the legacy log. |
+| **Assurance column check ignored order.** A transform could use a column created later in the same stage, and a filter could use an aggregation alias. | `assurance_agent/structural.py` checks in execution order (transforms one at a time → filter → aggregation inputs; aliases become known only after that). Violations say where: `(transformation)`, `(filter)` or `(aggregation)`. |
+| **Contention spill.** `resolve_contention` merged a spilled stage into the next group, which could depend on it. | The spilled stage gets its own group right after the current one. |
+| **Duplicate monitor analyses.** The poll loop, `sync_historical` and backfill could analyze the same run twice. Backfill asked ADF about `dbx-` Databricks ids, which always failed. | `MonitorService._in_flight` claims a `run_id` before fetching or analyzing (`_analyze` → `_analyze_locked`). Backfill analyzes `dbx-` records from their stored `raw_json` instead of calling ADF. |
+| **Learning cycle.** It ran synchronously on the event loop, and the `runs_since_cycle` counter was a non-atomic read-modify-write. | The manager runs `on_run_recorded` via `asyncio.to_thread`; `learning_agent._CYCLE_LOCK` serializes counting and the cycle trigger. |
+| **Retrain deploy gate.** It compared MAE across different held-out sets. | `run_training.py` writes its held-out set to `data/holdout_test.csv`. `RetrainingManager._old_model_mae` scores the snapshotted old model on those same rows, and the gate compares like with like (the stored old MAE is kept as `mae_before_stored`). If the old model can't be scored there (different feature set), the new one is kept. |
+| **Dead cost code.** Nine methods were unused since the fail-closed change. | Removed `_apply_cluster_downsize`, `_apply_node_downgrade`, `_apply_shuffle_tuning`, `_enforce_constraints_single` and `_suggest_*` ×5, plus the four constants only they used (`UTILIZATION_LOW_THRESHOLD`, `TINY_STAGE_THRESHOLD_S`, `OFF_PEAK_DISCOUNT`, `MERGE_SAVING_FACTOR`). A reference check across `unified/` and the teammate's root scripts showed 0 uses. |
+| **Single-worker assumption.** `mark_interrupted_manager_runs` would fail another worker's live runs. | **Documented, not changed:** the `db_service` docstring and `unified/README.md` now say to run one server process. Run state, the executor's resource locks, streams and the monitor poll loop are all per-process, so real multi-worker support would need shared state (a database or Redis), which is a larger design change. |
+
+### Verification
+
+- **Analytics** (real DB, through the API): 10 duration samples, average ratio 0.55, failed runs excluded; `anomalies_detected 2` (events) and `ai_slow_run_verdicts 5`.
+- **Assurance:**
+  - all real plans still pass the column check;
+  - a transform using a column defined later is flagged "unknown column 'z' (transformation)";
+  - a filter on an aggregation alias is flagged "unknown column 'total' (filter)";
+  - a correctly ordered stage passes.
+- **Contention:** groups `[a,b,c,e]` then `[d]` become `[b,a,c]`, `[e]`, `[d]`: the spilled `e` sits alone, before `d`.
+- **Monitor** (temp DB, mocked Groq/ADF):
+  - three concurrent analyses of one run make 1 Groq call;
+  - a `dbx-` record is backfilled and saved without ADF.
+- **Learning:** 20 concurrent `on_run_recorded` calls give `runs_since_cycle = 20`.
+- **Deploy gate:**
+  - the old model's MAE is computed on a new held-out file (125.3 on synthetic rows);
+  - a mismatched feature set returns `None` (no comparison);
+  - a **copy** of `run_training.py` run in a temp directory (real models untouched) wrote `holdout_test.csv` with 21,000 rows × (19 features + `actual_duration_s`).
+- **Regressions:**
+  - the integration test passes, and so do the teammate's 13 cost tests;
+  - `ruff` is clean, and the frontend builds;
+  - the backend has no tracebacks, and all 25 GET endpoints return 200.
+
+### Mistakes during this stage
+
+- **Legacy status missed.** The first analytics filter accepted only `final_status == "completed"`, which dropped every legacy success: older records use `"feedback"`, from before bug #8 was fixed. That gave 0 duration samples. Now both are accepted. I checked the other new filters: `_expected_duration` requires `"completed"` but also needs `pipeline_key`, which legacy records don't have, so it's unaffected.
+- **Bad test harness, twice.** One `asyncio.sleep` patch called itself recursively, and one contention scenario never actually spilled. Both were test bugs, fixed before relying on the results.
+
+---
+
+## All findings — where each was fixed
+
+| Finding | Stage | Finding | Stage |
+|---|---|---|---|
+| H1 container-name injection | 1 | M1 resource factor convergence | 3 |
+| H2 schema missing from plan | 2 | M2 learning factor convergence | 3 |
+| H3 flat schema from UI | 2 | M3 whole-run duration | 3 |
+| H4 aggregation count 0 | 2 | M4 copy-stage memory check | 4 |
+| H5 failed runs in Resource feedback | 3 | M5 model cache never refreshed | 6 |
+| H6 actual cost ignored duration | 3 | M6 frontend 404 detection | 6 |
+| H7 no concurrent-run isolation | 4 | M7 ragged CSV 500 | 6 |
+| H8 resource settings not executed | 4 (DIU/shuffle; workers/node advisory) | M8 streams unvalidated/unrecorded | 1 + 6 |
+| Fixed "SLA" time limit | 5 (replaced by learned duration) | M9 cross-pipeline aborts | 3 |
+| Low items | 4, 6, 7 (multi-worker: documented) | | |
+
+### Honest limits that remain
+
+- **Worker count and node type are still advisory.** Applying them needs Databricks job clusters (stage 4).
+- **One server process only.** This is documented, not changed (stage 7).
+- **The Cost agent needs history.** It only trades runtime for savings once a pipeline has 3 comparable completed runs (stage 5, by design).
+- **Frontend changes were checked by build and by running `req()` under Node, not by clicking through a browser.** Cloud behaviour was tested with mocks; no real Azure/Databricks runs were made during these stages.

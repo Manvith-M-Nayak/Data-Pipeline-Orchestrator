@@ -19,6 +19,10 @@ uvicorn main:app --reload --host 127.0.0.1 --port 8000
 cd frontend && npm install && npm run dev      # http://localhost:5173
 ```
 
+Run **one** server process (no `--workers N`): run state, the executor's
+resource locks, live streams and the monitor poll loop live in that process,
+and startup marks any unfinished run as failed.
+
 On startup the backend also starts Ollama (`ollama serve`) if it isn't running and
 loads the fine-tuned `planner-agent` model — see [Planner model](#models).
 Health check: `GET /api/health`. Interactive API docs: `/docs`.

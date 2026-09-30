@@ -1222,6 +1222,8 @@ class CentralManager:
                 else None,
                 "used_fallback": state.plan.get("used_fallback", False),
                 "complexity": state.predictions.get("complexity"),
+                # None when the run never reached resource prediction
+                "resource_feasible": state.predictions.get("feasible") if state.predictions else None,
                 "validation_issues": state.validation.get("issues", []),
                 # ── Learning & Policy Update Agent (patch 3a) ────────────────
                 # Logs the Performance Prediction Agent's own forecast (as
@@ -1269,7 +1271,9 @@ class CentralManager:
         try:
             from learning_policy_agent import get_learning_agent
 
-            get_learning_agent().on_run_recorded()
+            # File I/O + analysis over the whole feedback window — keep it
+            # off the event loop so it can't stall other requests.
+            await asyncio.to_thread(get_learning_agent().on_run_recorded)
         except Exception as exc:
             self._log(state, "LEARNING WARN", str(exc)[:200], "non-fatal", "warn")
 

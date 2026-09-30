@@ -12,7 +12,7 @@ Each finding says how it was verified:
 Line numbers are as of commit `6f8904c` plus the uncommitted scan fixes
 (`calibration.py`, `semantic.py`, `planner_agent/__init__.py`).
 
-**Nothing below has been fixed yet.**
+**Status (2026-09-30): all findings below have been addressed.** See [LOGIC_FIXES_LOG.md](LOGIC_FIXES_LOG.md) for what changed per finding, how it was verified, and what remains a known limit.
 
 ## High
 

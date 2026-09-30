@@ -134,36 +134,40 @@ class StructuralValidator:
 
         for s in plan.get("stages", []):
             sname = s.get("name", "?")
-            refs = set()
 
+            def _check(refs, where):
+                for r in sorted(refs):
+                    if r not in known:
+                        violations.append(f"stage '{sname}' references unknown column '{r}' ({where})")
+
+            # Checked in execution order (transforms → filter → aggregation):
+            # a transform may only use columns that exist BEFORE it, and the
+            # filter can't see aggregation aliases, which only exist after it.
             for t in s.get("transformations", []) or []:
                 if not isinstance(t, str):
                     continue
                 parts = _ASSIGN.split(t, maxsplit=1)
                 if len(parts) == 2:
                     created, rhs = parts[0].strip(), parts[1]
-                    refs |= self._refs_in_expr(rhs)
+                    _check(self._refs_in_expr(rhs), "transformation")
                     if created:
                         known.add(created)        # LHS is a new column, not a ref
                 else:
-                    refs |= self._refs_in_expr(t)
+                    _check(self._refs_in_expr(t), "transformation")
 
-            refs |= self._refs_in_expr(s.get("filter_condition"))
+            _check(self._refs_in_expr(s.get("filter_condition")), "filter")
 
             agg = s.get("aggregation")
             if isinstance(agg, dict):
-                for g in agg.get("group_by", []) or []:
-                    refs.add(g)
+                agg_refs = set(agg.get("group_by", []) or [])
                 for a in agg.get("aggregations", []) or []:
                     col = a.get("column")
                     if col and col != "*":
-                        refs.add(col)
+                        agg_refs.add(col)
+                _check(agg_refs, "aggregation")
+                for a in agg.get("aggregations", []) or []:
                     if a.get("alias"):
                         known.add(a["alias"])     # alias creates a column
-
-            for r in sorted(refs):
-                if r not in known:
-                    violations.append(f"stage '{sname}' references unknown column '{r}'")
 
             # An aggregation collapses the frame: only the group_by columns,
             # the aggregation aliases, and the re-added processed_time survive

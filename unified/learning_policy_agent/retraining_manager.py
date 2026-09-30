@@ -43,6 +43,7 @@ _PERF_AGENT_DIR = os.path.join(_UNIFIED_DIR, "performance_prediction_agent")
 _PERF_MODELS_DIR = os.path.join(_PERF_AGENT_DIR, "models")
 _PERF_METRICS = os.path.join(_PERF_MODELS_DIR, "metrics.json")
 _REAL_RUNS_CSV = os.path.join(_PERF_AGENT_DIR, "data", "real_runs.csv")
+_HOLDOUT_CSV = os.path.join(_PERF_AGENT_DIR, "data", "holdout_test.csv")
 _STATE_PATH = os.path.join(_AGENT_DIR, "data", "retrain_state.json")
 
 
@@ -196,6 +197,32 @@ class RetrainingManager:
                     pass
         return None
 
+    def _old_model_mae(self, version_id: Optional[str]) -> Optional[float]:
+        """MAE of the pre-retrain (snapshotted) duration model on the NEW
+        held-out set that run_training.py just wrote — so old vs new is
+        measured on identical rows. None if the old model can't be scored
+        there (missing, or trained on a different feature set); then there
+        is no fair comparison and the new model is kept."""
+        if not version_id or not os.path.exists(_HOLDOUT_CSV):
+            return None
+        path = os.path.join(self.safety.versions_dir, version_id,
+                            os.path.basename(_PERF_MODELS_DIR), "duration_regressor.pkl")
+        try:
+            import joblib
+            import numpy as np
+            import pandas as pd
+
+            old = joblib.load(path)
+            data = pd.read_csv(_HOLDOUT_CSV)
+            y = data.pop("actual_duration_s").to_numpy()
+            if getattr(old, "n_features_in_", data.shape[1]) != data.shape[1]:
+                return None
+            pred = np.expm1(old.predict(data))
+            return float(np.mean(np.abs(pred - y)))
+        except Exception as exc:
+            print(f"[Retrain] old-model scoring skipped: {exc}")
+            return None
+
     def retrain_async(self, records: List[Dict], on_done=None) -> Dict:
         """Kick off retraining in a background thread (never blocks a run)."""
         self._clear_stale_lock_if_any()
@@ -247,9 +274,15 @@ class RetrainingManager:
                 result["stderr_tail"] = (proc.stderr or "")[-2000:]
                 raise RuntimeError("run_training.py exited non-zero")
 
-            # 4. compare on held-out metrics; deploy only if better
+            # 4. compare on held-out metrics; deploy only if better.
+            #    Both models are scored on the SAME new held-out rows; the
+            #    old metrics.json MAE came from a different test set.
             after_mae = self._extract_mae(self._read_perf_metrics())
             result["mae_after"] = after_mae
+            old_on_new = self._old_model_mae(version_id)
+            result["mae_before_stored"] = before_mae
+            before_mae = old_on_new
+            result["mae_before"] = before_mae
 
             if before_mae is not None and after_mae is not None and after_mae > before_mae:
                 if version_id:
