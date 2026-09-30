@@ -207,6 +207,12 @@ the run at every phase change, and Run Insights reads the live state. The data f
 kept in IndexedDB, so it survives a refresh. Details in `LOGIC_FIXES_LOG.md` →
 Stage 14.1.
 
+## 13. Redesign part 3 — guided "New pipeline" flow (stage 15)
+
+New `/new` page: Data → Describe → Review → Run → Results, built on the shared state
+and the flow diagrams, with prompt ideas that use the dataset's own columns. Details
+in `LOGIC_FIXES_LOG.md` → Stage 15.
+
 ## Mistakes and dead ends (honest list)
 
 | What happened | Impact | Resolution |

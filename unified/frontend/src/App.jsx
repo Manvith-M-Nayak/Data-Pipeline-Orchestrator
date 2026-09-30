@@ -2,7 +2,7 @@ import React, { useEffect, useState, Suspense, lazy } from "react";
 import { BrowserRouter, Routes, Route, NavLink, useLocation } from "react-router-dom";
 import {
   LayoutGrid, Brain, Zap, Activity, GitBranch, Cpu, RefreshCw, Gauge,
-  CircleDollarSign, AlertTriangle, BarChart3, Moon, Sun, Workflow,
+  CircleDollarSign, AlertTriangle, BarChart3, Moon, Sun, Workflow, Plus,
 } from "lucide-react";
 import { monitor, health } from "./api.js";
 import { AppProvider, useAppContext } from "./AppContext.jsx";
@@ -12,6 +12,7 @@ import { Button, Dot, Spinner } from "./ui/components.jsx";
 
 // Route-level code splitting — each page ships in its own chunk.
 const HomePage    = lazy(() => import("./pages/HomePage.jsx"));
+const NewPipeline = lazy(() => import("./pages/NewPipeline.jsx"));
 const PlannerTab  = lazy(() => import("./pages/PlannerTab.jsx"));
 const ExecutorTab = lazy(() => import("./pages/ExecutorTab.jsx"));
 const MonitorTab  = lazy(() => import("./pages/MonitorTab.jsx"));
@@ -25,6 +26,7 @@ const RunInsights = lazy(() => import("./pages/RunInsights.jsx"));
 const NAV = [
   { group: "Workspace", items: [
     { to: "/",          label: "Overview",        icon: LayoutGrid, element: <HomePage /> },
+    { to: "/new",       label: "New pipeline",    icon: Plus,       element: <NewPipeline /> },
   ]},
   { group: "Build", items: [
     { to: "/planner",   label: "Planner",         icon: Brain,      element: <PlannerTab /> },

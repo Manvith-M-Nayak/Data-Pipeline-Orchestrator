@@ -212,3 +212,71 @@ textarea.input { height: auto; padding: 10px 12px; line-height: 1.55; resize: ve
 
 .stack { display: flex; flex-direction: column; }
 .row   { display: flex; align-items: center; }
+
+/* ── guided flow (New pipeline) ────────────────────────────────────────────── */
+.stepper { display: flex; align-items: center; gap: 0; margin: 4px 0 26px; }
+.step {
+  display: flex; align-items: center; gap: 10px;
+  background: none; border: 0; padding: 0; cursor: default; text-align: left;
+}
+.step.reachable { cursor: pointer; }
+.step-num {
+  width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0;
+  display: grid; place-items: center; font-size: 12px; font-weight: 600;
+  border: 1.5px solid var(--border-strong); color: var(--text-3); background: var(--surface);
+  transition: all 0.15s;
+}
+.step.done .step-num    { background: var(--ok-soft); border-color: var(--ok-line); color: var(--ok); }
+.step.current .step-num { background: var(--text); border-color: var(--text); color: var(--bg); }
+.step-text  { line-height: 1.25; }
+.step-label { font-size: 13px; font-weight: 500; color: var(--text-3); }
+.step.current .step-label, .step.done .step-label { color: var(--text); }
+.step-hint  { font-size: 11.5px; color: var(--text-4); }
+.step.reachable:hover .step-label { text-decoration: underline; text-underline-offset: 3px; }
+.step-line { flex: 1; height: 1.5px; background: var(--border); margin: 0 12px; min-width: 16px; }
+.step-line.done { background: var(--ok-line); }
+@media (max-width: 900px) { .step-hint, .step-label { display: none; } }
+
+.dropzone {
+  border: 1.5px dashed var(--border-strong); border-radius: var(--radius-lg);
+  padding: 44px 20px; text-align: center; cursor: pointer;
+  background: var(--surface); transition: border-color 0.15s, background 0.15s;
+}
+.dropzone:hover, .dropzone.over { border-color: var(--accent); background: var(--accent-soft); }
+.dropzone-icon {
+  width: 44px; height: 44px; border-radius: 12px; margin: 0 auto 14px;
+  display: grid; place-items: center; background: var(--surface-2); border: 1px solid var(--border); color: var(--text-3);
+}
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px;
+  border: 1px solid var(--border); border-radius: 7px; background: var(--surface);
+  font-size: 12.5px; color: var(--text-2);
+}
+.chip .mono { color: var(--text); }
+.chip small { color: var(--text-4); font-size: 11px; }
+button.chip { cursor: pointer; text-align: left; height: auto; min-height: 30px; padding: 6px 10px; }
+button.chip:hover { border-color: var(--accent-line); background: var(--accent-soft); color: var(--text); }
+
+.wizard-foot {
+  display: flex; align-items: center; gap: 10px; margin-top: 18px;
+}
+.wizard-foot .spacer { flex: 1; }
+
+.preview-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.preview-table th, .preview-table td {
+  padding: 7px 10px; border-bottom: 1px solid var(--divider); text-align: left; white-space: nowrap;
+}
+.preview-table th { color: var(--text-3); font-weight: 500; font-family: var(--font-mono); font-size: 12px; }
+.preview-table td { color: var(--text-2); font-family: var(--font-mono); font-size: 12px; }
+
+.big-status {
+  display: flex; align-items: center; gap: 14px; padding: 18px 20px;
+  border-radius: var(--radius-lg); border: 1px solid;
+}
+.big-status .icon {
+  width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; flex-shrink: 0;
+}
+.describe-grid { grid-template-columns: minmax(0, 1fr) 300px; align-items: start; }
+@media (max-width: 900px) { .describe-grid { grid-template-columns: 1fr; } }

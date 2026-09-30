@@ -26,6 +26,7 @@ records:
 | 13.1 | Text contrast; Executor tab follows runs started in the Central Manager | user request + 1 bug | Done |
 | 14 | Redesign 2/4: pipeline flow + agent flow diagrams (React Flow), live run status | feature (user request) | Done |
 | 14.1 | Reload consistency: one shared run store, live state everywhere, data file survives refresh | bugs (user report) | Done |
+| 15 | Redesign 3/4: guided "New pipeline" flow (Data → Describe → Review → Run → Results) | feature (user request) | Done |
 
 ---
 
@@ -990,4 +991,42 @@ other."
 - **Cleanup:** the test file stored in IndexedDB was deleted afterwards, and the test `run_id` was cleared.
 
 **Needs a backend restart** (unless it runs with `--reload`) for the phase-change saves and the live-state reads in Run Insights.
+
+
+## Stage 15 — Redesign, part 3: guided "New pipeline" flow
+
+A new page, `/new` ("New pipeline", second item in the sidebar, plus a button on the
+Overview), walks a first-time user from a file to a finished run in five steps:
+
+| Step | What it does |
+|---|---|
+| **1. Data** | Drop or choose a CSV/JSON file. Shows the detected schema: row and column counts, format, size, every column with its type, and the first 5 rows. Choosing a file clears any old plan (a plan belongs to the data it was designed for). |
+| **2. Describe** | Plain-English request, plus options: batch/streaming, single or multiple streaming stages, number of containers. While the planner works, it shows elapsed time and what is happening (designing, then self-checking). |
+| **3. Review** | The designed pipeline as the pipeline flow diagram, the planner's reasoning, the self-check (verified, or the structural/intent problems it could not fix), and the starting resources, noting that the Resource and Cost agents refine them. Then Run, or "Run once (seed data)" for streaming plans. |
+| **4. Run** | Current step, elapsed time and retries, plus the live agent flow and pipeline flow. Moves to Results by itself when the run ends. |
+| **5. Results** | Success or failure banner with the output container and Download output, or the error. Stat cards for duration vs predicted, stages completed, estimated cost and output checks, then the final diagrams. Links to Run Insights, "Change the request" (after a failure) and "Start another pipeline". |
+
+### Design decisions
+
+- **No state of its own.** Every step reads and writes the shared `AppContext` (data file, schema, prompt, plan, run), so the Planner, Central Manager and Executor pages always show the same thing. A run started here has origin `wizard`.
+- **The current step is derived from that state,** so a reload lands on the right step: a guided run in progress goes to Run, a finished one to Results, a plan to Review, a file to Describe. Clicking a completed step goes back. While a run is in progress the other steps are locked.
+- **Prompt ideas use the dataset's own columns.** The sample rows decide each column's role: numeric 0/1 columns are flags (filters), other numbers are measures, and text columns with repeated values are group keys. *First version mistake:* on the zoo data it suggested "Total hair per animal_name", which sums a 0/1 flag per unique name. The rewrite suggests "Keep only rows where hair is 1 …" and "Average legs and count rows for each hair".
+- **UI:** the new step indicator, drop zone, column chips and preview-table styles live in `ui/ui.css`; the page is built from the shared components; the options column stacks below 900 px.
+
+### Verification
+
+- **Lint and build:** ESLint reports 0 problems, and `vite build` passes (page chunk 7.3 KB gzipped).
+- **Browser (dark theme), real backend and real planner**, with a 10-row zoo sample:
+  - **Data:** 17 columns, types and preview shown.
+  - **Describe:** the new column-aware ideas.
+  - **Design:** the real planner produced ingest copy → notebook `avg(legs), count(*)` by `hair`, self-check "verified".
+  - **Review:** it rendered as a graph.
+- **Run and Results:** simulated by stubbing `POST /manager/run`, `/runs` and `/status`, so no Azure job was started. Pre-checks showed Resource, Performance and Cost running; executing showed the notebook stage running. On completion the page moved to Results with "Your pipeline ran successfully", duration 57 s vs predicted 2 m, 2/2 stages, $0.0318 and "Passed".
+- **Test-harness mistake (mine), and how it was fixed.** I backed up the browser's saved state into the test tab's `sessionStorage`; that tab closed before the restore, so the backup was lost. Restored instead:
+  - **Data file:** the stored file set back to the real `data/zv.csv` (101 rows) as "zv.csv";
+  - **Schema:** re-detected from that file;
+  - **Prompt:** the previous one, "filter animals that are predators";
+  - **Plan:** redesigned from that prompt by the real planner. It has the same shape as before (ingest copy → notebook `predator = 1`), verified, but it is a new plan, not the byte-identical old one.
+  - **Run pointer:** cleared.
+- **Observed, not a bug:** with 2 containers the planner's notebook reads and writes the same container. Batch runs purge every container first (`executor.purge_container`), so old output cannot be re-read. The plan's reasoning text said "3 containers", which is cosmetic.
 

@@ -4,7 +4,7 @@ import { monitor, connectWS } from "../api.js";
 import { useAppContext, isLive } from "../AppContext.jsx";
 import {
   Activity, Brain, Zap, AlertTriangle, CheckCircle,
-  Clock, ArrowRight, XCircle, RefreshCw,
+  Clock, ArrowRight, XCircle, RefreshCw, Plus,
 } from "lucide-react";
 
 const S = {
@@ -156,6 +156,9 @@ export default function HomePage() {
           </span>
           <button style={S.refreshBtn} onClick={loadSummary}>
             <RefreshCw size={12} /> Refresh
+          </button>
+          <button className="btn btn-primary btn-sm" onClick={() => navigate("/new")}>
+            <Plus size={13} /> New pipeline
           </button>
         </div>
       </div>
