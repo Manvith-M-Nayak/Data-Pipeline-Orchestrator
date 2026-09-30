@@ -219,6 +219,13 @@ Overview, the four Monitor tabs and the Resource, Performance and Cost agent pag
 are rebuilt on the shared components. Cancelling an ADF run now needs a second click.
 Details in `LOGIC_FIXES_LOG.md` → Stage 16.
 
+## 15. Redesign part 4b — working pages rebuilt (stage 17), redesign complete
+
+The Planner, Central Manager, Executor, Run Insights and streaming console are rebuilt
+on the shared components, with their logic unchanged. The whole frontend is now themed
+through tokens, with no per-page style objects left. Details in `LOGIC_FIXES_LOG.md` →
+Stage 17.
+
 ## Mistakes and dead ends (honest list)
 
 | What happened | Impact | Resolution |

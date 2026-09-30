@@ -1,53 +1,16 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
+import {
+  Activity, ArrowLeft, BarChart3, Brain, CheckCircle2, ChevronRight, CircleDollarSign, Clock, Cpu,
+  Download, GitBranch, RefreshCw, Shield, ShieldCheck, TrendingUp, XCircle, Zap,
+} from "lucide-react";
 import { useAppContext, isLive } from "../AppContext.jsx";
 import { manager, executor } from "../api.js";
 import AgentFlow from "../flows/AgentFlow.jsx";
 import PipelineFlow from "../flows/PipelineFlow.jsx";
-import {
-  Activity, Brain, Zap, Shield, ShieldCheck, Cpu, TrendingUp,
-  DollarSign, Clock, ChevronRight, AlertTriangle,
-  CheckCircle, XCircle, RefreshCw, Download, GitBranch,
-} from "lucide-react";
+import { Alert, Badge, Button, Card, Empty, KV, PageHeader, Spinner, Stat } from "../ui/components.jsx";
 
-const S = {
-  page:   { maxWidth: 1100, margin: "0 auto" },
-  title:  { fontSize: 22, fontWeight: 700, marginBottom: 4, color: "var(--text)" },
-  sub:    { fontSize: 13, color: "var(--text-3)", marginBottom: 24 },
-  grid4:  { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 20 },
-  grid3:  { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 20 },
-  grid2:  { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 20 },
-  card:   { background: "var(--surface)", borderRadius: 14, padding: 20, border: "1px solid var(--border)", marginBottom: 14 },
-  cardHdr:{ fontSize: 13, fontWeight: 700, color: "var(--text)", marginBottom: 14, display: "flex", alignItems: "center", gap: 8 },
-  statVal:{ fontSize: 30, fontWeight: 800, color: "var(--text)", lineHeight: 1, marginBottom: 3 },
-  statSub:{ fontSize: 11, color: "var(--text-3)" },
-  kv:     { display: "flex", flexDirection: "column", gap: 6 },
-  kvRow:  { display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--text-2)", borderBottom: "1px solid var(--divider)", paddingBottom: 5 },
-  kvVal:  { color: "var(--text)", fontWeight: 600 },
-  th:     { textAlign: "left", padding: "8px 10px", fontSize: 11, color: "var(--text-3)", borderBottom: "1px solid var(--border)", textTransform: "uppercase", letterSpacing: 0.5 },
-  td:     { padding: "8px 10px", fontSize: 12, borderBottom: "1px solid var(--divider)", verticalAlign: "top" },
-  decisionRow: (sev) => ({
-    display: "flex", gap: 8, padding: "6px 8px", borderBottom: "1px solid var(--divider)", alignItems: "flex-start",
-    background: sev === "error" ? "var(--bad-soft)" : sev === "warn" ? "var(--warn-soft)" : "transparent",
-  }),
-  tag: (sev) => ({
-    fontSize: 11, fontWeight: 700, borderRadius: 4, padding: "2px 5px", flexShrink: 0,
-    background: sev === "ok" ? "var(--ok-soft)" : sev === "error" ? "var(--bad-soft)" : sev === "warn" ? "var(--warn-soft)" : "var(--surface)",
-    color: sev === "ok" ? "var(--ok)" : sev === "error" ? "var(--bad)" : sev === "warn" ? "var(--warn)" : "var(--text-3)",
-  }),
-  chip: (ok) => ({
-    display: "inline-flex", alignItems: "center", gap: 4,
-    padding: "2px 8px", borderRadius: 20, fontSize: 11, fontWeight: 600,
-    background: ok ? "var(--ok-soft)" : ok === false ? "var(--bad-soft)" : "var(--surface)",
-    color: ok ? "var(--ok)" : ok === false ? "var(--bad)" : "var(--text-2)",
-  }),
-  sectionHdr: { fontSize: 11, fontWeight: 700, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8, marginTop: 16 },
-  detailCard: { background: "var(--surface-2)", borderRadius: 10, padding: 14, border: "1px solid var(--divider)", marginBottom: 10 },
-  btnPrimary: {
-    padding: "8px 16px", background: "var(--accent)", color: "var(--accent-fg)", border: "none",
-    borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 700,
-    display: "inline-flex", alignItems: "center", gap: 6,
-  },
-};
+const SEV_TONE = { ok: "ok", error: "bad", warn: "warn", info: "neutral" };
+const RUN_TONE = (s) => (s === "completed" ? "ok" : s === "failed" ? "bad" : "warn");
 
 // How this run compares with the pipeline's own history (learned per pipeline,
 // no fixed time limit). Older runs saved before this existed show "—".
@@ -57,87 +20,61 @@ function usualDuration(p) {
     return { label: `still learning (${p.expected_duration_runs || 0}/3 runs)`, ok: true };
   }
   return p.slower_than_usual
-    ? { label: `⚠ slower (usually ≤${Math.round(p.expected_duration_s)}s)`, ok: false }
-    : { label: `✔ within usual (≤${Math.round(p.expected_duration_s)}s)`, ok: true };
+    ? { label: `slower (usually ≤${Math.round(p.expected_duration_s)}s)`, ok: false }
+    : { label: `within usual (≤${Math.round(p.expected_duration_s)}s)`, ok: true };
 }
 
-function StatCard({ icon: Icon, color, label, value, sub }) {
-  return (
-    <div style={S.card}>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
-        <Icon size={14} color={color} />
-        <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: 0.5 }}>{label}</span>
-      </div>
-      <div style={{ ...S.statVal, color: color || "var(--text)" }}>{value}</div>
-      {sub && <div style={S.statSub}>{sub}</div>}
-    </div>
-  );
+// ISO timestamp → local, readable ("30 Sept 2026, 15:01:23").
+function fmtWhen(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return isNaN(d) ? iso : d.toLocaleString(undefined, { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-function AgentHealthCard({ title, icon: Icon, color, metrics }) {
+function metricValue(k, v) {
+  if (typeof v === "number" && k.includes("usd")) return `$${v.toFixed(5)}`;
+  if (typeof v === "number" && (k.includes("rate") || k.includes("pct"))) return `${v}%`;
+  return String(v);
+}
+
+function AgentHealthCard({ title, icon, metrics }) {
   const entries = Object.entries(metrics).filter(([, v]) => v !== null && v !== undefined);
-  if (entries.length === 0) return null;
+  if (!entries.length) return null;
   return (
-    <div style={S.detailCard}>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
-        <Icon size={13} color={color} />
-        <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text)" }}>{title}</span>
-      </div>
-      <div style={S.kv}>
-        {entries.map(([k, v]) => (
-          <div key={k} style={S.kvRow}>
-            <span>{k.replace(/_/g, " ")}</span>
-            <span style={S.kvVal}>
-              {typeof v === "number" && k.includes("usd") ? `$${v.toFixed(5)}` :
-               typeof v === "number" && k.includes("rate") ? `${v}%` :
-               typeof v === "number" && k.includes("pct") ? `${v}%` :
-               String(v)}
-            </span>
-          </div>
-        ))}
-      </div>
-    </div>
+    <Card title={title} icon={icon}>
+      <KV items={entries.map(([k, v]) => [k.replace(/_/g, " "), metricValue(k, v)])} />
+    </Card>
   );
 }
 
 function DecisionLog({ decisions }) {
   const [expanded, setExpanded] = useState(false);
+  if (!decisions.length) return <div className="muted" style={{ fontSize: 13 }}>No decisions recorded.</div>;
   const shown = expanded ? decisions : decisions.slice(0, 15);
-
-  if (!decisions.length) {
-    return <div style={{ fontSize: 12, color: "var(--text-4)", padding: "8px 0" }}>No decisions recorded.</div>;
-  }
-
   return (
-    <div>
-      <div style={{ borderRadius: 8, border: "1px solid var(--divider)", overflow: "hidden" }}>
+    <>
+      <div className="list">
         {shown.map((d, i) => (
-          <div key={i} style={S.decisionRow(d.severity)}>
-            <span style={{ fontSize: 11, color: "var(--text-4)", flexShrink: 0, paddingTop: 2, minWidth: 64 }}>
-              {d.ts?.slice(11, 19)}
-            </span>
-            <span style={S.tag(d.severity)}>{d.severity?.toUpperCase()}</span>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 11, color: "var(--text)", fontWeight: 600 }}>{d.action}</div>
-              <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 1 }}>
-                {d.reason}{d.outcome ? <span style={{ color: "var(--text-2)" }}> → {d.outcome}</span> : null}
-              </div>
+          <div key={i} className="list-row" style={{ alignItems: "flex-start", padding: "8px 0" }}>
+            <span className="mono faint" style={{ fontSize: 11.5, width: 58, flexShrink: 0, paddingTop: 2 }}>{d.ts?.slice(11, 19)}</span>
+            <Badge tone={SEV_TONE[d.severity] || "neutral"} style={{ flexShrink: 0 }}>{d.severity}</Badge>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ color: "var(--text)", fontWeight: 500, fontSize: 12.5 }}>{d.action}</div>
+              <div className="muted" style={{ fontSize: 12 }}>{d.reason}{d.outcome ? <span style={{ color: "var(--text-2)" }}> → {d.outcome}</span> : null}</div>
             </div>
           </div>
         ))}
       </div>
       {decisions.length > 15 && (
-        <button
-          onClick={() => setExpanded(!expanded)}
-          style={{ background: "none", border: "none", color: "var(--accent)", cursor: "pointer", fontSize: 11, padding: "6px 0", fontWeight: 600 }}
-        >
+        <button className="link" style={{ fontSize: 12.5, marginTop: 8 }} onClick={() => setExpanded(!expanded)}>
           {expanded ? "Show less" : `Show all ${decisions.length} entries`}
         </button>
       )}
-    </div>
+    </>
   );
 }
 
+// ── One run ───────────────────────────────────────────────────────────────────
 function RunDetail({ runId, onBack }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -145,7 +82,7 @@ function RunDetail({ runId, onBack }) {
   const [downloadError, setDownloadError] = useState("");
 
   // Loaded once; re-fetched every few seconds while the run is still in
-  // progress, so this view never lags behind the Central Manager tab.
+  // progress, so this view never lags behind the Central Manager page.
   const live = !!data && isLive(data.status);
   useEffect(() => {
     let alive = true;
@@ -165,342 +102,201 @@ function RunDetail({ runId, onBack }) {
     return () => clearInterval(t);
   }, [live, runId]);
 
-  if (loading) return <div style={{ color: "var(--text-3)", textAlign: "center", padding: 40 }}>Loading run details…</div>;
-  if (error) return <div style={{ color: "var(--bad)", textAlign: "center", padding: 40 }}>Error: {error}</div>;
+  const back = <Button size="sm" variant="ghost" icon={ArrowLeft} onClick={onBack}>All runs</Button>;
+  if (loading) return <div>{back}<div className="row muted" style={{ gap: 8, marginTop: 16 }}><Spinner /> Loading run…</div></div>;
+  if (error) return <div>{back}<Alert tone="bad" style={{ marginTop: 16 }}>{error}</Alert></div>;
   if (!data) return null;
 
   const fb = data.feedback || {};
   const ma = data.monitor_analysis || {};
-
+  const perf = data.performance_prediction;
+  const usual = usualDuration(perf);
+  const sink = data.executor_result?.sink_container;
 
   return (
     <div>
-      {/* Back button + header */}
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
-        <button onClick={onBack} style={{ ...S.btnPrimary, background: "transparent", color: "var(--text-3)", border: "1px solid var(--border)" }}>
-          ← Back to overview
-        </button>
-        <div>
-          <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text)" }}>
-            Run <span style={{ fontFamily: "monospace" }}>{runId.slice(0, 8)}</span>
-            <span style={{ ...S.chip(data.status === "completed"), marginLeft: 10 }}>{data.status}</span>
-          </div>
-          <div style={{ fontSize: 11, color: "var(--text-3)" }}>
-            {data.started_at} {data.completed_at ? `→ ${data.completed_at}` : ""}
-          </div>
-        </div>
-      </div>
+      <div style={{ marginBottom: 14 }}>{back}</div>
+      <PageHeader
+        eyebrow="Run insights" icon={BarChart3}
+        title={<>Run <span className="mono">{runId.slice(0, 8)}</span> <Badge tone={RUN_TONE(data.status)} dot style={{ verticalAlign: 4, marginLeft: 6 }}>{data.status}</Badge></>}
+        description={`${fmtWhen(data.started_at)}${data.completed_at ? ` → ${fmtWhen(data.completed_at)}` : ""}${data.started_at && data.completed_at ? ` · ${Math.round((new Date(data.completed_at) - new Date(data.started_at)) / 1000)}s` : ""}`}
+        actions={sink ? (
+          <Button variant="primary" icon={Download} onClick={() => {
+            setDownloadError("");
+            // via fetch so the x-api-key header is sent when auth is on
+            executor.download(sink).catch((err) => setDownloadError(err.message));
+          }}>Download output</Button>
+        ) : null}
+      />
 
-      {data.error && (
-        <div style={{ background: "var(--bad-soft)", borderRadius: 8, padding: "10px 14px", marginBottom: 14, color: "var(--bad)", fontSize: 12, whiteSpace: "pre-wrap" }}>
-          {data.error}
-        </div>
-      )}
+      {downloadError && <Alert tone="bad" style={{ marginBottom: 14 }}>{downloadError}</Alert>}
+      {data.error && <Alert tone="bad" title="The run failed" style={{ marginBottom: 14 }}><span style={{ whiteSpace: "pre-wrap" }}>{data.error}</span></Alert>}
+      {data.user_request && <Alert tone="neutral" title="Request" style={{ marginBottom: 14 }}>“{data.user_request}”</Alert>}
 
-      {/* Phase timeline */}
-      {/* How the run moved through the agents, and where it stopped */}
-      <div style={S.card}>
-        <div style={S.cardHdr}><Activity size={13} color="var(--accent)" />Orchestration</div>
-        <AgentFlow runState={data} hasPlan />
-      </div>
+      <div className="stack" style={{ gap: 14 }}>
+        <Card title="Orchestration" icon={Activity} subtitle="How the run moved through the agents, and where it stopped">
+          <AgentFlow runState={data} hasPlan />
+        </Card>
+        {data.plan?.stages?.length > 0 && (
+          <Card title="Pipeline" icon={GitBranch}>
+            <PipelineFlow plan={data.plan} runState={data} />
+          </Card>
+        )}
 
-      {data.plan?.stages?.length > 0 && (
-        <div style={S.card}>
-          <div style={S.cardHdr}><GitBranch size={13} color="var(--violet)" />Pipeline</div>
-          <PipelineFlow plan={data.plan} runState={data} />
-        </div>
-      )}
+        <div className="grid grid-2" style={{ alignItems: "start" }}>
+          <div className="stack" style={{ gap: 14 }}>
+            {data.validation && (
+              <Card title="Plan validation" icon={Shield}
+                actions={<Badge tone={data.validation.ok ? "ok" : "bad"} dot>{data.validation.ok ? "Passed" : "Failed"}</Badge>}>
+                {(data.validation.issues || []).map((x, i) => <div key={`i${i}`} style={{ color: "var(--bad)", fontSize: 12.5 }}>✗ {x}</div>)}
+                {(data.validation.warnings || []).map((w, i) => <div key={`w${i}`} style={{ color: "var(--warn)", fontSize: 12.5 }}>! {w}</div>)}
+                {!(data.validation.issues || []).length && !(data.validation.warnings || []).length && <div className="muted" style={{ fontSize: 13 }}>No issues or warnings.</div>}
+              </Card>
+            )}
 
-      <div style={S.grid2}>
-        {/* Left column: agent results */}
-        <div>
-          {/* Validation */}
-          {data.validation && (
-            <div style={S.detailCard}>
-              <div style={{ ...S.sectionHdr, marginTop: 0 }}>Plan Validation</div>
-              <span style={S.chip(data.validation.ok)}>{data.validation.ok ? "PASSED" : "FAILED"}</span>
-              {data.validation.issues?.length > 0 && (
-                <div style={{ marginTop: 8 }}>
-                  {data.validation.issues.map((issue, i) => (
-                    <div key={i} style={{ display: "flex", gap: 6, fontSize: 11, color: "var(--bad)", marginBottom: 3 }}>
-                      <XCircle size={10} style={{ flexShrink: 0, marginTop: 2 }} />{issue}
+            {data.plan_assurance?.summary && (
+              <Card title="Plan checks" icon={ShieldCheck} subtitle={data.plan_assurance.summary}
+                actions={<Badge tone={data.plan_assurance.overall_status === "pass" ? "ok" : "bad"} dot>{data.plan_assurance.overall_status === "pass" ? "Passed" : "Rejected"}</Badge>}>
+                <div className="list">
+                  {(data.plan_assurance.structural_results || []).map((c, i) => (
+                    <div key={i} className="list-row">
+                      {c.passed ? <CheckCircle2 size={14} style={{ color: "var(--ok)" }} /> : <XCircle size={14} style={{ color: "var(--bad)" }} />}
+                      <span className="grow" style={{ color: "var(--text-2)" }}>{c.label}</span>
                     </div>
                   ))}
                 </div>
-              )}
-              {data.validation.warnings?.length > 0 && (
-                <div style={{ marginTop: 6 }}>
-                  {data.validation.warnings.map((w, i) => (
-                    <div key={i} style={{ display: "flex", gap: 6, fontSize: 11, color: "var(--warn)", marginBottom: 3 }}>
-                      <AlertTriangle size={10} style={{ flexShrink: 0, marginTop: 2 }} />{w}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Plan Assurance */}
-          {data.plan_assurance?.summary && (
-            <div style={S.detailCard}>
-              <div style={S.sectionHdr}>Plan Assurance (Pre-execution)</div>
-              <span style={S.chip(data.plan_assurance.overall_status === "pass")}>
-                {data.plan_assurance.overall_status === "pass" ? "PASSED" : "REJECTED"}
-              </span>
-              <div style={{ fontSize: 11, color: "var(--text-2)", marginTop: 6 }}>{data.plan_assurance.summary}</div>
-              {(data.plan_assurance.structural_results || []).map((c, i) => (
-                <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--text-2)", marginTop: 4 }}>
-                  <span>{c.label}</span>
-                  <span style={S.chip(c.passed)}>{c.passed ? "✔" : "✖"}</span>
-                </div>
-              ))}
-              {data.plan_assurance.semantic_result && (
-                <div style={{ marginTop: 8, padding: "6px 10px", background: "var(--surface-2)", borderRadius: 6, fontSize: 11, color: "var(--text-2)" }}>
-                  Semantic: {data.plan_assurance.semantic_result.flagged ? "⚠ flagged" : "✔ matches"} — {data.plan_assurance.semantic_result.reasoning}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Resource Prediction */}
-          {data.predictions?.stage_count && (
-            <div style={S.detailCard}>
-              <div style={S.sectionHdr}>Resource Prediction</div>
-              <div style={S.kv}>
-                <div style={S.kvRow}><span>File size</span><span style={S.kvVal}>{data.predictions.file_size_mb} MB</span></div>
-                <div style={S.kvRow}><span>Stages</span><span style={S.kvVal}>{data.predictions.stage_count}</span></div>
-                <div style={S.kvRow}><span>Complexity</span><span style={S.kvVal}>{data.predictions.complexity}</span></div>
-                <div style={S.kvRow}><span>Peak workers</span><span style={S.kvVal}>{data.predictions.suggested_workers}</span></div>
-                <div style={S.kvRow}><span>Est. duration</span><span style={S.kvVal}>~{data.predictions.estimated_duration_s}s</span></div>
-                <div style={S.kvRow}><span>Feasible</span><span style={S.kvVal}><span style={S.chip(data.resource_plan?.feasible ?? true)}>{data.resource_plan?.feasible !== false ? "Yes" : "No"}</span></span></div>
-              </div>
-              {/* Per-stage allocations */}
-              {(data.resource_plan?.allocations || []).length > 0 && (
-                <div style={{ marginTop: 8, borderTop: "1px solid var(--divider)", paddingTop: 8 }}>
-                  {data.resource_plan.allocations.map((a) => (
-                    <div key={a.stage_name} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--text-2)", padding: "3px 0" }}>
-                      <span style={{ color: "var(--text)", fontWeight: 600 }}>{a.stage_name}</span>
-                      <span>{a.stage_type === "notebook" ? `${a.workers}w · ${a.memory_gb}GB` : `${a.diu} DIU`} · ~{a.duration_s}s</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Performance Prediction */}
-          {data.performance_prediction?.outcome && (
-            <div style={S.detailCard}>
-              <div style={S.sectionHdr}>Performance Prediction</div>
-              <span style={S.chip(data.performance_prediction.outcome === "success")}>
-                {data.performance_prediction.outcome}
-              </span>
-              <div style={S.kv}>
-                <div style={S.kvRow}><span>Predicted total</span><span style={S.kvVal}>~{data.performance_prediction.predicted_total_s}s</span></div>
-                <div style={S.kvRow}><span>Bottleneck</span><span style={S.kvVal}>{data.performance_prediction.bottleneck_stage || "—"}</span></div>
-                <div style={S.kvRow}><span>Confidence</span><span style={S.kvVal}>{Math.round((data.performance_prediction.confidence || 0) * 100)}%</span></div>
-                <div style={S.kvRow}><span>vs usual duration</span><span style={S.kvVal}><span style={S.chip(usualDuration(data.performance_prediction).ok)}>{usualDuration(data.performance_prediction).label}</span></span></div>
-                {data.performance_prediction.prediction_source && (
-                  <div style={S.kvRow}><span>Source</span><span style={S.kvVal}>{data.performance_prediction.prediction_source}</span></div>
-                )}
-                {data.performance_prediction.learning_correction_applied && (
-                  <div style={S.kvRow}><span>Learning correction</span><span style={S.kvVal}>×{data.performance_prediction.learning_correction_applied}</span></div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Cost Estimation */}
-          {data.cost_estimate?.total_usd !== undefined && (
-            <div style={S.detailCard}>
-              <div style={S.sectionHdr}>Cost Estimation</div>
-              <div style={S.kv}>
-                <div style={S.kvRow}><span>ADF activities</span><span style={S.kvVal}>${data.cost_estimate.adf_activity_usd}</span></div>
-                <div style={S.kvRow}><span>Databricks</span><span style={S.kvVal}>${data.cost_estimate.databricks_usd}</span></div>
-                <div style={S.kvRow}><span>Storage</span><span style={S.kvVal}>${data.cost_estimate.storage_usd}</span></div>
-                <div style={{ ...S.kvRow, borderBottom: "none" }}>
-                  <span style={{ fontWeight: 700, color: "var(--text)" }}>Total</span>
-                  <span style={{ ...S.kvVal, color: data.cost_estimate.budget_ok ? "var(--ok)" : "var(--warn)" }}>${data.cost_estimate.total_usd}</span>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Cost Optimization */}
-          {data.cost_optimization?.estimated_cost && (
-            <div style={S.detailCard}>
-              <div style={S.sectionHdr}>Cost Optimization</div>
-              <div style={S.kv}>
-                <div style={S.kvRow}>
-                  <span>Optimized cost</span>
-                  <span style={S.kvVal}>${data.cost_optimization.estimated_cost.total_usd}</span>
-                </div>
-                {data.cost_optimization.cost_correction_applied && (
-                  <div style={S.kvRow}>
-                    <span>Learning correction</span>
-                    <span style={S.kvVal}>×{data.cost_optimization.cost_correction_applied}</span>
+                {data.plan_assurance.semantic_result && (
+                  <div className="muted" style={{ fontSize: 12.5, marginTop: 8 }}>
+                    Intent: {data.plan_assurance.semantic_result.flagged ? "flagged" : "matches"} — {data.plan_assurance.semantic_result.reasoning}
                   </div>
                 )}
-              </div>
-              {(data.cost_optimization.recommendations || []).length > 0 && (
-                <div style={{ marginTop: 8 }}>
-                  {data.cost_optimization.recommendations.map((r, i) => (
-                    <div key={i} style={{ display: "flex", gap: 6, fontSize: 11, color: "var(--text-2)", marginBottom: 3 }}>
-                      <DollarSign size={10} style={{ flexShrink: 0, marginTop: 2 }} />
-                      <span><b>{r.change}</b> — {r.estimated_saving}</span>
+              </Card>
+            )}
+
+            {data.predictions?.stage_count && (
+              <Card title="Resource prediction" icon={Cpu}
+                actions={<Badge tone={data.resource_plan?.feasible === false ? "bad" : "ok"}>{data.resource_plan?.feasible === false ? "infeasible" : "feasible"}</Badge>}>
+                <KV items={[
+                  ["File size", `${data.predictions.file_size_mb} MB`],
+                  ["Stages", data.predictions.stage_count],
+                  ["Complexity", data.predictions.complexity],
+                  ["Peak workers", data.predictions.suggested_workers],
+                  ["Estimated duration", `~${data.predictions.estimated_duration_s}s`],
+                ]} />
+                {(data.resource_plan?.allocations || []).length > 0 && (
+                  <div className="list" style={{ marginTop: 10 }}>
+                    {data.resource_plan.allocations.map((a) => (
+                      <div key={a.stage_name} className="list-row" style={{ fontSize: 12.5 }}>
+                        <span className="grow mono">{a.stage_name}</span>
+                        <span className="meta">{a.stage_type === "notebook" ? `${a.workers}w · ${a.memory_gb}GB` : `${a.diu} DIU`} · ~{a.duration_s}s</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Card>
+            )}
+
+            {perf?.outcome && (
+              <Card title="Performance prediction" icon={TrendingUp}
+                actions={<Badge tone={perf.outcome === "success" ? "ok" : perf.outcome === "failure" ? "bad" : "warn"}>{perf.outcome}</Badge>}>
+                <KV items={[
+                  ["Predicted total", `~${perf.predicted_total_s}s`],
+                  ["Bottleneck", perf.bottleneck_stage ? <span key="b" className="mono">{perf.bottleneck_stage}</span> : "—"],
+                  ["Confidence", `${Math.round((perf.confidence || 0) * 100)}%`],
+                  ["vs usual duration", <Badge key="u" tone={usual.ok ? "neutral" : "warn"}>{usual.label}</Badge>],
+                  perf.prediction_source ? ["Source", perf.prediction_source] : null,
+                  perf.learning_correction_applied ? ["Learning correction", `×${perf.learning_correction_applied}`] : null,
+                ]} />
+              </Card>
+            )}
+
+            {(data.cost_estimate?.total_usd !== undefined || data.cost_optimization?.estimated_cost) && (
+              <Card title="Cost" icon={CircleDollarSign}>
+                <KV items={[
+                  data.cost_estimate?.total_usd !== undefined ? ["Estimate (pre-checks)", `$${data.cost_estimate.total_usd}`] : null,
+                  data.cost_optimization?.estimated_cost ? ["Cost agent estimate", `$${data.cost_optimization.estimated_cost.total_usd}`] : null,
+                  data.cost_optimization?.cost_correction_applied ? ["Learned correction", `×${data.cost_optimization.cost_correction_applied}`] : null,
+                ]} />
+                {(data.cost_optimization?.recommendations || []).map((r, i) => (
+                  <div key={i} className="muted" style={{ fontSize: 12.5, marginTop: 6 }}>
+                    <CircleDollarSign size={11} style={{ verticalAlign: -1 }} /> <b style={{ color: "var(--text-2)" }}>{r.change}</b> — {r.estimated_saving}
+                  </div>
+                ))}
+              </Card>
+            )}
+          </div>
+
+          <div className="stack" style={{ gap: 14 }}>
+            {data.assurance && Object.keys(data.assurance).length > 0 && (
+              <Card title="Output checks" icon={ShieldCheck}
+                actions={<Badge tone={data.assurance.passed ? "ok" : "warn"} dot>{data.assurance.passed ? "Passed" : "Warnings"}</Badge>}>
+                <KV items={[
+                  data.assurance.actual_duration_s !== undefined ? ["Actual duration", `${data.assurance.actual_duration_s}s`] : null,
+                  data.assurance.predicted_duration_s !== undefined ? ["Predicted duration", `${data.assurance.predicted_duration_s}s`] : null,
+                  data.assurance.timing_ratio !== undefined ? ["Timing ratio", `${data.assurance.timing_ratio}×`] : null,
+                  data.assurance.retries_used !== undefined ? ["Retries", data.assurance.retries_used] : null,
+                ]} />
+              </Card>
+            )}
+
+            {fb.run_id && (
+              <Card title="Feedback record" icon={Brain} subtitle="What the learning loop recorded">
+                <KV items={[
+                  fb.actual_duration_s !== undefined ? ["Actual duration", `${fb.actual_duration_s}s`] : null,
+                  fb.predicted_duration_s !== undefined ? ["Predicted duration", `${fb.predicted_duration_s}s`] : null,
+                  fb.perf_predicted_total_s !== undefined ? ["Performance prediction", `${fb.perf_predicted_total_s}s`] : null,
+                  fb.estimated_cost_usd != null ? ["Estimated cost", `$${fb.estimated_cost_usd}`] : null,
+                  fb.actual_cost_usd != null ? ["Actual cost", `$${fb.actual_cost_usd}`] : null,
+                  fb.prediction_source ? ["Prediction source", fb.prediction_source] : null,
+                  fb.complexity ? ["Complexity", fb.complexity] : null,
+                ]} />
+              </Card>
+            )}
+
+            {ma.status_summary && (
+              <Card title="Monitor analysis" icon={Activity}
+                actions={ma.severity ? <Badge tone={ma.severity === "high" ? "bad" : ma.severity === "medium" ? "warn" : "ok"}>{ma.severity}</Badge> : null}>
+                <div style={{ fontSize: 13, color: "var(--text-2)" }}>{ma.status_summary}</div>
+                {ma.explanation && <div className="muted" style={{ fontSize: 12.5, marginTop: 6 }}>{ma.explanation}</div>}
+                {ma.root_cause && <div style={{ fontSize: 12.5, marginTop: 6, color: "var(--warn)" }}>Root cause: {ma.root_cause}</div>}
+              </Card>
+            )}
+
+            {data.parallelism?.execution_groups && (
+              <Card title="Parallelism" icon={GitBranch}
+                subtitle={data.parallelism.can_parallelize ? `${data.parallelism.parallel_groups} parallel group(s)` : "All sequential"}>
+                <div className="stack" style={{ gap: 6 }}>
+                  {data.parallelism.execution_groups.map((g, i) => (
+                    <div key={i} className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+                      <span className="faint" style={{ fontSize: 12, width: 28 }}>G{i + 1}</span>
+                      {g.map((n) => <Badge key={n} tone={g.length > 1 ? "violet" : "neutral"}>{n}</Badge>)}
                     </div>
                   ))}
                 </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Right column: assurance + feedback + logs */}
-        <div>
-          {/* Post-execution Assurance */}
-          {data.assurance && Object.keys(data.assurance).length > 0 && (
-            <div style={S.detailCard}>
-              <div style={{ ...S.sectionHdr, marginTop: 0 }}>Post-execution Assurance</div>
-              <span style={S.chip(data.assurance.passed)}>{data.assurance.passed ? "PASSED" : "WARNINGS"}</span>
-              <div style={S.kv}>
-                {data.assurance.actual_duration_s !== undefined && (
-                  <div style={S.kvRow}><span>Actual duration</span><span style={S.kvVal}>{data.assurance.actual_duration_s}s</span></div>
-                )}
-                {data.assurance.predicted_duration_s !== undefined && (
-                  <div style={S.kvRow}><span>Predicted duration</span><span style={S.kvVal}>{data.assurance.predicted_duration_s}s</span></div>
-                )}
-                {data.assurance.timing_ratio !== undefined && (
-                  <div style={S.kvRow}><span>Timing ratio</span><span style={S.kvVal}>{data.assurance.timing_ratio}×</span></div>
-                )}
-                {data.assurance.retries_used !== undefined && (
-                  <div style={S.kvRow}><span>Retries</span><span style={S.kvVal}>{data.assurance.retries_used}</span></div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Feedback Record */}
-          {fb.run_id && (
-            <div style={S.detailCard}>
-              <div style={S.sectionHdr}>Feedback Record</div>
-              <div style={S.kv}>
-                {fb.actual_duration_s !== undefined && (
-                  <div style={S.kvRow}><span>Actual duration</span><span style={S.kvVal}>{fb.actual_duration_s}s</span></div>
-                )}
-                {fb.predicted_duration_s !== undefined && (
-                  <div style={S.kvRow}><span>Predicted duration</span><span style={S.kvVal}>{fb.predicted_duration_s}s</span></div>
-                )}
-                {fb.perf_predicted_total_s !== undefined && (
-                  <div style={S.kvRow}><span>Perf predicted total</span><span style={S.kvVal}>{fb.perf_predicted_total_s}s</span></div>
-                )}
-                {fb.estimated_cost_usd !== undefined && fb.estimated_cost_usd !== null && (
-                  <div style={S.kvRow}><span>Estimated cost</span><span style={S.kvVal}>${fb.estimated_cost_usd}</span></div>
-                )}
-                {fb.actual_cost_usd !== undefined && fb.actual_cost_usd !== null && (
-                  <div style={S.kvRow}><span>Actual cost</span><span style={S.kvVal}>${fb.actual_cost_usd}</span></div>
-                )}
-                {fb.prediction_source && (
-                  <div style={S.kvRow}><span>Prediction source</span><span style={S.kvVal}>{fb.prediction_source}</span></div>
-                )}
-                {fb.complexity && (
-                  <div style={S.kvRow}><span>Complexity</span><span style={S.kvVal}>{fb.complexity}</span></div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Monitor Analysis */}
-          {ma.status_summary && (
-            <div style={S.detailCard}>
-              <div style={S.sectionHdr}>Monitor Analysis</div>
-              <div style={{ fontSize: 12, color: "var(--text-2)", marginBottom: 6 }}>{ma.status_summary}</div>
-              {ma.explanation && <div style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 6 }}>{ma.explanation}</div>}
-              {ma.root_cause && (
-                <div style={{ fontSize: 11, color: "var(--warn)", marginBottom: 4 }}>Root cause: {ma.root_cause}</div>
-              )}
-              {ma.severity && (
-                <span style={{ fontSize: 11, color: ma.severity === "high" ? "var(--orange)" : ma.severity === "medium" ? "var(--warn)" : "var(--ok)", fontWeight: 600 }}>
-                  Severity: {ma.severity}
-                </span>
-              )}
-            </div>
-          )}
-
-          {/* Parallelism */}
-          {data.parallelism?.execution_groups && (
-            <div style={S.detailCard}>
-              <div style={S.sectionHdr}>Parallelism</div>
-              <div style={{ fontSize: 11, color: "var(--text-2)", marginBottom: 6 }}>
-                {data.parallelism.can_parallelize
-                  ? `${data.parallelism.parallel_groups} parallel group(s)`
-                  : "All sequential"}
-              </div>
-              {data.parallelism.execution_groups.map((group, i) => (
-                <div key={i} style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 4 }}>
-                  <span style={{ fontSize: 11, color: "var(--text-4)", minWidth: 40 }}>G{i + 1}</span>
-                  {group.map((name) => (
-                    <span key={name} style={{
-                      padding: "1px 6px", borderRadius: 4, fontSize: 11,
-                      background: group.length > 1 ? "var(--violet-soft)" : "var(--surface)",
-                      color: group.length > 1 ? "var(--violet)" : "var(--text-3)",
-                    }}>{name}</span>
-                  ))}
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* User Request */}
-          {data.user_request && (
-            <div style={S.detailCard}>
-              <div style={S.sectionHdr}>User Request</div>
-              <div style={{ fontSize: 12, color: "var(--text-2)", fontStyle: "italic" }}>"{data.user_request}"</div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Full Decision Log */}
-      <div style={S.card}>
-        <div style={S.cardHdr}><Shield size={13} color="var(--accent)" />Decision Audit Log ({data.decisions?.length || 0} entries)</div>
-        <DecisionLog decisions={data.decisions || []} />
-      </div>
-
-      {/* Executor Result */}
-      {data.executor_result && (
-        <div style={S.card}>
-          <div style={S.cardHdr}><Zap size={13} color="var(--warn)" />Executor Result</div>
-          <div style={{ fontSize: 12, color: "var(--text-2)" }}>
-            Status: <span style={{ color: data.executor_result.status === "ok" ? "var(--ok)" : "var(--bad)" }}>{data.executor_result.status}</span>
-            {data.executor_result.stages?.length > 0 && (
-              <> · Stages: {data.executor_result.stages.join(" → ")}</>
+              </Card>
             )}
-            {data.executor_result.sink_container && (
-              <> · Output: {data.executor_result.sink_container}</>
+
+            {data.executor_result && (
+              <Card title="Executor result" icon={Zap}>
+                <KV items={[
+                  ["Status", <Badge key="s" tone={data.executor_result.status === "ok" ? "ok" : "bad"}>{data.executor_result.status}</Badge>],
+                  data.executor_result.stages?.length ? ["Stages", data.executor_result.stages.join(" → ")] : null,
+                  sink ? ["Output container", <span key="o" className="mono">{sink}</span>] : null,
+                ]} />
+              </Card>
             )}
           </div>
-          {data.executor_result.sink_container && (
-            <a
-              href="#"
-              onClick={(e) => {
-                e.preventDefault();
-                setDownloadError("");
-                // via fetch so the x-api-key header is sent when auth is on
-                executor.download(data.executor_result.sink_container).catch((err) => setDownloadError(err.message));
-              }}
-              style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 12px", background: "var(--accent)", color: "var(--accent-fg)", borderRadius: 8, fontSize: 12, fontWeight: 600, textDecoration: "none", marginTop: 8 }}
-            >
-              <Download size={12} /> Download output
-            </a>
-          )}
-          {downloadError && <div style={{ fontSize: 11, color: "var(--bad)", marginTop: 6 }}>{downloadError}</div>}
         </div>
-      )}
+
+        <Card title="Decision log" icon={Shield} subtitle={`${data.decisions?.length || 0} entries`}>
+          <DecisionLog decisions={data.decisions || []} />
+        </Card>
+      </div>
     </div>
   );
 }
 
+// ── All runs ──────────────────────────────────────────────────────────────────
 export default function RunInsights() {
   const [analytics, setAnalytics] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -532,13 +328,7 @@ export default function RunInsights() {
     return () => clearInterval(t);
   }, [liveKey, load]);
 
-  if (loading && !analytics) {
-    return <div style={{ color: "var(--text-3)", textAlign: "center", padding: 60 }}>Loading analytics…</div>;
-  }
-
-  if (selectedRun) {
-    return <RunDetail runId={selectedRun} onBack={() => setSelectedRun(null)} />;
-  }
+  if (selectedRun) return <RunDetail runId={selectedRun} onBack={() => setSelectedRun(null)} />;
 
   const s = analytics?.summary || {};
   const da = analytics?.duration_accuracy || {};
@@ -547,103 +337,66 @@ export default function RunInsights() {
   const runs = analytics?.runs || [];
 
   return (
-    <div style={S.page}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
-        <div>
-          <h1 style={S.title}>Run Insights</h1>
-          <p style={S.sub}>Combined results and logs from all agents across every pipeline run.</p>
-        </div>
-        <button onClick={load} style={{ padding: "6px 12px", background: "transparent", color: "var(--text-4)", border: "1px solid var(--border)", borderRadius: 8, cursor: "pointer", fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>
-          <RefreshCw size={12} /> Refresh
-        </button>
+    <div>
+      <PageHeader
+        eyebrow="Observe" icon={BarChart3}
+        title="Run insights"
+        description="Every managed run with what each agent predicted, decided and measured — and how accurate the predictions were."
+        actions={<Button size="sm" icon={RefreshCw} loading={loading} onClick={() => load()}>Refresh</Button>}
+      />
+
+      {error && <Alert tone="bad" style={{ marginBottom: 14 }}>{error}</Alert>}
+
+      <div className="grid grid-4" style={{ marginBottom: 14 }}>
+        <Stat icon={Activity} label="Runs" value={s.total_runs ?? 0} sub={`${s.completed ?? 0} completed · ${s.failed ?? 0} failed`} />
+        <Stat icon={CheckCircle2} label="Success rate" value={`${s.success_rate_pct ?? 0}%`} tone="ok" sub={`${s.in_progress ?? 0} in progress`} />
+        <Stat icon={TrendingUp} label="Actual ÷ predicted" value={da.avg_predicted_vs_actual_ratio ? `${da.avg_predicted_vs_actual_ratio}×` : "—"} sub={`${da.samples || 0} samples`} />
+        <Stat icon={CircleDollarSign} label="Cost estimate error" value={ca.avg_error_pct != null ? `${ca.avg_error_pct}%` : "—"}
+          sub={`$${ca.total_estimated_usd?.toFixed(4) || 0} est. · $${ca.total_actual_usd?.toFixed(4) || 0} actual`} />
       </div>
 
-      {error && (
-        <div style={{ background: "var(--bad-soft)", borderRadius: 8, padding: "10px 14px", marginBottom: 14, color: "var(--bad)", fontSize: 12 }}>
-          {error}
-        </div>
-      )}
-
-      {/* Summary stats */}
-      <div style={S.grid4}>
-        <StatCard icon={Activity} color="var(--accent)" label="Total Runs" value={s.total_runs ?? 0} sub={`${s.completed ?? 0} completed · ${s.failed ?? 0} failed`} />
-        <StatCard icon={CheckCircle} color="var(--ok)" label="Success Rate" value={`${s.success_rate_pct ?? 0}%`} sub={`${s.in_progress ?? 0} in progress`} />
-        <StatCard icon={TrendingUp} color="var(--violet)" label="Duration Accuracy" value={da.avg_predicted_vs_actual_ratio ? `${da.avg_predicted_vs_actual_ratio}×` : "—"} sub={`${da.samples || 0} samples`} />
-        <StatCard icon={DollarSign} color="var(--warn)" label="Cost Accuracy" value={ca.avg_error_pct != null ? `${ca.avg_error_pct}%` : "—"} sub={`$${ca.total_estimated_usd?.toFixed(4) || 0} est. · $${ca.total_actual_usd?.toFixed(4) || 0} actual`} />
+      <div className="list-title" style={{ marginBottom: 10 }}>Agent health</div>
+      <div className="grid grid-3" style={{ marginBottom: 14, alignItems: "start" }}>
+        <AgentHealthCard title="Planner" icon={Brain} metrics={ah.planner || {}} />
+        <AgentHealthCard title="Assurance" icon={ShieldCheck} metrics={ah.assurance || {}} />
+        <AgentHealthCard title="Resource" icon={Cpu} metrics={ah.resource || {}} />
+        <AgentHealthCard title="Performance" icon={TrendingUp} metrics={ah.performance_prediction || {}} />
+        <AgentHealthCard title="Cost" icon={CircleDollarSign} metrics={ah.cost_optimization || {}} />
+        <AgentHealthCard title="Executor" icon={Zap} metrics={ah.executor || {}} />
       </div>
 
-      {/* Agent health */}
-      <div style={S.sectionHdr}>Agent Health</div>
-      <div style={S.grid3}>
-        <AgentHealthCard title="Planner Agent" icon={Brain} color="var(--violet)" metrics={ah.planner || {}} />
-        <AgentHealthCard title="Assurance Agent" icon={ShieldCheck} color="var(--ok)" metrics={ah.assurance || {}} />
-        <AgentHealthCard title="Resource Agent" icon={Cpu} color="var(--accent)" metrics={ah.resource || {}} />
-        <AgentHealthCard title="Performance Prediction" icon={TrendingUp} color="var(--violet)" metrics={ah.performance_prediction || {}} />
-        <AgentHealthCard title="Cost Optimization" icon={DollarSign} color="var(--warn)" metrics={ah.cost_optimization || {}} />
-        <AgentHealthCard title="Executor Agent" icon={Zap} color="var(--warn)" metrics={ah.executor || {}} />
-      </div>
-
-      {/* Run list */}
-      <div style={S.card}>
-        <div style={S.cardHdr}><Clock size={13} color="var(--text-2)" />All Runs ({runs.length})</div>
+      <Card title="All runs" icon={Clock} subtitle={`${runs.length} run(s) — select one for the full breakdown`} pad={false}>
         {runs.length === 0 ? (
-          <div style={{ color: "var(--text-4)", textAlign: "center", padding: 20, fontSize: 12 }}>No runs recorded yet.</div>
+          <Empty icon={Clock} title="No runs recorded yet">Runs started through the Central Manager appear here.</Empty>
         ) : (
           <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead>
-                <tr>
-                  <th style={S.th} />
-                  <th style={S.th}>Run ID</th>
-                  <th style={S.th}>Status</th>
-                  <th style={S.th}>Stages</th>
-                  <th style={S.th}>Duration</th>
-                  <th style={S.th}>Cost Est.</th>
-                  <th style={S.th}>Cost Actual</th>
-                  <th style={S.th}>Assurance</th>
-                  <th style={S.th}>Source</th>
-                  <th style={S.th}>Started</th>
-                </tr>
-              </thead>
+            <table className="table">
+              <thead><tr>
+                <th /><th>Run</th><th>Status</th><th>Stages</th><th>Duration</th><th>Cost est.</th><th>Cost actual</th><th>Checks</th><th>Source</th><th>Started</th>
+              </tr></thead>
               <tbody>
                 {runs.map((r) => (
-                  <tr
-                    key={r.run_id}
-                    onClick={() => setSelectedRun(r.run_id)}
-                    style={{ cursor: "pointer", background: "transparent" }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = "var(--surface-2)"}
-                    onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
-                  >
-                    <td style={S.td}><ChevronRight size={12} color="var(--text-4)" /></td>
-                    <td style={{ ...S.td, fontFamily: "monospace", fontSize: 11 }}>{r.run_id?.slice(0, 8)}…</td>
-                    <td style={S.td}>
-                      <span style={{
-                        padding: "2px 6px", borderRadius: 8, fontSize: 11, fontWeight: 700,
-                        background: r.status === "completed" ? "var(--ok-soft)" : r.status === "failed" ? "var(--bad-soft)" : "var(--surface)",
-                        color: r.status === "completed" ? "var(--ok)" : r.status === "failed" ? "var(--bad)" : "var(--text-2)",
-                      }}>{r.status}</span>
-                    </td>
-                    <td style={S.td}>{r.stage_count}</td>
-                    <td style={S.td}>
+                  <tr key={r.run_id} className="clickable" onClick={() => setSelectedRun(r.run_id)}>
+                    <td style={{ width: 24, color: "var(--text-4)" }}><ChevronRight size={14} /></td>
+                    <td className="mono" style={{ color: "var(--text)" }}>{r.run_id?.slice(0, 8)}</td>
+                    <td><Badge tone={RUN_TONE(r.status)}>{r.status?.replace("_", " ")}</Badge></td>
+                    <td>{r.stage_count}</td>
+                    <td>
                       {r.actual_duration_s ? `${r.actual_duration_s}s` : "—"}
-                      {r.predicted_duration_s != null && <span style={{ color: "var(--text-3)", fontSize: 11 }}> (pred: {r.predicted_duration_s}s)</span>}
+                      {r.predicted_duration_s != null && <span className="faint" style={{ fontSize: 12 }}> / {r.predicted_duration_s}s</span>}
                     </td>
-                    <td style={S.td}>{r.cost_estimate_usd != null ? `$${r.cost_estimate_usd}` : "—"}</td>
-                    <td style={S.td}>{r.actual_cost_usd != null ? `$${r.actual_cost_usd}` : "—"}</td>
-                    <td style={S.td}>
-                      {r.assurance_passed != null ? (
-                        <span style={S.chip(r.assurance_passed)}>{r.assurance_passed ? "✔" : "✖"}</span>
-                      ) : "—"}
-                    </td>
-                    <td style={S.td}>{r.prediction_source || "—"}</td>
-                    <td style={{ ...S.td, fontSize: 11, color: "var(--text-4)" }}>{(r.started_at || "").slice(0, 16)}</td>
+                    <td>{r.cost_estimate_usd != null ? `$${r.cost_estimate_usd}` : "—"}</td>
+                    <td>{r.actual_cost_usd != null ? `$${r.actual_cost_usd}` : "—"}</td>
+                    <td>{r.assurance_passed != null ? <Badge tone={r.assurance_passed ? "ok" : "bad"}>{r.assurance_passed ? "passed" : "failed"}</Badge> : <span className="faint">—</span>}</td>
+                    <td className="muted">{r.prediction_source || "—"}</td>
+                    <td className="muted mono" style={{ fontSize: 12 }}>{(r.started_at || "").slice(5, 16).replace("T", " ")}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         )}
-      </div>
+      </Card>
     </div>
   );
 }

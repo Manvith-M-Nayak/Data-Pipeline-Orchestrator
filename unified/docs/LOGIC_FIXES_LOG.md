@@ -28,6 +28,7 @@ records:
 | 14.1 | Reload consistency: one shared run store, live state everywhere, data file survives refresh | bugs (user report) | Done |
 | 15 | Redesign 3/4: guided "New pipeline" flow (Data → Describe → Review → Run → Results) | feature (user request) | Done |
 | 16 | Redesign 4a: Overview, Monitor (4 tabs), Resource/Performance/Cost rebuilt on shared components | feature (user request) | Done |
+| 17 | Redesign 4b: Planner, Central Manager, Executor, Run Insights, streaming console rebuilt — redesign complete | feature (user request) | Done |
 
 ---
 
@@ -1069,4 +1070,38 @@ colours.
   - **Performance:** the latest slowdown prediction.
   - **Cost:** $0.0364 with the learned ×0.8644 correction.
 - **Capture artifact, not a bug:** some screenshots looked faded because the page's 0.18 s fade-in is paused while the tab is in the background; computed opacity was 1.
+
+
+## Stage 17 — Redesign, part 4b: the working pages (redesign complete)
+
+This stage rebuilds the last five pages on the shared components. **State and handler
+code was copied unchanged**; only the rendering was rewritten. After this stage no
+page keeps its own inline style object (`const S = {…}` / `const C = {…}`), and every
+colour comes from the theme tokens.
+
+| Page | Layout now |
+|---|---|
+| **Planner** | Page header with "Guided mode". A drop zone, or a file card with column chips and a collapsible preview. Side by side: the request (examples, Design) and Settings (processing, streaming stages, containers, names, collapsible compute overrides). The plan card holds the reasoning, pass-through warning, pipeline diagram, resource summary, collapsible execution-order editor, the self-check / re-check result with "Fix & design again", and Re-check / Discard / Send to Manager. |
+| **Central Manager** | Page header with Run and Clear. Plan and data-file cards. Request & context, with schema and transformations collapsible. Streaming console for streaming plans. Run status banner with Download. Orchestration and pipeline diagrams, decision log, then result cards: resources & cost, parallelism, performance, plan checks, output checks. Plan warnings, and "How a run works" when idle. Recent runs as a table (click one to open it). |
+| **Executor** | Page header with Run / Run again. Plan and data-file cards (with a compact drop zone and the different-file warning). An Execution card with the "Following run …" notice, live pipeline diagram, step list with status icons, and a result banner (error, ADF message, run details, Download). Monitor feed card. |
+| **Run Insights** | Stats, agent-health cards and a runs table. The run detail has a back link, a title with a status badge, readable local times and duration, Download, the error and request notes, both diagrams, two columns of agent cards, and the decision log. |
+| **Streaming console** | A card with a status badge, stream / trigger / sink line, drop zone, Refresh / Stop / New stream, last-trigger error, and an output table. |
+
+### Small improvements
+
+- **Run Insights times:** raw ISO timestamps (`2026-09-30T15:01:23.165Z`) are now local and readable, with the run's duration ("30 Sept 2026, 20:31:23 → 20:32:55 · 92s").
+- **Less code:** the pages are about 3,700 lines, down from about 5,700 before the redesign.
+
+### Verification
+
+- **Lint, build and tests:** ESLint reports 0 problems (after removing one unused import), `vite build` passes, and the flow status tests pass (15/15).
+- **Browser, against the live backend**, with the user's real finished run `ce7c2c2d`:
+  - **Planner:** shows zv.csv (101 rows, 17 columns), the prompt and settings.
+  - **Central Manager:** "Pipeline completed" with Download, two diagrams, 12 cards.
+  - **Executor:** "Following run ce7c2c2d, started from the Central Manager", the pipeline diagram, all 8 step rows, "Pipeline completed".
+  - **Run Insights:** 19 runs; the detail view has both diagrams and 13 cards.
+  - **Errors:** no crashes and no `console.error`, in dark and light.
+- **Browser state:**
+  - **Backup:** the run pointer and theme were backed up first to a scratchpad file (`browser_backup_stage17.json`), not tab storage — see the stage 15 mistake.
+  - **Untouched:** the checks only read; afterwards `run_id`, `run_origin` and `theme` were unchanged, and the plan, schema, prompt and stored file were never written.
 

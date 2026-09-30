@@ -1,314 +1,112 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import {
+  Activity, Brain, CheckCircle2, CircleDollarSign, ClipboardCheck, Clock, Cpu, Download,
+  FileText, GitBranch, Play, RotateCcw, Shield, ShieldCheck, TrendingUp, XCircle,
+} from "lucide-react";
 import { executor } from "../api.js";
 import { useAppContext, isLive } from "../AppContext.jsx";
 import StreamingConsole from "./StreamingConsole.jsx";
 import AgentFlow from "../flows/AgentFlow.jsx";
 import PipelineFlow from "../flows/PipelineFlow.jsx";
-import {
-  Shield, ShieldCheck, Brain, Zap, ClipboardCheck, TrendingUp, CheckCircle,
-  XCircle, AlertTriangle, Clock, Activity, RotateCcw, Download,
-  DollarSign, Cpu, GitBranch,
-} from "lucide-react";
+import { Alert, Badge, Button, Card, Dot, KV, PageHeader, Spinner } from "../ui/components.jsx";
 
-const S = {
-  page: { maxWidth: 900, margin: "0 auto" },
-  header: { marginBottom: 28 },
-  badge: {
-    padding: "4px 12px", background: "var(--accent-soft)", border: "1px solid var(--accent-line)",
-    borderRadius: 20, fontSize: 12, fontWeight: 700, color: "var(--accent)",
-    display: "inline-flex", alignItems: "center", gap: 6, marginBottom: 6,
-  },
-  title:  { fontSize: 22, fontWeight: 700, color: "var(--text)", marginBottom: 4 },
-  sub:    { fontSize: 13, color: "var(--text-3)" },
-  card:   { background: "var(--surface)", borderRadius: 14, padding: 20, border: "1px solid var(--border)", marginBottom: 14 },
-  cardHdr:{ fontSize: 14, fontWeight: 700, color: "var(--text)", marginBottom: 12, display: "flex", alignItems: "center", gap: 8 },
-  grid2:  { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 },
-  btnPrimary: (disabled) => ({
-    padding: "10px 22px", background: disabled ? "var(--surface-2)" : "var(--accent)",
-    color: disabled ? "var(--text-4)" : "var(--accent-fg)", border: "none", borderRadius: 10,
-    cursor: disabled ? "not-allowed" : "pointer", fontSize: 13, fontWeight: 700,
-    display: "inline-flex", alignItems: "center", gap: 7,
-  }),
-  btnSecondary: {
-    padding: "10px 18px", background: "transparent", color: "var(--text-3)",
-    border: "1px solid var(--border)", borderRadius: 10, cursor: "pointer",
-    fontSize: 13, display: "inline-flex", alignItems: "center", gap: 6,
-  },
-  errBox: {
-    background: "var(--bad-soft)", borderRadius: 8, padding: "10px 14px", marginBottom: 14,
-    color: "var(--bad)", fontSize: 13, display: "flex", gap: 8,
-  },
-  decisionRow: (severity) => ({
-    display: "flex", gap: 10, padding: "7px 10px",
-    borderBottom: "1px solid var(--divider)", alignItems: "flex-start",
-    background: severity === "error" ? "var(--bad-soft)" : severity === "warn" ? "var(--warn-soft)" : "transparent",
-  }),
-  tag: (severity) => ({
-    fontSize: 11, fontWeight: 700, borderRadius: 4, padding: "2px 6px", flexShrink: 0,
-    background:
-      severity === "ok"    ? "var(--ok-soft)" :
-      severity === "error" ? "var(--bad-soft)" :
-      severity === "warn"  ? "var(--warn-soft)" : "var(--surface)",
-    color:
-      severity === "ok"    ? "var(--ok)" :
-      severity === "error" ? "var(--bad)" :
-      severity === "warn"  ? "var(--warn)" : "var(--text-3)",
-  }),
-  kv: { display: "flex", flexDirection: "column", gap: 6 },
-  kvRow: { display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--text-2)", borderBottom: "1px solid var(--divider)", paddingBottom: 5 },
-  kvVal: { color: "var(--text)", fontWeight: 600 },
-  chip: (ok) => ({
-    display: "inline-flex", alignItems: "center", gap: 4,
-    padding: "2px 8px", borderRadius: 20, fontSize: 11, fontWeight: 600,
-    background: ok ? "var(--ok-soft)" : ok === false ? "var(--bad-soft)" : "var(--surface)",
-    color: ok ? "var(--ok)" : ok === false ? "var(--bad)" : "var(--text-2)",
-  }),
-};
+const SEV_TONE = { ok: "ok", error: "bad", warn: "warn", info: "neutral" };
+const RUN_TONE = (s) => (s === "completed" ? "ok" : s === "failed" ? "bad" : "warn");
+const yesNo = (v) => <Badge tone={v ? "ok" : "bad"}>{v ? "yes" : "no"}</Badge>;
 
-function Spinner({ size = 14, color = "var(--accent)" }) {
-  return (
-    <span style={{
-      display: "inline-block", width: size, height: size,
-      border: "2px solid var(--border)", borderTopColor: color,
-      borderRadius: "50%", animation: "spin 0.7s linear infinite",
-    }} />
-  );
-}
-
+// ── Decision audit log ────────────────────────────────────────────────────────
 function DecisionLog({ decisions }) {
   const endRef = useRef();
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [decisions.length]);
-
-  if (!decisions.length) {
-    return <div style={{ fontSize: 13, color: "var(--text-4)", padding: "10px 0" }}>Waiting for decisions…</div>;
-  }
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }); }, [decisions.length]);
+  if (!decisions.length) return <div className="muted" style={{ fontSize: 13 }}>Waiting for the first decision…</div>;
   return (
-    <div style={{ maxHeight: 240, overflowY: "auto", borderRadius: 8, border: "1px solid var(--divider)" }}>
-      {decisions.map((d, i) => (
-        <div key={i} style={S.decisionRow(d.severity)}>
-          <span style={{ fontSize: 11, color: "var(--text-4)", flexShrink: 0, paddingTop: 2, minWidth: 72 }}>
-            {d.ts?.slice(11, 19)}
-          </span>
-          <span style={S.tag(d.severity)}>{d.severity?.toUpperCase()}</span>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 12, color: "var(--text)", fontWeight: 600 }}>{d.action}</div>
-            <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 2 }}>
-              {d.reason}{d.outcome ? <span style={{ color: "var(--text-2)" }}> → {d.outcome}</span> : null}
+    <div style={{ maxHeight: 320, overflowY: "auto", margin: "-4px -4px 0", padding: "0 4px" }}>
+      <div className="list">
+        {decisions.map((d, i) => (
+          <div key={i} className="list-row" style={{ alignItems: "flex-start", gap: 10, padding: "8px 0" }}>
+            <span className="mono faint" style={{ fontSize: 11.5, width: 58, flexShrink: 0, paddingTop: 2 }}>{d.ts?.slice(11, 19)}</span>
+            <Badge tone={SEV_TONE[d.severity] || "neutral"} style={{ flexShrink: 0 }}>{d.severity}</Badge>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ color: "var(--text)", fontWeight: 500, fontSize: 12.5 }}>{d.action}</div>
+              <div className="muted" style={{ fontSize: 12 }}>
+                {d.reason}{d.outcome ? <span style={{ color: "var(--text-2)" }}> → {d.outcome}</span> : null}
+              </div>
             </div>
           </div>
-        </div>
-      ))}
+        ))}
+      </div>
       <div ref={endRef} />
     </div>
   );
 }
 
-function PredictionsCard({ predictions, cost, resourcePlan }) {
+// ── Pre-check results ─────────────────────────────────────────────────────────
+function ResourceCard({ predictions, cost, resourcePlan }) {
   if (!predictions?.stage_count) return null;
-  const allocs    = resourcePlan?.allocations || [];
-  const feasible  = resourcePlan?.feasible ?? true;
-  const violations = resourcePlan?.constraint_violations || [];
-  const warnings   = resourcePlan?.warnings || [];
-  const factors    = predictions.correction_factors || {};
-
+  const allocs = resourcePlan?.allocations || [];
+  const feasible = resourcePlan?.feasible ?? true;
+  const factors = predictions.correction_factors || {};
   return (
-    <div style={S.card}>
-      <div style={S.cardHdr}>
-        <Cpu size={14} color="var(--accent)" />Resource Prediction
-        {resourcePlan && (
-          <span style={{
-            marginLeft: "auto", padding: "2px 8px", borderRadius: 99, fontSize: 11, fontWeight: 700,
-            background: feasible ? "#4ade8022" : "#f8717122", color: feasible ? "var(--ok)" : "var(--bad)",
-          }}>
-            {feasible ? "Feasible" : "Infeasible"}
-          </span>
-        )}
-      </div>
-
-      {/* Constraint violations */}
-      {violations.map((v, i) => (
-        <div key={i} style={{ display: "flex", gap: 6, fontSize: 11, color: "var(--bad)", marginBottom: 4 }}>
-          <AlertTriangle size={11} style={{ flexShrink: 0, marginTop: 1 }} />{v}
-        </div>
-      ))}
-      {warnings.map((w, i) => (
-        <div key={i} style={{ display: "flex", gap: 6, fontSize: 11, color: "var(--warn)", marginBottom: 4 }}>
-          <AlertTriangle size={11} style={{ flexShrink: 0, marginTop: 1 }} />{w}
-        </div>
-      ))}
-
-      <div style={S.kv}>
-        <div style={S.kvRow}><span>File size</span><span style={S.kvVal}>{predictions.file_size_mb} MB</span></div>
-        <div style={S.kvRow}><span>Stages</span><span style={S.kvVal}>{predictions.stage_count} ({predictions.copy_stages} copy + {predictions.notebook_stages} notebook)</span></div>
-        <div style={S.kvRow}><span>Complexity</span><span style={S.kvVal}>{predictions.complexity}</span></div>
-        <div style={S.kvRow}><span>Peak workers</span><span style={S.kvVal}>{predictions.suggested_workers}</span></div>
-        <div style={S.kvRow}><span>Total memory</span><span style={S.kvVal}>{predictions.total_memory_gb ?? "—"} GB</span></div>
-        <div style={S.kvRow}><span>Estimated duration</span><span style={S.kvVal}>~{predictions.estimated_duration_s}s</span></div>
-        <div style={S.kvRow}><span>Node type</span><span style={S.kvVal}>{predictions.node_type}</span></div>
-        {(factors.copy || factors.notebook) && (
-          <div style={S.kvRow}>
-            <span>Correction factors</span>
-            <span style={S.kvVal}>{factors.copy}× copy · {factors.notebook}× notebook</span>
-          </div>
-        )}
-      </div>
-
-      {/* Per-stage allocations from Resource Agent */}
+    <Card title="Resources & cost" icon={Cpu}
+      actions={resourcePlan ? <Badge tone={feasible ? "ok" : "bad"} dot>{feasible ? "Feasible" : "Infeasible"}</Badge> : null}>
+      {(resourcePlan?.constraint_violations || []).map((v, i) => <Alert key={`v${i}`} tone="bad" style={{ marginBottom: 8 }}>{v}</Alert>)}
+      {(resourcePlan?.warnings || []).map((w, i) => <Alert key={`w${i}`} tone="warn" style={{ marginBottom: 8 }}>{w}</Alert>)}
+      <KV items={[
+        ["File size", `${predictions.file_size_mb} MB`],
+        ["Stages", `${predictions.stage_count} (${predictions.copy_stages} copy + ${predictions.notebook_stages} notebook)`],
+        ["Complexity", predictions.complexity],
+        ["Peak workers", predictions.suggested_workers],
+        ["Total memory", `${predictions.total_memory_gb ?? "—"} GB`],
+        ["Estimated duration", `~${predictions.estimated_duration_s}s`],
+        ["Node type", <span key="n" className="mono">{predictions.node_type}</span>],
+        (factors.copy || factors.notebook) ? ["Correction factors", `${factors.copy}× copy · ${factors.notebook}× notebook`] : null,
+      ]} />
       {allocs.length > 0 && (
-        <div style={{ marginTop: 12, borderTop: "1px solid var(--divider)", paddingTop: 10 }}>
-          <div style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 8 }}>Stage allocations</div>
-          {allocs.map((a) => (
-            <div key={a.stage_name} style={{
-              display: "flex", justifyContent: "space-between", alignItems: "center",
-              fontSize: 11, color: "var(--text-2)", paddingBottom: 4, marginBottom: 4,
-              borderBottom: "1px solid var(--divider)",
-            }}>
-              <span style={{ color: "var(--text)", fontWeight: 600, minWidth: 120 }}>{a.stage_name}</span>
-              <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-                {a.stage_type === "notebook"
-                  ? <span>{a.workers}w · {a.memory_gb}GB · {a.cpu}vCPU</span>
-                  : <span>{a.diu} DIU</span>}
-                <span style={{ color: "var(--text-3)" }}>~{a.duration_s}s</span>
-                {a.right_sized && <span style={{ color: "var(--ok)", fontSize: 11 }}>✔ right-sized</span>}
-                {a.contention_adjusted && <span style={{ color: "var(--warn)", fontSize: 11 }}>⚠ adjusted</span>}
+        <>
+          <div className="list-title">Stage allocations</div>
+          <div className="list">
+            {allocs.map((a) => (
+              <div key={a.stage_name} className="list-row" style={{ fontSize: 12.5 }}>
+                <span className="grow mono">{a.stage_name}</span>
+                <span className="meta">{a.stage_type === "notebook" ? `${a.workers}w · ${a.memory_gb}GB · ${a.cpu}vCPU` : `${a.diu} DIU`} · ~{a.duration_s}s</span>
+                {a.right_sized && <Badge tone="ok">right-sized</Badge>}
+                {a.contention_adjusted && <Badge tone="warn">adjusted</Badge>}
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        </>
       )}
-
       {cost?.total_usd !== undefined && (
-        <div style={{ marginTop: 12, padding: "8px 12px", borderRadius: 8, background: "var(--surface-2)", border: "1px solid var(--divider)" }}>
-          <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
-            <DollarSign size={12} /> Cost estimate
-          </div>
-          <div style={S.kv}>
-            <div style={S.kvRow}><span>ADF activities</span><span style={S.kvVal}>${cost.adf_activity_usd}</span></div>
-            <div style={S.kvRow}><span>Databricks</span><span style={S.kvVal}>${cost.databricks_usd}</span></div>
-            <div style={S.kvRow}><span>Blob storage</span><span style={S.kvVal}>${cost.storage_usd}</span></div>
-            <div style={{ ...S.kvRow, borderBottom: "none" }}>
-              <span style={{ fontWeight: 700, color: "var(--text)" }}>Total</span>
-              <span style={{ ...S.kvVal, color: cost.budget_ok ? "var(--ok)" : "var(--warn)" }}>
-                ${cost.total_usd} {cost.budget_ok ? "✔" : "⚠ >$1"}
-              </span>
-            </div>
-          </div>
-        </div>
+        <>
+          <div className="list-title"><CircleDollarSign size={11} style={{ verticalAlign: -1 }} /> Cost estimate</div>
+          <KV items={[
+            ["ADF activities", `$${cost.adf_activity_usd}`],
+            ["Databricks", `$${cost.databricks_usd}`],
+            ["Blob storage", `$${cost.storage_usd}`],
+            ["Total", <span key="t" style={{ color: cost.budget_ok ? "var(--ok)" : "var(--warn)", fontWeight: 600 }}>${cost.total_usd} {cost.budget_ok ? "" : "· over $1"}</span>],
+          ]} />
+        </>
       )}
-    </div>
+    </Card>
   );
 }
 
 function ParallelismCard({ parallelism }) {
   if (!parallelism?.execution_groups) return null;
   return (
-    <div style={S.card}>
-      <div style={S.cardHdr}><GitBranch size={14} color="var(--violet)" />Parallelism Analysis</div>
-      <div style={{ marginBottom: 10, fontSize: 12, color: "var(--text-2)" }}>
-        {parallelism.can_parallelize
-          ? `${parallelism.parallel_groups} group(s) can run in parallel`
-          : "All stages run sequentially (linear dependency chain)"}
+    <Card title="Parallelism" icon={GitBranch}
+      subtitle={parallelism.can_parallelize ? `${parallelism.parallel_groups} group(s) can run in parallel` : "All stages run in sequence"}>
+      <div className="stack" style={{ gap: 8 }}>
+        {parallelism.execution_groups.map((group, i) => (
+          <div key={i} className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+            <span className="faint" style={{ fontSize: 12, width: 60 }}>Group {i + 1}</span>
+            {group.map((name) => <Badge key={name} tone={group.length > 1 ? "violet" : "neutral"}>{name}</Badge>)}
+            {group.length > 1 && <span style={{ fontSize: 12, color: "var(--violet)" }}>parallel</span>}
+          </div>
+        ))}
       </div>
-      {parallelism.execution_groups.map((group, i) => (
-        <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-          <span style={{ fontSize: 11, color: "var(--text-4)", minWidth: 48 }}>Group {i + 1}</span>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {group.map((name) => (
-              <span key={name} style={{
-                padding: "2px 8px", borderRadius: 6, fontSize: 11,
-                background: group.length > 1 ? "var(--violet-soft)" : "var(--surface)",
-                color: group.length > 1 ? "var(--violet)" : "var(--text-3)",
-                border: `1px solid ${group.length > 1 ? "var(--violet-soft)" : "var(--border-strong)"}`,
-              }}>
-                {name}
-              </span>
-            ))}
-          </div>
-          {group.length > 1 && (
-            <span style={{ fontSize: 11, color: "var(--violet)" }}>parallel</span>
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// Shared context surfaced from the Planner into the Manager (hub view):
-// the original request (editable), the detected schema, and the plan's
-// per-stage transformations/filters/aggregations.
-function ContextCard({ request, setRequest, disabled, detectedSchema, savedPlan }) {
-  const cols = detectedSchema?.columns || {};            // {col: type}
-  const colEntries = Object.entries(cols);
-  const stages = savedPlan?.config?.stages || [];
-  const transformStages = stages.filter(
-    (s) => (s.transformations && s.transformations.length) || s.filter_condition || s.aggregation
-  );
-
-  return (
-    <div style={S.card}>
-      <div style={S.cardHdr}><Brain size={14} color="var(--violet)" />Request &amp; Context</div>
-
-      {/* Editable user request */}
-      <div style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 6 }}>
-        User request (drives semantic intent check — edit before running)
-      </div>
-      <textarea
-        value={request}
-        disabled={disabled}
-        onChange={(e) => setRequest(e.target.value)}
-        placeholder="e.g. Ingest orders, then total revenue per category and region"
-        style={{
-          width: "100%", minHeight: 60, resize: "vertical", boxSizing: "border-box",
-          background: "var(--surface-2)", color: "var(--text)", border: "1px solid var(--border)",
-          borderRadius: 8, padding: "8px 10px", fontSize: 12, fontFamily: "inherit",
-          opacity: disabled ? 0.6 : 1,
-        }}
-      />
-
-      {/* Detected schema */}
-      {colEntries.length > 0 && (
-        <div style={{ marginTop: 12 }}>
-          <div style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 6 }}>
-            Detected schema · {colEntries.length} columns
-          </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 96, overflowY: "auto" }}>
-            {colEntries.map(([col, type]) => (
-              <span key={col} style={{
-                padding: "2px 8px", borderRadius: 6, fontSize: 11,
-                background: "var(--surface)", border: "1px solid var(--border)", color: "var(--text-2)",
-              }}>
-                {col}<span style={{ color: "var(--text-3)" }}> · {String(type)}</span>
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Plan transformations / filters / aggregations */}
-      {transformStages.length > 0 && (
-        <div style={{ marginTop: 12, borderTop: "1px solid var(--divider)", paddingTop: 10 }}>
-          <div style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 6 }}>Transformations &amp; filters</div>
-          {transformStages.map((s) => (
-            <div key={s.name} style={{ marginBottom: 8 }}>
-              <div style={{ fontSize: 12, color: "var(--text)", fontWeight: 600 }}>{s.name}</div>
-              {(s.transformations || []).map((t, i) => (
-                <div key={i} style={{ fontSize: 11, color: "var(--text-2)", fontFamily: "monospace", marginLeft: 8 }}>• {t}</div>
-              ))}
-              {s.filter_condition && (
-                <div style={{ fontSize: 11, color: "var(--warn)", fontFamily: "monospace", marginLeft: 8 }}>filter: {s.filter_condition}</div>
-              )}
-              {s.aggregation && (
-                <div style={{ fontSize: 11, color: "var(--accent)", fontFamily: "monospace", marginLeft: 8 }}>
-                  group by [{(s.aggregation.group_by || []).join(", ")}] →{" "}
-                  {(s.aggregation.aggregations || []).map((a) => `${a.op}(${a.column})`).join(", ")}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
+    </Card>
   );
 }
 
@@ -320,142 +118,77 @@ function usualDuration(p) {
     return { label: `still learning (${p.expected_duration_runs || 0}/3 runs)`, ok: true };
   }
   return p.slower_than_usual
-    ? { label: `⚠ slower (usually ≤${Math.round(p.expected_duration_s)}s)`, ok: false }
-    : { label: `✔ within usual (≤${Math.round(p.expected_duration_s)}s)`, ok: true };
+    ? { label: `slower (usually ≤${Math.round(p.expected_duration_s)}s)`, ok: false }
+    : { label: `within usual (≤${Math.round(p.expected_duration_s)}s)`, ok: true };
 }
 
-// Performance prediction (gap in the hub view — computed by the manager but
-// not previously surfaced).
-function PerformancePredictionCard({ perf }) {
-  if (!perf || !perf.outcome) return null;
+function PerformanceCard({ perf }) {
+  if (!perf?.outcome) return null;
   const usual = usualDuration(perf);
-  const ok = perf.outcome === "success" && usual.ok;
   return (
-    <div style={S.card}>
-      <div style={S.cardHdr}>
-        <TrendingUp size={14} color="var(--violet)" />Performance Prediction
-        <span style={S.chip(ok)}>{perf.outcome}</span>
-      </div>
-      <div style={S.kv}>
-        <div style={S.kvRow}><span>Predicted total</span><span style={S.kvVal}>~{perf.predicted_total_s}s</span></div>
-        <div style={S.kvRow}><span>Bottleneck stage</span><span style={S.kvVal}>{perf.bottleneck_stage || "—"}</span></div>
-        <div style={S.kvRow}><span>Confidence</span><span style={S.kvVal}>{Math.round((perf.confidence || 0) * 100)}%</span></div>
-        <div style={S.kvRow}>
-          <span>vs usual duration</span>
-          <span style={S.kvVal}><span style={S.chip(usual.ok)}>{usual.label}</span></span>
-        </div>
-        {perf.history_runs_used !== undefined && (
-          <div style={S.kvRow}><span>History runs used</span><span style={S.kvVal}>{perf.history_runs_used}</span></div>
-        )}
-      </div>
-    </div>
+    <Card title="Performance prediction" icon={TrendingUp}
+      actions={<Badge tone={perf.outcome === "success" ? "ok" : perf.outcome === "failure" ? "bad" : "warn"}>{perf.outcome}</Badge>}>
+      <KV items={[
+        ["Predicted total", `~${perf.predicted_total_s}s`],
+        ["Bottleneck stage", perf.bottleneck_stage ? <span key="b" className="mono">{perf.bottleneck_stage}</span> : "—"],
+        ["Confidence", `${Math.round((perf.confidence || 0) * 100)}%`],
+        ["vs usual duration", <Badge key="u" tone={usual.ok ? "neutral" : "warn"}>{usual.label}</Badge>],
+        perf.history_runs_used !== undefined ? ["History runs used", perf.history_runs_used] : null,
+      ]} />
+    </Card>
   );
 }
 
-// Pre-execution plan verification (Assurance Agent: structural + semantic)
 function PlanAssuranceCard({ planAssurance }) {
-  if (!planAssurance || !planAssurance.summary) return null;
+  if (!planAssurance?.summary) return null;
   const structural = planAssurance.structural_results || [];
   const sem = planAssurance.semantic_result;
   const passed = planAssurance.overall_status === "pass";
-
   return (
-    <div style={S.card}>
-      <div style={S.cardHdr}>
-        <ShieldCheck size={14} color="var(--ok)" />
-        Plan Assurance
-        <span style={S.chip(passed)}>{passed ? "PASSED" : "REJECTED"}</span>
-      </div>
-
-      <div style={{ fontSize: 12, color: "var(--text-2)", marginBottom: 10 }}>
-        {planAssurance.summary}
-      </div>
-
-      {/* Structural checks (deterministic) */}
-      <div style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 6 }}>
-        Structural checks (deterministic)
-      </div>
-      <div style={S.kv}>
+    <Card title="Plan checks (before running)" icon={ShieldCheck} subtitle={planAssurance.summary}
+      actions={<Badge tone={passed ? "ok" : "bad"} dot>{passed ? "Passed" : "Rejected"}</Badge>}>
+      <div className="list">
         {structural.map((c) => (
-          <div key={c.check} style={S.kvRow}>
-            <span>{c.label}</span>
-            <span style={S.kvVal}>
-              <span style={S.chip(c.passed)}>{c.passed ? "✔ pass" : "✖ fail"}</span>
-            </span>
+          <div key={c.check} className="list-row" style={{ alignItems: "flex-start" }}>
+            {c.passed
+              ? <CheckCircle2 size={14} style={{ color: "var(--ok)", marginTop: 2, flexShrink: 0 }} />
+              : <XCircle size={14} style={{ color: "var(--bad)", marginTop: 2, flexShrink: 0 }} />}
+            <div style={{ minWidth: 0 }}>
+              <div style={{ color: "var(--text)" }}>{c.label}</div>
+              {!c.passed && <div style={{ color: "var(--bad)", fontSize: 12.5 }}>{c.message}</div>}
+            </div>
           </div>
         ))}
       </div>
-
-      {/* Per-check violation messages on failure */}
-      {structural.filter((c) => !c.passed).map((c) => (
-        <div key={c.check + "-msg"} style={{ display: "flex", gap: 6, fontSize: 11, color: "var(--bad)", marginTop: 6 }}>
-          <AlertTriangle size={11} style={{ flexShrink: 0, marginTop: 1 }} />
-          <span><b>{c.label}:</b> {c.message}</span>
-        </div>
-      ))}
-
-      {/* Semantic check (advisory) */}
       {sem && (
-        <div style={{ marginTop: 12, padding: "8px 12px", borderRadius: 8, background: "var(--surface-2)", border: "1px solid var(--divider)" }}>
-          <div style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 4, display: "flex", alignItems: "center", gap: 6 }}>
-            <Brain size={12} /> Semantic intent check {sem.model ? `· ${sem.model}` : ""} (advisory)
-          </div>
-          {!sem.available ? (
-            <div style={{ fontSize: 12, color: "var(--text-3)" }}>{sem.reasoning}</div>
-          ) : (
-            <>
-              <span style={S.chip(!sem.flagged)}>
-                {sem.flagged ? "⚠ possible mismatch" : "✔ matches request"}
-              </span>
-              <div style={{ fontSize: 12, color: "var(--text-2)", marginTop: 6 }}>{sem.reasoning}</div>
-            </>
-          )}
-        </div>
+        <Alert tone={!sem.available ? "neutral" : sem.flagged ? "warn" : "ok"} style={{ marginTop: 10 }}
+          title={`Intent check${sem.model ? ` · ${sem.model}` : ""} (advisory)${sem.available ? (sem.flagged ? " — possible mismatch" : " — matches the request") : ""}`}>
+          {sem.reasoning}
+        </Alert>
       )}
-    </div>
+    </Card>
   );
 }
 
 function AssuranceCard({ assurance }) {
   if (!Object.keys(assurance || {}).length) return null;
-  const rows = [
-    { label: "All stages completed", val: assurance.all_stages_completed, bool: true },
-    { label: "Output present",       val: assurance.has_output,           bool: true },
-    { label: "Timing OK (< 4× est)", val: assurance.timing_ok,           bool: true },
-    { label: "Actual duration",      val: `${assurance.actual_duration_s}s` },
-    { label: "Predicted duration",   val: `${assurance.predicted_duration_s}s` },
-    { label: "Timing ratio",         val: `${assurance.timing_ratio}×` },
-    { label: "Retries used",         val: assurance.retries_used },
-  ].filter((r) => r.val !== undefined && r.val !== null);
-
   return (
-    <div style={S.card}>
-      <div style={S.cardHdr}>
-        <ClipboardCheck size={14} color="var(--ok)" />
-        Assurance Checks
-        <span style={S.chip(assurance.passed)}>
-          {assurance.passed ? "PASSED" : "WARNINGS"}
-        </span>
-      </div>
-      <div style={S.kv}>
-        {rows.map(({ label, val, bool }) => (
-          <div key={label} style={S.kvRow}>
-            <span>{label}</span>
-            <span style={S.kvVal}>
-              {bool ? (
-                <span style={S.chip(val)}>
-                  {val ? "✔ Yes" : "✖ No"}
-                </span>
-              ) : val}
-            </span>
-          </div>
-        ))}
-      </div>
-    </div>
+    <Card title="Output checks (after running)" icon={ClipboardCheck}
+      actions={<Badge tone={assurance.passed ? "ok" : "warn"} dot>{assurance.passed ? "Passed" : "Warnings"}</Badge>}>
+      <KV items={[
+        assurance.all_stages_completed !== undefined ? ["All stages completed", yesNo(assurance.all_stages_completed)] : null,
+        assurance.has_output !== undefined ? ["Output present", yesNo(assurance.has_output)] : null,
+        assurance.timing_ok !== undefined ? ["Timing within 4× estimate", yesNo(assurance.timing_ok)] : null,
+        assurance.actual_duration_s !== undefined ? ["Actual duration", `${assurance.actual_duration_s}s`] : null,
+        assurance.predicted_duration_s !== undefined ? ["Predicted duration", `${assurance.predicted_duration_s}s`] : null,
+        assurance.timing_ratio !== undefined ? ["Timing ratio", `${assurance.timing_ratio}×`] : null,
+        assurance.retries_used !== undefined ? ["Retries used", assurance.retries_used] : null,
+      ]} />
+    </Card>
   );
 }
 
-// ── Main component ────────────────────────────────────────────────────────────
+// ── Page ──────────────────────────────────────────────────────────────────────
 export default function ManagerTab() {
   const navigate = useNavigate();
   const {
@@ -506,298 +239,216 @@ export default function ManagerTab() {
   const status = mgrState?.status;
   const isTerminal = status === "completed" || status === "failed";
   const canRun = !!csvFile && !!savedPlan && !running;
+  const cfg = savedPlan?.config;
+  const streaming = cfg?.mode === "streaming";
+  const transformStages = (cfg?.stages || []).filter(
+    (s) => (s.transformations && s.transformations.length) || s.filter_condition || s.aggregation);
 
   return (
-    <div style={S.page}>
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    <div>
+      <PageHeader
+        eyebrow="Run" icon={GitBranch}
+        title="Central Manager"
+        description="Validates the plan, sizes resources, forecasts runtime and cost, hands off to the Executor, retries failures, checks the output and records the outcome."
+        actions={<>
+          {(mgrState || error) && <Button size="sm" icon={RotateCcw} onClick={reset} disabled={running && !isTerminal}>Clear</Button>}
+          <Button variant="primary" icon={Play} loading={starting} disabled={!canRun} onClick={handleRun}>
+            {streaming ? "Run once (seed data)" : "Run pipeline"}
+          </Button>
+        </>}
+      />
 
-      {/* Header */}
-      <div style={S.header}>
-        <div style={S.badge}><Activity size={13} /> Central Manager</div>
-        <h1 style={S.title}>Orchestrator</h1>
-        <p style={S.sub}>
-          Validates the plan, predicts resources and cost, orchestrates all agents in sequence,
-          retries failures, verifies output, and records outcomes for future improvement.
-        </p>
-      </div>
+      {error && <Alert tone="bad" style={{ marginBottom: 14 }}>{error}</Alert>}
 
-      {error && (
-        <div style={S.errBox}><XCircle size={14} style={{ flexShrink: 0 }} />{error}</div>
-      )}
-
-      {/* Plan + CSV status */}
-      <div style={S.grid2}>
-        <div style={{ ...S.card, marginBottom: 0 }}>
-          <div style={S.cardHdr}><Brain size={14} color="var(--violet)" />Pipeline Plan</div>
-          {savedPlan ? (
-            <>
-              <div style={{ fontSize: 12, color: "var(--ok)", marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
-                <CheckCircle size={11} /> Loaded from Planner Agent
+      {/* ── What will run ── */}
+      <div className="grid grid-2" style={{ marginBottom: 14, alignItems: "start" }}>
+        <Card title="Plan" icon={Brain}
+          actions={cfg ? <button className="link" onClick={() => navigate("/planner")}>Edit →</button> : null}>
+          {cfg ? (
+            <div className="stack" style={{ gap: 6, fontSize: 13 }}>
+              <div style={{ color: "var(--text)" }}>
+                {cfg.stages?.length ?? 0} stage(s) · {streaming ? "streaming" : "batch"}
+                {savedPlan.used_fallback && <Badge tone="warn" style={{ marginLeft: 8 }}>fallback</Badge>}
+                {savedPlan.verification?.verified && <Badge tone="ok" style={{ marginLeft: 8 }}>self-checked</Badge>}
               </div>
-              <div style={{ fontSize: 12, color: "var(--text-3)" }}>
-                {savedPlan.config?.stages?.length ?? 0} stages ·{" "}
-                {savedPlan.config?.execution_order?.join(" → ")}
-              </div>
-              {savedPlan.used_fallback && (
-                <div style={{ fontSize: 11, color: "var(--warn)", marginTop: 4 }}>
-                  ⚠ Fallback config used
-                </div>
-              )}
-            </>
+              <div className="mono muted" style={{ fontSize: 12, overflowWrap: "anywhere" }}>{cfg.execution_order?.join(" → ")}</div>
+            </div>
           ) : (
-            <div style={{ fontSize: 13, color: "var(--text-3)" }}>
-              No plan — generate one in{" "}
-              <button onClick={() => navigate("/planner")} style={{ color: "var(--accent)", background: "none", border: "none", cursor: "pointer", fontSize: 13 }}>
-                Planner Agent
-              </button>
+            <div className="muted" style={{ fontSize: 13 }}>
+              No plan yet — <button className="link" onClick={() => navigate("/planner")}>design one in the Planner</button>
+              {" "}or <button className="link" onClick={() => navigate("/new")}>use guided mode</button>.
             </div>
           )}
-        </div>
+        </Card>
 
-        <div style={{ ...S.card, marginBottom: 0 }}>
-          <div style={S.cardHdr}><Zap size={14} color="var(--warn)" />Data File</div>
+        <Card title="Data file" icon={FileText}>
           {csvRestoring ? (
-            <div style={{ fontSize: 13, color: "var(--text-3)", display: "flex", alignItems: "center", gap: 8 }}>
-              <Spinner size={12} /> Restoring your data file…
-            </div>
+            <div className="row muted" style={{ gap: 8, fontSize: 13 }}><Spinner size={12} /> Restoring your data file…</div>
           ) : csvFile ? (
-            <>
-              <div style={{ fontSize: 12, color: "var(--ok)", marginBottom: 4, display: "flex", alignItems: "center", gap: 6 }}>
-                <CheckCircle size={11} /> {csvFile.name}
-              </div>
-              <div style={{ fontSize: 11, color: "var(--text-3)" }}>
-                {(csvFile.size / 1024).toFixed(1)} KB · ready to execute
-              </div>
-            </>
+            <div className="stack" style={{ gap: 4, fontSize: 13 }}>
+              <div className="mono" style={{ color: "var(--text)" }}>{csvFile.name}</div>
+              <div className="muted">{(csvFile.size / 1024).toFixed(1)} KB · ready</div>
+            </div>
           ) : (
-            <div style={{ fontSize: 13, color: "var(--text-3)" }}>
-              No data file — upload one in{" "}
-              <button onClick={() => navigate("/planner")} style={{ color: "var(--accent)", background: "none", border: "none", cursor: "pointer", fontSize: 13 }}>
-                Planner
-              </button>{" "}or{" "}
-              <button onClick={() => navigate("/executor")} style={{ color: "var(--accent)", background: "none", border: "none", cursor: "pointer", fontSize: 13 }}>
-                Executor
-              </button>
+            <div className="muted" style={{ fontSize: 13 }}>
+              No data file — choose one in the <button className="link" onClick={() => navigate("/planner")}>Planner</button>
+              {" "}or <button className="link" onClick={() => navigate("/executor")}>Executor</button>.
             </div>
           )}
-        </div>
+        </Card>
       </div>
 
-      {/* Shared context from Planner (request + schema + transformations) */}
-      {savedPlan && (
-        <ContextCard
-          request={request}
-          setRequest={setRequest}
-          disabled={running}
-          detectedSchema={detectedSchema}
-          savedPlan={savedPlan}
-        />
-      )}
-
-      {/* Run controls — batch runs once; streaming runs live via the console below */}
-      <div style={{ display: "flex", gap: 10, marginBottom: 20, alignItems: "center" }}>
-        <button
-          style={S.btnPrimary(!canRun)}
-          disabled={!canRun}
-          onClick={handleRun}
-        >
-          <Activity size={14} /> {savedPlan?.config?.mode === "streaming" ? "Run once (seed data)" : "Run via Manager"}
-        </button>
-        {(mgrState || error) && (
-          <button style={S.btnSecondary} onClick={reset}>
-            <RotateCcw size={13} /> Reset
-          </button>
-        )}
-      </div>
-
-      {/* Streaming console — live incremental processing for streaming-mode plans */}
-      {savedPlan?.config?.mode === "streaming" && (
-        <StreamingConsole
-          config={savedPlan.config}
-          schema={runSchema}
-          fileFormat={detectedSchema?.file_format || "csv"}
-        />
-      )}
-
-      {/* All runs — managed here or mirrored from the Executor Agent */}
-      {allRuns.length > 0 && (
-        <div style={S.card}>
-          <div style={S.cardHdr}><Clock size={14} color="var(--text-2)" />Recent Runs</div>
-          {allRuns.slice(0, 8).map((r) => {
-            const live = isLive(r.status);
-            const selected = r.run_id === runId;
-            const color = r.status === "completed" ? "var(--ok)" : r.status === "failed" ? "var(--bad)" : "var(--warn)";
-            return (
-              <div
-                key={r.run_id}
-                onClick={() => attachToRun(r.run_id)}
-                style={{
-                  display: "flex", alignItems: "center", gap: 10, padding: "8px 10px",
-                  borderRadius: 8, cursor: "pointer", marginBottom: 4,
-                  background: selected ? "var(--surface-2)" : "transparent",
-                  border: `1px solid ${selected ? "var(--border-strong)" : "transparent"}`,
-                }}
-              >
-                <span style={{
-                  width: 8, height: 8, borderRadius: "50%", flexShrink: 0, background: color,
-                  boxShadow: live ? `0 0 0 3px color-mix(in srgb, ${color} 20%, transparent)` : "none",
-                }} />
-                <span style={{ fontSize: 12, color: "var(--text-2)", fontFamily: "monospace" }}>
-                  {r.run_id.slice(0, 8)}
-                </span>
-                <span style={{ fontSize: 12, color, fontWeight: 600 }}>{r.status}</span>
-                <span style={{ fontSize: 12, color: "var(--text-3)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {r.step}
-                </span>
-                <span style={{ fontSize: 11, color: "var(--text-4)", flexShrink: 0 }}>
-                  {r.stage_count} stage(s) · {(r.started_at || "").slice(11, 19)}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Active / completed run */}
-      {mgrState && (
-        <>
-          {/* Agent lifecycle — which agent is working on this run right now */}
-          <div style={S.card}>
-            <div style={S.cardHdr}><Activity size={14} color="var(--accent)" />Orchestration</div>
-            <div style={{ marginBottom: 14 }}>
-              <AgentFlow runState={mgrState} hasPlan />
-            </div>
-
-            {/* Current step */}
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-              {running && !isTerminal && <Spinner color="var(--accent)" />}
-              {status === "completed" && <CheckCircle size={14} color="var(--ok)" />}
-              {status === "failed"    && <XCircle    size={14} color="var(--bad)" />}
-              <span style={{ fontSize: 13, color: status === "failed" ? "var(--bad)" : status === "completed" ? "var(--ok)" : "var(--text-2)" }}>
-                {mgrState.step}
-              </span>
-              {mgrState.retries > 0 && (
-                <span style={{ fontSize: 11, color: "var(--warn)", padding: "2px 8px", background: "var(--warn-soft)", borderRadius: 20 }}>
-                  {mgrState.retries} {mgrState.retries === 1 ? "retry" : "retries"}
-                </span>
+      {cfg && (
+        <Card title="Request & context" icon={Activity} style={{ marginBottom: 14 }}
+          subtitle="The request drives the intent check — edit it before running">
+          <textarea className="input" rows={2} value={request} disabled={running}
+            onChange={(e) => setRequest(e.target.value)}
+            placeholder="e.g. Ingest orders, then total revenue per category and region" />
+          {(Object.keys(detectedSchema?.columns || {}).length > 0 || transformStages.length > 0) && (
+            <details style={{ marginTop: 10 }}>
+              <summary className="link" style={{ fontSize: 13 }}>Schema and transformations</summary>
+              {Object.keys(detectedSchema?.columns || {}).length > 0 && (
+                <>
+                  <div className="list-title">Columns</div>
+                  <div className="chips">
+                    {Object.entries(detectedSchema.columns).map(([c, t]) => (
+                      <span key={c} className="chip"><span className="mono">{c}</span><small>{String(t)}</small></span>
+                    ))}
+                  </div>
+                </>
               )}
+              {transformStages.map((s) => (
+                <div key={s.name} style={{ marginTop: 10 }}>
+                  <div className="mono" style={{ color: "var(--text)", fontSize: 12.5 }}>{s.name}</div>
+                  <div className="mono muted" style={{ fontSize: 12, paddingLeft: 10 }}>
+                    {(s.transformations || []).map((t, i) => <div key={i}>• {t}</div>)}
+                    {s.filter_condition && <div style={{ color: "var(--warn)" }}>filter: {s.filter_condition}</div>}
+                    {s.aggregation && (
+                      <div style={{ color: "var(--accent)" }}>
+                        group by [{(s.aggregation.group_by || []).join(", ")}] → {(s.aggregation.aggregations || []).map((a) => `${a.op}(${a.column})`).join(", ")}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </details>
+          )}
+        </Card>
+      )}
+
+      {streaming && (
+        <div style={{ marginBottom: 14 }}>
+          <StreamingConsole config={cfg} schema={runSchema} fileFormat={detectedSchema?.file_format || "csv"} />
+        </div>
+      )}
+
+      {/* ── The run ── */}
+      {runId && !mgrState && !error && (
+        <Card style={{ marginBottom: 14 }}>
+          <div className="row muted" style={{ gap: 10 }}><Spinner size={13} /> Loading run {runId.slice(0, 8)}…</div>
+        </Card>
+      )}
+
+      {mgrState && (
+        <div className="stack" style={{ gap: 14, marginBottom: 14 }}>
+          <div className="big-status" style={{
+            background: status === "completed" ? "var(--ok-soft)" : status === "failed" ? "var(--bad-soft)" : "var(--surface)",
+            borderColor: status === "completed" ? "var(--ok-line)" : status === "failed" ? "var(--bad-line)" : "var(--border)",
+          }}>
+            <div className="icon" style={{ background: status === "completed" || status === "failed" ? "var(--surface)" : "var(--surface-2)" }}>
+              {status === "completed" ? <CheckCircle2 size={20} style={{ color: "var(--ok)" }} />
+                : status === "failed" ? <XCircle size={20} style={{ color: "var(--bad)" }} />
+                : <Spinner size={18} />}
             </div>
-
-            {/* Error detail */}
-            {status === "failed" && mgrState.error && (
-              <div style={{ background: "var(--bad-soft)", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "var(--bad)", marginBottom: 12, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-                {mgrState.error}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ color: "var(--text)", fontWeight: 600 }}>
+                {status === "completed" ? "Pipeline completed" : status === "failed" ? "Run failed" : mgrState.step}
               </div>
-            )}
-
-            {/* Completed result */}
-            {status === "completed" && mgrState.executor_result && (
-              <div style={{ background: "var(--ok-soft)", borderRadius: 8, padding: "10px 14px", marginBottom: 12 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ok)", marginBottom: 6, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                  <span>Pipeline completed successfully</span>
-                  {mgrState.executor_result.sink_container && (
-                    <a
-                      href="#"
-                      onClick={(e) => { e.preventDefault(); executor.download(mgrState.executor_result.sink_container).catch((err) => setLocalError(err.message)); }}
-                      style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 12px", background: "var(--accent)", color: "var(--accent-fg)", borderRadius: 8, fontSize: 12, fontWeight: 600, textDecoration: "none" }}
-                    >
-                      <Download size={12} /> Download output
-                    </a>
-                  )}
-                </div>
-                <div style={{ fontSize: 12, color: "var(--text-3)" }}>
-                  Stages: {mgrState.executor_result.stages?.join(" → ")}
-                </div>
+              <div className="muted" style={{ fontSize: 12.5, wordBreak: "break-word", whiteSpace: "pre-wrap" }}>
+                Run <span className="mono">{mgrState.run_id?.slice(0, 8)}</span>
+                {mgrState.retries > 0 ? ` · ${mgrState.retries} ${mgrState.retries === 1 ? "retry" : "retries"}` : ""}
+                {status === "completed" && mgrState.executor_result?.stages ? ` · ${mgrState.executor_result.stages.join(" → ")}` : ""}
+                {status === "failed" && (mgrState.error ? ` · ${mgrState.error}` : ` · ${mgrState.step}`)}
               </div>
+            </div>
+            {status === "completed" && mgrState.executor_result?.sink_container && (
+              <Button variant="primary" icon={Download}
+                onClick={() => executor.download(mgrState.executor_result.sink_container).catch((err) => setLocalError(err.message))}>
+                Download output
+              </Button>
             )}
           </div>
 
-          {/* The pipeline itself, stages lighting up as the executor reaches them */}
-          {(mgrState.plan?.stages?.length || savedPlan?.config?.stages?.length) ? (
-            <div style={S.card}>
-              <div style={S.cardHdr}><GitBranch size={14} color="var(--violet)" />Pipeline</div>
+          <Card title="Orchestration" icon={Activity} subtitle="Which agent is working on this run">
+            <AgentFlow runState={mgrState} hasPlan />
+          </Card>
+
+          {(mgrState.plan?.stages?.length || cfg?.stages?.length) ? (
+            <Card title="Pipeline" icon={GitBranch} subtitle="Stages light up as the executor reaches them">
               <PipelineFlow
-                plan={mgrState.plan?.stages?.length ? mgrState.plan : savedPlan.config}
+                plan={mgrState.plan?.stages?.length ? mgrState.plan : cfg}
                 runState={mgrState}
                 inputLabel={csvFile?.name}
               />
-            </div>
+            </Card>
           ) : null}
 
-          {/* Decision audit log */}
-          <div style={S.card}>
-            <div style={S.cardHdr}><Shield size={14} color="var(--accent)" />Decision Audit Log</div>
+          <Card title="Decision log" icon={Shield} subtitle={`${(mgrState.decisions || []).length} entries`}>
             <DecisionLog decisions={mgrState.decisions || []} />
-          </div>
+          </Card>
 
-          {/* Pre-check cards */}
-          {(mgrState.predictions?.stage_count || mgrState.cost_estimate?.total_usd !== undefined) && (
-            <div style={S.grid2}>
-              <PredictionsCard
-                predictions={mgrState.predictions}
-                cost={mgrState.cost_estimate}
-                resourcePlan={mgrState.resource_plan}
-              />
-              <ParallelismCard parallelism={mgrState.parallelism} />
-            </div>
-          )}
-
-          {/* Performance prediction */}
-          {mgrState.performance_prediction && (
-            <PerformancePredictionCard perf={mgrState.performance_prediction} />
-          )}
-
-          {/* Plan assurance (pre-execution verification) */}
-          {mgrState.plan_assurance && mgrState.plan_assurance.summary && (
-            <PlanAssuranceCard planAssurance={mgrState.plan_assurance} />
-          )}
-
-          {/* Assurance (post-execution runtime checks) */}
-          {mgrState.assurance && Object.keys(mgrState.assurance).length > 0 && (
-            <AssuranceCard assurance={mgrState.assurance} />
-          )}
-
-          {/* Plan summary */}
-          {mgrState.plan_summary && (
-            <div style={S.card}>
-              <div style={S.cardHdr}><GitBranch size={14} color="var(--text-3)" />Plan Summary</div>
-              <div style={{ fontSize: 12, color: "var(--text-3)" }}>
-                {mgrState.plan_summary.stage_count} stages ·{" "}
-                {mgrState.plan_summary.execution_order?.join(" → ")}
+          {(mgrState.predictions?.stage_count || mgrState.parallelism?.execution_groups) && (
+            <div className="grid grid-2" style={{ alignItems: "start" }}>
+              <ResourceCard predictions={mgrState.predictions} cost={mgrState.cost_estimate} resourcePlan={mgrState.resource_plan} />
+              <div className="stack" style={{ gap: 14 }}>
+                <ParallelismCard parallelism={mgrState.parallelism} />
+                <PerformanceCard perf={mgrState.performance_prediction} />
               </div>
-              {mgrState.validation?.warnings?.length > 0 && (
-                <div style={{ marginTop: 10 }}>
-                  {mgrState.validation.warnings.map((w, i) => (
-                    <div key={i} style={{ display: "flex", gap: 6, fontSize: 11, color: "var(--warn)", marginTop: 4 }}>
-                      <AlertTriangle size={11} style={{ flexShrink: 0, marginTop: 1 }} />{w}
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
           )}
-        </>
-      )}
 
-      {/* After a reload: the run id is known, its state is being fetched */}
-      {runId && !mgrState && !error && (
-        <div style={{ ...S.card, display: "flex", alignItems: "center", gap: 10, fontSize: 13, color: "var(--text-3)" }}>
-          <Spinner size={13} /> Loading run {runId.slice(0, 8)}…
-        </div>
-      )}
-
-      {/* Empty state — what a run will do, before one starts */}
-      {!runId && !mgrState && !error && (
-        <div style={S.card}>
-          <div style={S.cardHdr}><Activity size={14} color="var(--accent)" />How a run works</div>
-          <div style={{ fontSize: 13, color: "var(--text-3)", marginBottom: 14 }}>
-            Each run passes through these agents in order. Needs a plan from the Planner and a data file (CSV or JSON).
-            {!savedPlan && (
-              <> <button onClick={() => navigate("/planner")} style={{ color: "var(--accent)", background: "none", border: "none", cursor: "pointer", fontSize: 13, padding: 0 }}>Generate a plan →</button></>
-            )}
+          <div className="grid grid-2" style={{ alignItems: "start" }}>
+            <PlanAssuranceCard planAssurance={mgrState.plan_assurance} />
+            <AssuranceCard assurance={mgrState.assurance} />
           </div>
-          <AgentFlow hasPlan={!!savedPlan} />
+
+          {mgrState.validation?.warnings?.length > 0 && (
+            <Alert tone="warn" title="Plan warnings">
+              {mgrState.validation.warnings.map((w, i) => <div key={i}>{w}</div>)}
+            </Alert>
+          )}
         </div>
+      )}
+
+      {!runId && !mgrState && !error && (
+        <Card title="How a run works" icon={Activity} style={{ marginBottom: 14 }}
+          subtitle="Each run passes through these agents in order">
+          <AgentFlow hasPlan={!!savedPlan} />
+        </Card>
+      )}
+
+      {/* ── Recent runs ── */}
+      {allRuns.length > 0 && (
+        <Card title="Recent runs" icon={Clock} pad={false}>
+          <div style={{ overflowX: "auto" }}>
+            <table className="table">
+              <thead><tr><th /><th>Run</th><th>Status</th><th>Step</th><th>Stages</th><th>Started</th></tr></thead>
+              <tbody>
+                {allRuns.slice(0, 8).map((r) => (
+                  <tr key={r.run_id} className="clickable" onClick={() => attachToRun(r.run_id)}
+                    style={r.run_id === runId ? { background: "var(--surface-2)" } : undefined}>
+                    <td style={{ width: 24 }}><Dot tone={RUN_TONE(r.status)} live={isLive(r.status)} /></td>
+                    <td className="mono" style={{ color: "var(--text)" }}>{r.run_id.slice(0, 8)}</td>
+                    <td><Badge tone={RUN_TONE(r.status)}>{r.status?.replace("_", " ")}</Badge></td>
+                    <td className="muted" style={{ maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.step}</td>
+                    <td>{r.stage_count}</td>
+                    <td className="muted mono" style={{ fontSize: 12 }}>{(r.started_at || "").slice(5, 16).replace("T", " ")}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
       )}
     </div>
   );

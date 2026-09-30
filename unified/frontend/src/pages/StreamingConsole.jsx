@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { Radio, Upload, Square, RefreshCw } from "lucide-react";
 import { stream as streamApi } from "../api.js";
+import { Alert, Badge, Button, Card, Spinner } from "../ui/components.jsx";
 
-// The stream id is remembered so leaving the Manager tab doesn't orphan a
+// The stream id is remembered so leaving the Manager page doesn't orphan a
 // stream that is still active on the backend.
 const STREAM_KEY = "stream_id";
 function savedStreamId() {
@@ -20,6 +21,7 @@ export default function StreamingConsole({ config, schema, fileFormat = "csv" })
   const [rows,     setRows]     = useState([]);
   const [busy,     setBusy]     = useState(false);
   const [error,    setError]    = useState("");
+  const [over,     setOver]     = useState(false);
   const fileRef = useRef();
 
   const setStreamId = useCallback((sid) => { setStreamIdRaw(sid); saveStreamId(sid); }, []);
@@ -88,114 +90,73 @@ export default function StreamingConsole({ config, schema, fileFormat = "csv" })
 
   const cols = rows.length ? Object.keys(rows[0]) : [];
   const running = status?.running;
+  const state = status?.active ? (running ? "processing" : "live") : "stopped";
 
   return (
-    <div style={S.card}>
-      <div style={S.hdr}>
-        <Radio size={16} color="var(--accent)" />
-        Streaming Console
-        <span style={S.sub}>availableNow · drop data → processed incrementally</span>
-      </div>
+    <Card title="Streaming console" icon={Radio}
+      subtitle="Each file you add runs one incremental trigger (~1–2 min on Databricks); the checkpoint skips data already processed"
+      actions={streamId ? <Badge tone={state === "live" ? "ok" : state === "processing" ? "warn" : "neutral"} dot>{state}</Badge> : null}>
+      {error && <Alert tone="bad" style={{ marginBottom: 12 }}>{error}</Alert>}
 
       {!streamId ? (
-        <button style={S.primary(busy)} disabled={busy} onClick={start}>
-          <Radio size={13} /> {busy ? "Starting…" : "Start Streaming"}
-        </button>
+        <Button variant="primary" icon={Radio} loading={busy} onClick={start}>Start streaming</Button>
       ) : (
-        <>
-          <div style={S.metaRow}>
-            <Pill label="stream" value={streamId} />
-            <Pill label="state" value={status?.active ? (running ? "processing…" : "live") : "stopped"}
-                  color={status?.active ? (running ? "var(--warn)" : "var(--ok)") : "var(--text-3)"} />
-            <Pill label="triggers" value={status?.tick_count ?? 0} />
-            <Pill label="sink" value={status?.sink_container} />
+        <div className="stack" style={{ gap: 12 }}>
+          <div className="row muted" style={{ gap: 16, flexWrap: "wrap", fontSize: 12.5 }}>
+            <span>Stream <span className="mono" style={{ color: "var(--text)" }}>{streamId}</span></span>
+            <span>Triggers <b style={{ color: "var(--text)" }}>{status?.tick_count ?? 0}</b></span>
+            <span>Sink <span className="mono" style={{ color: "var(--text)" }}>{status?.sink_container || "—"}</span></span>
           </div>
 
           <div
+            className={`dropzone${over ? " over" : ""}`}
+            style={{ padding: "24px 16px", opacity: busy ? 0.6 : 1, cursor: busy ? "default" : "pointer" }}
             onClick={() => !busy && fileRef.current?.click()}
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => { e.preventDefault(); onDrop(e.dataTransfer.files[0]); }}
-            style={S.drop(busy)}
+            onDragOver={(e) => { e.preventDefault(); setOver(true); }}
+            onDragLeave={() => setOver(false)}
+            onDrop={(e) => { e.preventDefault(); setOver(false); onDrop(e.dataTransfer.files[0]); }}
+            role="button" tabIndex={0}
           >
-            <Upload size={20} color="var(--text-4)" />
-            <div style={{ marginTop: 6, fontSize: 13, color: "var(--text-2)" }}>
-              {busy ? "Processing new data…" : "Drop or click to add data to the stream"}
+            <div className="dropzone-icon" style={{ width: 36, height: 36, marginBottom: 8 }}>
+              {busy ? <Spinner size={16} /> : <Upload size={17} strokeWidth={1.8} />}
             </div>
-            <div style={{ fontSize: 11, color: "var(--text-3)" }}>
-              each drop runs one incremental trigger (~1–2 min on Databricks)
+            <div style={{ fontSize: 13.5, color: "var(--text)" }}>
+              {busy ? "Processing new data…" : "Drop a file or click to add data to the stream"}
             </div>
-            <input
-              ref={fileRef} type="file" accept=".csv,.json,.jsonl,.ndjson" hidden
-              onChange={(e) => { onDrop(e.target.files[0]); e.target.value = ""; }}
-            />
+            <input ref={fileRef} type="file" accept=".csv,.json,.jsonl,.ndjson" hidden
+              onChange={(e) => { onDrop(e.target.files[0]); e.target.value = ""; }} />
           </div>
 
-          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-            <button style={S.ghost} disabled={busy} onClick={() => refresh(streamId)}>
-              <RefreshCw size={12} /> Refresh output
-            </button>
+          <div className="row" style={{ gap: 8 }}>
+            <Button size="sm" icon={RefreshCw} disabled={busy} onClick={() => refresh(streamId)}>Refresh output</Button>
             {status?.active ? (
-              <button style={S.ghost} onClick={stop}><Square size={12} /> Stop stream</button>
+              <Button size="sm" variant="danger" icon={Square} onClick={stop}>Stop stream</Button>
             ) : (
-              <button style={S.ghost} onClick={() => { setStreamId(null); setStatus(null); setRows([]); setError(""); }}>
-                <Radio size={12} /> New stream
-              </button>
+              <Button size="sm" icon={Radio} onClick={() => { setStreamId(null); setStatus(null); setRows([]); setError(""); }}>New stream</Button>
             )}
           </div>
 
-          {status?.last_error && (
-            <div style={S.err}>Last tick error: {status.last_error}</div>
-          )}
+          {status?.last_error && <Alert tone="bad" title="Last trigger failed">{status.last_error}</Alert>}
 
-          <div style={{ marginTop: 12, fontSize: 12, color: "var(--text-2)" }}>
-            Output — {rows.length} row(s) in sink
+          <div>
+            <div className="list-title">Output — {rows.length} row(s) in the sink</div>
+            {rows.length > 0 ? (
+              <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: "var(--radius)" }}>
+                <table className="preview-table">
+                  <thead><tr>{cols.map((c) => <th key={c}>{c}</th>)}</tr></thead>
+                  <tbody>
+                    {rows.slice(0, 50).map((r, i) => (
+                      <tr key={i}>{cols.map((c) => <td key={c}>{String(r[c])}</td>)}</tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="muted" style={{ fontSize: 13 }}>No output yet — add a file to generate results.</div>
+            )}
           </div>
-          {rows.length > 0 ? (
-            <div style={{ overflowX: "auto", marginTop: 6 }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-                <thead>
-                  <tr>{cols.map((c) => <th key={c} style={S.th}>{c}</th>)}</tr>
-                </thead>
-                <tbody>
-                  {rows.slice(0, 50).map((r, i) => (
-                    <tr key={i}>{cols.map((c) => <td key={c} style={S.td}>{String(r[c])}</td>)}</tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <div style={{ fontSize: 12, color: "var(--text-3)", marginTop: 6 }}>
-              No output yet — drop a file to generate results.
-            </div>
-          )}
-        </>
+        </div>
       )}
-
-      {error && <div style={S.err}>{error}</div>}
-    </div>
+    </Card>
   );
 }
-
-function Pill({ label, value, color = "var(--text-2)" }) {
-  return (
-    <div style={{ fontSize: 11, color: "var(--text-3)" }}>
-      {label}: <span style={{ color, fontWeight: 600 }}>{String(value)}</span>
-    </div>
-  );
-}
-
-const S = {
-  card: { background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: 20, marginTop: 16 },
-  hdr:  { display: "flex", alignItems: "center", gap: 8, fontSize: 15, fontWeight: 700, color: "var(--text)", marginBottom: 12 },
-  sub:  { fontSize: 11, color: "var(--text-4)", fontWeight: 400 },
-  metaRow: { display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 12 },
-  primary: (d) => ({ display: "flex", alignItems: "center", gap: 7, padding: "10px 16px", fontSize: 13, fontWeight: 700,
-    background: d ? "var(--accent-soft)" : "var(--accent)", color: "var(--accent-fg)", border: "none", borderRadius: 8, cursor: d ? "default" : "pointer" }),
-  drop: (d) => ({ border: "1px dashed var(--border-strong)", borderRadius: 10, padding: 24, textAlign: "center",
-    cursor: d ? "default" : "pointer", background: "var(--surface-2)", opacity: d ? 0.6 : 1 }),
-  ghost: { display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", fontSize: 12, background: "transparent",
-    color: "var(--text-2)", border: "1px solid var(--border)", borderRadius: 8, cursor: "pointer" },
-  th: { textAlign: "left", padding: "6px 10px", borderBottom: "1px solid var(--border)", color: "var(--text-3)", whiteSpace: "nowrap" },
-  td: { padding: "5px 10px", borderBottom: "1px solid var(--divider)", color: "var(--text-2)", whiteSpace: "nowrap" },
-  err: { marginTop: 10, fontSize: 12, color: "var(--bad)", background: "var(--bad-soft)", padding: "8px 10px", borderRadius: 8 },
-};

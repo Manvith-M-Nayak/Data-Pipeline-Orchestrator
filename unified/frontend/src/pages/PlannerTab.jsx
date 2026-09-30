@@ -1,76 +1,14 @@
 import React, { useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
+import {
+  ArrowRight, Brain, FileText, GitBranch, RotateCcw, Settings, ShieldCheck, Sparkles, Upload, Wand2,
+} from "lucide-react";
 import { schema as schemaApi, planner, assurance } from "../api.js";
 import { useAppContext } from "../AppContext.jsx";
 import PipelineFlow from "../flows/PipelineFlow.jsx";
 import {
-  Upload, Brain, CheckCircle, XCircle, Zap, RotateCcw, ArrowRight, Settings, ShieldCheck,
-} from "lucide-react";
-
-const C = {
-  page:   { maxWidth: 760, margin: "0 auto" },
-  header: { marginBottom: 28 },
-  agent:  { display: "flex", alignItems: "center", gap: 10, marginBottom: 6 },
-  agentBadge: {
-    padding: "4px 12px", background: "var(--violet-soft)", border: "1px solid var(--violet-line)",
-    borderRadius: 20, fontSize: 12, fontWeight: 700, color: "var(--violet)",
-    display: "flex", alignItems: "center", gap: 6,
-  },
-  title:  { fontSize: 22, fontWeight: 700, color: "var(--text)", marginBottom: 4 },
-  sub:    { fontSize: 13, color: "var(--text-3)" },
-  card:   { background: "var(--surface)", borderRadius: 14, padding: 24, border: "1px solid var(--border)", marginBottom: 16 },
-  cardHdr:{ fontSize: 15, fontWeight: 700, color: "var(--text)", marginBottom: 4, display: "flex", alignItems: "center", gap: 8 },
-  cardSub:{ fontSize: 13, color: "var(--text-3)", marginBottom: 18 },
-  drop:   (active, hasFile) => ({
-    border: `2px dashed ${hasFile ? "var(--ok)" : active ? "var(--accent)" : "var(--border-strong)"}`,
-    borderRadius: 12, padding: "30px 20px", textAlign: "center", cursor: "pointer",
-    background: active ? "var(--surface-2)" : "transparent", transition: "all 0.2s",
-  }),
-  table:  { width: "100%", borderCollapse: "collapse", fontSize: 12, marginTop: 4 },
-  th:     { padding: "8px 10px", textAlign: "left", color: "var(--text-3)", borderBottom: "1px solid var(--border)", fontWeight: 600, fontSize: 11, textTransform: "uppercase" },
-  td:     { padding: "7px 10px", borderBottom: "1px solid var(--divider)", color: "var(--text-2)", fontFamily: "monospace" },
-  typeBadge: (t) => ({
-    display: "inline-block", padding: "1px 7px", borderRadius: 10, fontSize: 11, fontWeight: 700,
-    background: t === "integer" ? "var(--accent-soft)" : t === "double" ? "var(--violet-soft)" : "var(--ok-soft)",
-    color:      t === "integer" ? "var(--accent)" : t === "double" ? "var(--violet)" : "var(--ok)",
-  }),
-  textarea: {
-    width: "100%", background: "var(--surface-2)", border: "1px solid var(--border)",
-    color: "var(--text)", borderRadius: 10, padding: "12px 14px", fontSize: 14,
-    resize: "none", lineHeight: 1.6, outline: "none",
-  },
-  btnRow: { display: "flex", gap: 10, marginTop: 18, alignItems: "center", flexWrap: "wrap" },
-  btnPrimary: (disabled) => ({
-    padding: "10px 22px", background: disabled ? "var(--surface-2)" : "var(--accent)",
-    color: disabled ? "var(--text-4)" : "var(--accent-fg)", border: "none", borderRadius: 10,
-    cursor: disabled ? "not-allowed" : "pointer", fontSize: 13, fontWeight: 600,
-    display: "inline-flex", alignItems: "center", gap: 7,
-  }),
-  btnSecondary: {
-    padding: "10px 18px", background: "transparent", color: "var(--text-3)",
-    border: "1px solid var(--border)", borderRadius: 10, cursor: "pointer",
-    fontSize: 13, display: "inline-flex", alignItems: "center", gap: 6,
-  },
-  successBox: {
-    background: "var(--ok-soft)", borderRadius: 10, padding: 16,
-    border: "1px solid var(--ok-line)", marginTop: 14,
-    display: "flex", alignItems: "flex-start", gap: 12,
-  },
-  errBox: {
-    background: "var(--bad-soft)", borderRadius: 8, padding: "10px 14px", marginBottom: 14,
-    color: "var(--bad)", fontSize: 13, display: "flex", gap: 8,
-  },
-};
-
-function Spinner() {
-  return (
-    <span style={{
-      display: "inline-block", width: 13, height: 13,
-      border: "2px solid var(--border)", borderTopColor: "var(--violet)",
-      borderRadius: "50%", animation: "spin 0.7s linear infinite",
-    }} />
-  );
-}
+  Alert, Badge, Button, Card, Field, PageHeader, Segmented, Spinner,
+} from "../ui/components.jsx";
 
 // Mirrors DEFAULT_EDITABLE_SETTINGS in planner_agent/planner_common.py —
 // used until a plan arrives with its own editable_settings.
@@ -82,10 +20,10 @@ const DEFAULT_EDITABLE = {
 };
 
 const SETTING_LABELS = {
-  diu:                "DIU (Copy Activity)",
-  num_workers:        "Notebook Workers",
-  shuffle_partitions: "Shuffle Partitions",
-  node_type:          "Node Type",
+  diu:                "Copy throughput (DIU)",
+  num_workers:        "Databricks workers",
+  shuffle_partitions: "Shuffle partitions",
+  node_type:          "Node type",
 };
 
 const EXAMPLE_PROMPTS = [
@@ -276,446 +214,266 @@ export default function PlannerTab() {
     setAssuranceResult(null);   // groups changed — previous validation is stale
   }
 
+  const cols = Object.entries(detected?.columns || {});
+  const rows = detected?.row_count ?? detected?.row_count_sample;
+
+  // ── render ─────────────────────────────────────────────────────────────────
   return (
-    <div style={C.page}>
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    <div>
+      <PageHeader
+        eyebrow="Build" icon={Brain}
+        title="Planner"
+        description="Describe what should happen to your data. The planner model designs the ADF + Databricks pipeline, then checks its own design against your data and request."
+        actions={<Button size="sm" icon={Sparkles} onClick={() => navigate("/new")}>Guided mode</Button>}
+      />
 
-      <div style={C.header}>
-        <div style={C.agent}>
-          <span style={C.agentBadge}><Brain size={13} /> Planner Agent</span>
-        </div>
-        <h1 style={C.title}>Design your pipeline</h1>
-        <p style={C.sub}>Upload data, describe your goal — AI designs the ADF + Databricks pipeline config.</p>
-      </div>
+      {error && <Alert tone="bad" style={{ marginBottom: 14 }}>{error}</Alert>}
 
-      {error && (
-        <div style={C.errBox}><XCircle size={14} style={{ flexShrink: 0 }} />{error}</div>
-      )}
+      <input ref={fileRef} type="file" accept=".csv,.json,.jsonl,.ndjson" hidden
+        onChange={(e) => { handleFile(e.target.files[0]); e.target.value = ""; }} />
 
-      {/* Upload */}
-      <div style={C.card}>
-        <div style={C.cardHdr}><Upload size={16} color="var(--accent)" />Upload Data File</div>
-        <div style={C.cardSub}>Drop a CSV or JSON file — column names and types detected automatically.</div>
+      {/* ── Data ── */}
+      {!(csvFile && detected) && !detecting ? (
         <div
-          style={C.drop(dragging, !!csvFile)}
+          className={`dropzone${dragging ? " over" : ""}`}
+          style={{ marginBottom: 14 }}
           onClick={() => fileRef.current.click()}
           onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
           onDragLeave={() => setDragging(false)}
           onDrop={onDrop}
+          role="button" tabIndex={0}
+          onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && fileRef.current.click()}
         >
-          <input ref={fileRef} type="file" accept=".csv,.json,.jsonl,.ndjson" hidden onChange={(e) => { handleFile(e.target.files[0]); e.target.value = ""; }} />
-          <Upload size={32} color={csvFile ? "var(--ok)" : dragging ? "var(--accent)" : "var(--border-strong)"} style={{ marginBottom: 10 }} />
-          {detecting ? (
-            <div style={{ fontSize: 14, color: "var(--text-2)" }}>Detecting schema… <Spinner /></div>
-          ) : csvFile && detected ? (
-            <div style={{ fontSize: 14, color: "var(--ok)", fontWeight: 600 }}>
-              <CheckCircle size={14} style={{ verticalAlign: "middle", marginRight: 6 }} />
-              {csvFile.name} · {detected?.column_count} columns · {(detected?.row_count ?? detected?.row_count_sample)?.toLocaleString()} rows
-              <span style={{ marginLeft: 10, fontSize: 12, color: "var(--text-3)", cursor: "pointer" }}
-                onClick={(e) => { e.stopPropagation(); reset(); }}>
-                Change
-              </span>
+          <div className="dropzone-icon"><Upload size={20} strokeWidth={1.8} /></div>
+          <div style={{ fontSize: 15, fontWeight: 500, color: "var(--text)" }}>Drop a data file, or click to choose</div>
+          <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>CSV with a header row · JSON array of objects · NDJSON</div>
+          {detected && !csvFile && (
+            <div style={{ fontSize: 12.5, color: "var(--warn)", marginTop: 10 }}>
+              The plan below was made for “{detected.file_name || csvName || "your file"}” — choose it again to run it.
             </div>
-          ) : (
-            <>
-              <div style={{ fontSize: 14, color: "var(--text-3)", fontWeight: 600 }}>Click or drag-and-drop your CSV or JSON</div>
-              <div style={{ fontSize: 12, color: "var(--text-4)" }}>CSV with a header row · JSON array of objects · NDJSON</div>
-            </>
           )}
         </div>
-
-        {/* Schema preview */}
-        {detected && (
-          <div style={{ marginTop: 16, overflowX: "auto" }}>
-            <table style={C.table}>
-              <thead>
-                <tr>
-                  <th style={C.th}>Column</th>
-                  <th style={C.th}>Type</th>
-                  {detected.preview?.[0] && Object.keys(detected.preview[0]).slice(0, 3).map((_, i) => (
-                    <th key={i} style={C.th}>Sample {i + 1}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {Object.entries(detected.columns || {}).map(([col, type]) => (
-                  <tr key={col}>
-                    <td style={{ ...C.td, fontWeight: 600, color: "var(--text)" }}>{col}</td>
-                    <td style={C.td}><span style={C.typeBadge(type)}>{type}</span></td>
-                    {(detected.preview || []).slice(0, 3).map((row, i) => (
-                      <td key={i} style={C.td}>{row[col] ?? "—"}</td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {/* Prompt — stays visible after planning so it can be edited + re-run */}
-      {detected && (
-        <div style={C.card}>
-          <div style={C.cardHdr}><Brain size={16} color="var(--violet)" />Describe your goal</div>
-          <div style={C.cardSub}>
-            {plan
-              ? "Edit the prompt and re-generate to refine the plan."
-              : "Plain English — no technical knowledge needed."}
-          </div>
-
-          <textarea
-            style={{ ...C.textarea, minHeight: 80 }}
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder="e.g. Filter active users, group by region, calculate average order value."
-            onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) handlePlan(); }}
-          />
-
-          {!plan && (
+      ) : (
+        <Card
+          style={{ marginBottom: 14 }}
+          icon={FileText}
+          title={detecting ? "Reading your file…" : <span className="mono">{csvFile?.name}</span>}
+          subtitle={detecting ? undefined : `${rows?.toLocaleString() ?? "?"} rows · ${cols.length} columns · ${(detected?.file_format || "csv").toUpperCase()}`}
+          actions={!detecting && <>
+            <Button size="sm" icon={RotateCcw} onClick={() => fileRef.current.click()}>Change file</Button>
+            <Button size="sm" variant="ghost" onClick={reset}>Clear</Button>
+          </>}
+        >
+          {detecting ? <div className="row muted" style={{ gap: 8 }}><Spinner /> Detecting columns and types…</div> : (
             <>
-              <div style={{ marginTop: 8, marginBottom: 6, fontSize: 11, color: "var(--text-4)" }}>Click an example to use it:</div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {EXAMPLE_PROMPTS.map((p, i) => (
-                  <button key={i} onClick={() => setPrompt(p)}
-                    style={{ fontSize: 11, color: "var(--text-3)", background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 6, padding: "4px 8px", cursor: "pointer", textAlign: "left" }}>
-                    {p.slice(0, 55)}…
-                  </button>
-                ))}
+              <div className="chips">
+                {cols.map(([c, t]) => <span key={c} className="chip"><span className="mono">{c}</span><small>{t}</small></span>)}
               </div>
+              {(detected?.preview || []).length > 0 && (
+                <details style={{ marginTop: 12 }}>
+                  <summary className="link" style={{ fontSize: 13 }}>Preview rows</summary>
+                  <div style={{ overflowX: "auto", marginTop: 8 }}>
+                    <table className="preview-table">
+                      <thead><tr>{cols.map(([c]) => <th key={c}>{c}</th>)}</tr></thead>
+                      <tbody>
+                        {detected.preview.slice(0, 5).map((r, i) => (
+                          <tr key={i}>{cols.map(([c]) => <td key={c}>{r[c] ?? "—"}</td>)}</tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </details>
+              )}
             </>
           )}
-
-          <div style={C.btnRow}>
-            <button style={C.btnPrimary(!prompt.trim() || planning)} disabled={!prompt.trim() || planning} onClick={handlePlan}>
-              <Brain size={13} />{planning ? <><Spinner /> Planning…</> : plan ? "Re-generate Plan" : "Generate Pipeline Plan"}
-            </button>
-          </div>
-        </div>
+        </Card>
       )}
 
-      {/* Pipeline settings — stage count + cloud resources */}
+      {/* ── Request + settings ── */}
       {detected && (
-        <div style={C.card}>
-          <div style={C.cardHdr}>
-            <Settings size={16} color="var(--warn)" />Pipeline Settings
-            <span style={{ fontSize: 11, color: "var(--text-4)", fontWeight: 400 }}>(optional)</span>
-          </div>
-          <div style={C.cardSub}>
-            Auto uses size-based recommendations. Override to control stage count and cloud resources
-            {plan ? " — then re-plan to apply." : " before generating the plan."}
-          </div>
-
-          {/* Pipeline mode: batch (ETL, run-to-completion) vs streaming (incremental) */}
-          <div style={{ marginBottom: 14 }}>
-            <div style={{ fontSize: 12, color: "var(--text-2)", marginBottom: 6 }}>Pipeline Mode</div>
-            <div style={{ display: "flex", gap: 8 }}>
-              {[
-                { id: "batch",     label: "Batch (ETL)",  hint: "Process the whole dataset once, then finish." },
-                { id: "streaming", label: "Streaming",    hint: "Incremental: each run processes only new data (checkpointed)." },
-              ].map((m) => (
-                <button
-                  key={m.id}
-                  onClick={() => setPipelineMode(m.id)}
-                  title={m.hint}
-                  style={{
-                    flex: 1, padding: "10px 12px", cursor: "pointer", textAlign: "left",
-                    borderRadius: 8, fontSize: 13, fontWeight: pipelineMode === m.id ? 700 : 400,
-                    color: pipelineMode === m.id ? "var(--accent)" : "var(--text-2)",
-                    background: pipelineMode === m.id ? "var(--accent-soft)" : "var(--surface-2)",
-                    border: `1px solid ${pipelineMode === m.id ? "var(--accent)" : "var(--border-strong)"}`,
-                  }}
-                >
-                  {m.label}
-                  <div style={{ fontSize: 11, fontWeight: 400, color: "var(--text-3)", marginTop: 2 }}>{m.hint}</div>
-                </button>
-              ))}
-            </div>
-            {pipelineMode === "streaming" && (
-              <div style={{ marginTop: 10 }}>
-                <div style={{ fontSize: 12, color: "var(--text-2)", marginBottom: 6 }}>Streaming Stages</div>
-                <div style={{ display: "flex", gap: 8 }}>
-                  {[
-                    { id: "single", label: "Single stage",
-                      hint: "All steps in one incremental stage — one Databricks job per run (fastest, cheapest)." },
-                    { id: "multi",  label: "Multiple stages",
-                      hint: "One incremental stage per step, chained with their own checkpoints — one job per stage per run." },
-                  ].map((l) => (
-                    <button
-                      key={l.id}
-                      onClick={() => setStreamLayout(l.id)}
-                      title={l.hint}
-                      style={{
-                        flex: 1, padding: "8px 12px", cursor: "pointer", textAlign: "left",
-                        borderRadius: 8, fontSize: 12, fontWeight: streamLayout === l.id ? 700 : 400,
-                        color: streamLayout === l.id ? "var(--accent)" : "var(--text-2)",
-                        background: streamLayout === l.id ? "var(--accent-soft)" : "var(--surface-2)",
-                        border: `1px solid ${streamLayout === l.id ? "var(--accent)" : "var(--border-strong)"}`,
-                      }}
-                    >
-                      {l.label}
-                      <div style={{ fontSize: 11, fontWeight: 400, color: "var(--text-3)", marginTop: 2 }}>{l.hint}</div>
-                    </button>
+        <div className="grid describe-grid" style={{ marginBottom: 14 }}>
+          <Card title="Your request" icon={Brain}
+            subtitle={plan ? "Edit and design again to refine the plan." : "Plain English — number the steps if order matters."}>
+            <textarea
+              className="input" rows={4} value={prompt} disabled={planning}
+              onChange={(e) => setPrompt(e.target.value)}
+              placeholder="e.g. Filter active users, group by region, calculate average order value."
+              onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) handlePlan(); }}
+            />
+            {!plan && (
+              <>
+                <div className="field-label" style={{ marginTop: 12 }}>Examples</div>
+                <div className="chips">
+                  {EXAMPLE_PROMPTS.map((p) => (
+                    <button key={p} className="chip" onClick={() => setPrompt(p)}>{p}</button>
                   ))}
                 </div>
-                <div style={{ fontSize: 11, color: "var(--warn)", marginTop: 6 }}>
-                  Each run processes only newly arrived data (checkpointed). Aggregations cover
-                  each run's new rows, not everything so far.
-                </div>
-              </div>
+              </>
             )}
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <div>
-              <div style={{ fontSize: 12, color: "var(--text-2)", marginBottom: 4 }}>
-                Storage Containers (2–10)
-                <span style={{ color: "var(--text-4)", marginLeft: 6 }}>
-                  {numStages !== null
-                    ? `= 1 copy + ${numStages - 2} transform stage(s)`
-                    : "auto — model decides"}
-                </span>
-              </div>
-              <input
-                type="number" min={2} max={10} value={numStages ?? ""} placeholder="auto"
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setNumStages(v === "" ? null : Math.max(2, Math.min(10, Number(v) || 3)));
-                }}
-                style={{ ...C.textarea, padding: "8px 10px", fontSize: 13 }}
-                title="N containers = N−1 stages: the first stage is always an ADF Copy (ingest); the rest are Databricks notebooks. Leave empty to let the planner decide."
-              />
+            <div className="wizard-foot">
+              {planning && <span className="muted" style={{ fontSize: 12.5 }}>Designing and self-checking — usually under a minute</span>}
+              <div className="spacer" />
+              <Button variant="primary" icon={Wand2} loading={planning} disabled={!prompt.trim()} onClick={handlePlan}>
+                {plan ? "Design again" : "Design pipeline"}
+              </Button>
             </div>
-            <div>
-              <div style={{ fontSize: 12, color: "var(--text-2)", marginBottom: 4 }}>
-                Container Names (comma-separated)
-                {containerNamesMismatch && (
-                  <span style={{ color: "var(--warn)", marginLeft: 6 }}>
-                    {numStages === null
-                      ? "set container count first — ignored"
-                      : `${containerNameCount} name(s) ≠ ${numStages} containers — ignored`}
-                  </span>
-                )}
-              </div>
-              <input
-                type="text" value={containerNames} placeholder="auto (e.g. raw, bronze, silver)"
-                onChange={(e) => setContainerNames(e.target.value)}
-                style={{ ...C.textarea, padding: "8px 10px", fontSize: 13 }}
-              />
-            </div>
+          </Card>
 
-            {Object.keys(SETTING_LABELS).map((key) => {
-              const options = plan?.config?.editable_settings?.[key] || DEFAULT_EDITABLE[key];
-              const recommended = plan?.config?.recommended_settings?.[key];
-              return (
-                <div key={key}>
-                  <div style={{ fontSize: 12, color: "var(--text-2)", marginBottom: 4 }}>{SETTING_LABELS[key]}</div>
-                  <select
-                    value={overrides[key]}
-                    onChange={(e) => setOverrides({ ...overrides, [key]: e.target.value })}
-                    style={{ ...C.textarea, padding: "8px 10px", fontSize: 13 }}
-                  >
-                    <option value="">
-                      Auto{recommended !== undefined ? ` (recommended: ${recommended})` : " (recommended)"}
-                    </option>
-                    {options.map((o) => (
-                      <option key={o} value={o}>{o}</option>
-                    ))}
-                  </select>
+          <Card title="Settings" icon={Settings} subtitle="Optional — auto uses size-based recommendations">
+            <div className="stack" style={{ gap: 14 }}>
+              <Field label="Processing" hint={pipelineMode === "batch" ? "Whole dataset once." : "Only new data each run (checkpointed)."}>
+                <Segmented value={pipelineMode} onChange={setPipelineMode}
+                  options={[{ value: "batch", label: "Batch" }, { value: "streaming", label: "Streaming" }]} />
+              </Field>
+              {pipelineMode === "streaming" && (
+                <Field label="Streaming stages" hint="Aggregations cover each run's new rows, not everything so far.">
+                  <Segmented value={streamLayout} onChange={setStreamLayout}
+                    options={[{ value: "single", label: "Single" }, { value: "multi", label: "Multiple" }]} />
+                </Field>
+              )}
+              <Field label="Storage containers"
+                hint={numStages !== null ? `= 1 copy + ${numStages - 2} transform stage(s)` : "Auto — the planner decides (2–10)"}>
+                <input className="input" type="number" min={2} max={10} value={numStages ?? ""} placeholder="auto"
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setNumStages(v === "" ? null : Math.max(2, Math.min(10, Number(v) || 3)));
+                  }} />
+              </Field>
+              <Field label="Container names"
+                hint={containerNamesMismatch
+                  ? <span style={{ color: "var(--warn)" }}>{numStages === null ? "Set the container count first — ignored" : `${containerNameCount} name(s) ≠ ${numStages} containers — ignored`}</span>
+                  : "Comma-separated, optional"}>
+                <input className="input" value={containerNames} placeholder="raw, bronze, silver"
+                  onChange={(e) => setContainerNames(e.target.value)} />
+              </Field>
+              <details>
+                <summary className="link" style={{ fontSize: 13 }}>Compute overrides</summary>
+                <div className="stack" style={{ gap: 12, marginTop: 10 }}>
+                  {Object.keys(SETTING_LABELS).map((key) => {
+                    const options = cfg?.editable_settings?.[key] || DEFAULT_EDITABLE[key];
+                    const recommended = cfg?.recommended_settings?.[key];
+                    return (
+                      <Field key={key} label={SETTING_LABELS[key]}>
+                        <select className="input" value={overrides[key]}
+                          onChange={(e) => setOverrides({ ...overrides, [key]: e.target.value })}>
+                          <option value="">Auto{recommended !== undefined ? ` (recommended: ${recommended})` : ""}</option>
+                          {options.map((o) => <option key={o} value={o}>{o}</option>)}
+                        </select>
+                      </Field>
+                    );
+                  })}
                 </div>
-              );
-            })}
-          </div>
-
-          {plan && (
-            <div style={C.btnRow}>
-              <button
-                style={C.btnPrimary(planning || !prompt.trim())}
-                disabled={planning || !prompt.trim()}
-                onClick={handlePlan}
-              >
-                <Settings size={13} />{planning ? <><Spinner /> Re-planning…</> : "Apply Settings & Re-plan"}
-              </button>
+              </details>
             </div>
-          )}
+          </Card>
         </div>
       )}
 
-      {/* Plan result */}
-      {plan && (
-        <div style={C.card}>
-          <div style={C.cardHdr}><Brain size={16} color="var(--violet)" />Pipeline Plan — Ready</div>
+      {/* ── Plan ── */}
+      {planning && !plan && (
+        <Card><div className="row" style={{ gap: 12 }}><Spinner size={16} /> <span>Designing your pipeline, then checking it against your data and request…</span></div></Card>
+      )}
 
-          <div style={C.successBox}>
-            <CheckCircle size={18} color="var(--ok)" style={{ flexShrink: 0, marginTop: 1 }} />
-            <div>
-              <div style={{ fontWeight: 700, color: "var(--ok)", marginBottom: 4 }}>
-                Plan generated · {plan.config?.stages?.length} stage(s)
-                {plan.used_fallback && <span style={{ marginLeft: 8, fontSize: 11, color: "var(--warn)" }}>fallback used</span>}
-                {plan.config?.streaming?.layout && (
-                  <span style={{ marginLeft: 8, fontSize: 11, color: "var(--accent)" }}>
-                    streaming · {plan.config.streaming.layout === "multi"
-                      ? `${plan.config.stages?.length || 0} stages` : "single stage"}
-                  </span>
-                )}
-              </div>
-              <div style={{ fontSize: 13, color: "var(--text-3)" }}>{plan.config?.reasoning}</div>
-            </div>
-          </div>
-
-          {plan.config?.streaming?.layout_note && (
-            <div style={{ fontSize: 12, color: "var(--accent)", background: "var(--accent-soft)", border: "1px solid var(--accent-line)",
-                          borderRadius: 8, padding: "8px 10px", marginBottom: 10 }}>
-              ℹ {plan.config.streaming.layout_note}
-            </div>
-          )}
-
+      {plan && cfg && (
+        <Card
+          title="Pipeline plan" icon={GitBranch}
+          subtitle={`${cfg.stages?.length || 0} stage(s) · ${cfg.mode === "streaming" ? `streaming, ${cfg.streaming?.layout === "multi" ? "multiple stages" : "single stage"}` : "batch"}`}
+          actions={plan.used_fallback ? <Badge tone="warn">fallback design</Badge> : null}
+        >
+          {cfg.reasoning && <p className="muted" style={{ fontSize: 13, marginBottom: 12 }}>{cfg.reasoning}</p>}
+          {cfg.streaming?.layout_note && <Alert tone="accent" style={{ marginBottom: 12 }}>{cfg.streaming.layout_note}</Alert>}
           {passThroughStages.length > 0 && (
-            <div style={{
-              background: "var(--warn-soft)", border: "1px solid var(--warn-line)", borderRadius: 8,
-              padding: "10px 14px", marginTop: 12, fontSize: 12, color: "var(--warn)",
-            }}>
-              ⚠ {passThroughStages.map((s) => s.name).join(", ")}{" "}
-              {passThroughStages.length > 1 ? "do" : "does"} nothing except copy data forward.
-              Reduce Storage Containers in Pipeline Settings, or re-plan with a prompt
-              describing what each stage should do.
-            </div>
+            <Alert tone="warn" style={{ marginBottom: 12 }}>
+              <span className="mono">{passThroughStages.map((s) => s.name).join(", ")}</span>{" "}
+              {passThroughStages.length > 1 ? "do" : "does"} nothing except copy data forward. Lower the container count, or describe what each stage should do.
+            </Alert>
           )}
 
-          {/* Stages as a data-flow graph: input → copy → steps (parallel stacked) → output */}
-          <div style={{ marginTop: 14 }}>
-            <PipelineFlow plan={plan.config} inputLabel={csvFile?.name || csvName} />
-          </div>
+          <PipelineFlow plan={cfg} inputLabel={csvFile?.name || csvName} />
 
-          {cfg?.recommended_settings && (
-            <div style={{ marginTop: 12, fontSize: 12, color: "var(--text-3)" }}>
-              Resources: DIU {cfg.recommended_settings.diu} ·{" "}
-              workers {cfg.recommended_settings.num_workers} ·{" "}
-              shuffle {cfg.recommended_settings.shuffle_partitions} ·{" "}
-              {cfg.recommended_settings.node_type}
+          {cfg.recommended_settings && (
+            <div className="row muted" style={{ gap: 14, flexWrap: "wrap", fontSize: 12.5, marginTop: 10 }}>
+              <span>DIU <b style={{ color: "var(--text)" }}>{cfg.recommended_settings.diu}</b></span>
+              <span>Workers <b style={{ color: "var(--text)" }}>{cfg.recommended_settings.num_workers}</b></span>
+              <span>Shuffle <b style={{ color: "var(--text)" }}>{cfg.recommended_settings.shuffle_partitions}</b></span>
+              <span>Node <b className="mono" style={{ color: "var(--text)" }}>{cfg.recommended_settings.node_type}</b></span>
             </div>
           )}
 
           {/* Execution flow — user-controlled concurrency */}
           {stageNames.length > 1 && (
-            <div style={{ marginTop: 18 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)", marginBottom: 4 }}>
-                Execution Flow
+            <details style={{ marginTop: 16 }}>
+              <summary className="link" style={{ fontSize: 13 }}>Edit execution order ({execGroups.length} group{execGroups.length > 1 ? "s" : ""})</summary>
+              <div className="muted" style={{ fontSize: 12.5, margin: "8px 0 10px" }}>
+                Stages in the same group run in parallel; groups run in order. Data dependencies are checked and repaired at run time.
               </div>
-              <div style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 10 }}>
-                Stages in the same group run in parallel; groups run in order.
-                Data dependencies are validated and auto-repaired at run time.
-              </div>
-              {execGroups.map((g, gi) => (
-                <div key={gi} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                  <span style={{ fontSize: 11, color: g.length > 1 ? "var(--violet)" : "var(--text-3)", width: 70, flexShrink: 0, fontWeight: 600 }}>
-                    Group {gi + 1}{g.length > 1 ? " ⚡" : ""}
-                  </span>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              <div className="stack" style={{ gap: 8 }}>
+                {execGroups.map((g, gi) => (
+                  <div key={gi} className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                    <span style={{ width: 74, fontSize: 12, fontWeight: 500, color: g.length > 1 ? "var(--violet)" : "var(--text-3)" }}>
+                      Group {gi + 1}{g.length > 1 ? " · ∥" : ""}
+                    </span>
                     {g.map((n) => {
-                      const st = cfg.stages.find((s) => s.name === n);
-                      const locked = st?.type === "copy";
+                      const locked = cfg.stages.find((s) => s.name === n)?.type === "copy";
                       return (
-                        <span key={n} style={{
-                          display: "inline-flex", alignItems: "center", gap: 6,
-                          background: "var(--surface-2)", border: "1px solid var(--border)",
-                          borderRadius: 8, padding: "4px 8px", fontSize: 11, color: "var(--text-2)",
-                        }}>
-                          {n}
-                          <select
-                            value={gi}
-                            disabled={locked}
-                            title={locked ? "Copy stage always runs first" : "Move to another group"}
+                        <span key={n} className="chip">
+                          <span className="mono">{n}</span>
+                          <select value={gi} disabled={locked}
+                            title={locked ? "The copy stage always runs first" : "Move to another group"}
                             onChange={(e) => setStageGroup(n, Number(e.target.value))}
-                            style={{
-                              background: "var(--surface)", color: locked ? "var(--text-4)" : "var(--text-2)",
-                              border: "1px solid var(--border)", borderRadius: 6, fontSize: 11,
-                            }}
-                          >
-                            {stageNames.map((_, i) => (
-                              <option key={i} value={i}>G{i + 1}</option>
-                            ))}
+                            style={{ background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 5, fontSize: 11.5, color: "var(--text-2)" }}>
+                            {stageNames.map((_, i) => <option key={i} value={i}>G{i + 1}</option>)}
                           </select>
                         </span>
                       );
                     })}
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            </details>
           )}
 
-          {/* Assurance validation result */}
+          {/* Self-check / re-check result */}
           {assuranceResult && (() => {
             const pass = assuranceResult.overall_status === "pass";
             const failures = (assuranceResult.structural_results || []).filter((c) => !c.passed);
             const sem = assuranceResult.semantic_result;
             return (
-              <div style={{
-                marginTop: 14, borderRadius: 10, padding: 12,
-                background: pass ? "var(--ok-soft)" : "var(--bad-soft)",
-                border: `1px solid ${pass ? "var(--ok-soft)" : "var(--bad-soft)"}`,
-              }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: pass ? "var(--ok)" : "var(--bad)", marginBottom: failures.length || sem ? 8 : 0 }}>
-                  <ShieldCheck size={13} style={{ verticalAlign: "middle", marginRight: 6 }} />
-                  {assuranceResult.summary}
+              <Alert tone={pass ? "ok" : "bad"} style={{ marginTop: 16 }}
+                title={<span><ShieldCheck size={14} style={{ verticalAlign: -2, marginRight: 6 }} />{assuranceResult.summary}</span>}
+                action={(failures.length > 0 || sem?.flagged) ? (
+                  <Button size="sm" icon={RotateCcw} loading={planning} onClick={handleReplanWithFixes}>Fix & design again</Button>
+                ) : null}>
+                <div className="stack" style={{ gap: 4, fontSize: 12.5 }}>
+                  {assuranceFromPlanner && plan?.verification && (
+                    <div className="muted">
+                      Planner self-check: {plan.verification.verified ? "verified" : "open issues remain"}
+                      {plan.verification.replanned ? ` after redesigning (${plan.verification.attempts} attempts)` : " on the first attempt"}
+                    </div>
+                  )}
+                  {failures.map((c) => <div key={c.check} style={{ color: "var(--bad)" }}>✗ {c.label}: {c.message}</div>)}
+                  {sem && (
+                    <div style={{ color: sem.available ? (sem.flagged ? "var(--warn)" : "var(--text-3)") : "var(--text-4)" }}>
+                      Intent ({sem.model || "semantic"}): {!sem.available ? "unavailable" : sem.flagged ? "flagged (advisory)" : "matches the request"} — {sem.reasoning}
+                    </div>
+                  )}
+                  {(sem?.issues || []).map((it, i) => (
+                    <div key={i} style={{ color: "var(--warn)" }}>
+                      • <span className="mono">{it.stage}</span>: {it.problem}{it.suggestion ? <span className="muted"> — fix: {it.suggestion}</span> : null}
+                    </div>
+                  ))}
                 </div>
-                {assuranceFromPlanner && plan?.verification && (
-                  <div style={{ fontSize: 12, color: "var(--text-2)", marginBottom: 6 }}>
-                    Planner self-check: {plan.verification.verified ? "verified" : "open issues remain"}
-                    {plan.verification.replanned
-                      ? ` after re-planning (${plan.verification.attempts} attempts)`
-                      : " on the first attempt"}
-                  </div>
-                )}
-                {failures.map((c) => (
-                  <div key={c.check} style={{ fontSize: 12, color: "var(--bad)", marginBottom: 4 }}>
-                    ✗ {c.label}: {c.message}
-                  </div>
-                ))}
-                {sem && (
-                  <div style={{ fontSize: 12, color: sem.available ? (sem.flagged ? "var(--warn)" : "var(--text-3)") : "var(--text-4)" }}>
-                    Intent ({sem.model || "semantic"}):{" "}
-                    {!sem.available ? "unavailable" : sem.flagged ? "FLAGGED (advisory)" : "matches request"} — {sem.reasoning}
-                  </div>
-                )}
-                {(sem?.issues?.length ?? 0) > 0 && (
-                  <div style={{ marginTop: 6 }}>
-                    {sem.issues.map((it, i) => (
-                      <div key={i} style={{ fontSize: 12, color: "var(--warn)", marginBottom: 3 }}>
-                        • <span style={{ fontWeight: 600 }}>{it.stage}</span>: {it.problem}
-                        {it.suggestion && <span style={{ color: "var(--text-2)" }}> — fix: {it.suggestion}</span>}
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {(failures.length > 0 || sem?.flagged) && (
-                  <button
-                    style={{ ...C.btnSecondary, marginTop: 10, color: "var(--warn)", borderColor: "var(--warn-soft)" }}
-                    disabled={planning}
-                    onClick={handleReplanWithFixes}
-                  >
-                    <RotateCcw size={13} />{planning ? <><Spinner /> Re-planning…</> : "Fix & Re-plan"}
-                  </button>
-                )}
-              </div>
+              </Alert>
             );
           })()}
 
-          <div style={C.btnRow}>
-            <button style={C.btnPrimary(false)} onClick={() => navigate("/manager")}>
-              <Zap size={13} /> Send to Manager <ArrowRight size={13} />
-            </button>
-            <button style={{ ...C.btnSecondary, color: "var(--ok)", borderColor: "var(--ok-soft)" }} disabled={assuring} onClick={handleValidate}>
-              <ShieldCheck size={13} />{assuring ? <><Spinner /> Checking…</> : "Re-check Plan"}
-            </button>
-            <button style={C.btnSecondary} onClick={() => { setPlan(null); }}>
-              <RotateCcw size={13} /> Re-plan
-            </button>
-            <button style={C.btnSecondary} onClick={reset}>
-              New dataset
-            </button>
+          <div className="wizard-foot">
+            <Button icon={ShieldCheck} loading={assuring} onClick={handleValidate}>Re-check plan</Button>
+            <Button variant="ghost" onClick={() => setPlan(null)}>Discard plan</Button>
+            <div className="spacer" />
+            <Button variant="primary" onClick={() => navigate("/manager")}>Send to Manager <ArrowRight size={15} /></Button>
           </div>
-        </div>
+        </Card>
       )}
     </div>
   );

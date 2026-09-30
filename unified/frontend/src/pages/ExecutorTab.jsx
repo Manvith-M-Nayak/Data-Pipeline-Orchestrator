@@ -1,85 +1,16 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
+import {
+  Activity, AlertTriangle, Brain, CheckCircle2, Circle, Download, FileText, Play, RotateCcw, Upload, XCircle, Zap,
+} from "lucide-react";
 import { executor, monitor, connectWS } from "../api.js";
 import { useAppContext } from "../AppContext.jsx";
 import { failedPhaseOf } from "../flows/status.js";
 import PipelineFlow from "../flows/PipelineFlow.jsx";
-import {
-  Zap, Upload, CheckCircle, XCircle, RotateCcw, Brain, AlertTriangle, Activity, Download,
-} from "lucide-react";
+import { Alert, Badge, Button, Card, Empty, PageHeader, Spinner } from "../ui/components.jsx";
 
-const C = {
-  page:   { maxWidth: 760, margin: "0 auto" },
-  header: { marginBottom: 28 },
-  agent:  { display: "flex", alignItems: "center", gap: 10, marginBottom: 6 },
-  agentBadge: {
-    padding: "4px 12px", background: "var(--warn-soft)", border: "1px solid var(--warn-line)",
-    borderRadius: 20, fontSize: 12, fontWeight: 700, color: "var(--warn)",
-    display: "flex", alignItems: "center", gap: 6,
-  },
-  title:  { fontSize: 22, fontWeight: 700, color: "var(--text)", marginBottom: 4 },
-  sub:    { fontSize: 13, color: "var(--text-3)" },
-  card:   { background: "var(--surface)", borderRadius: 14, padding: 24, border: "1px solid var(--border)", marginBottom: 16 },
-  cardHdr:{ fontSize: 15, fontWeight: 700, color: "var(--text)", marginBottom: 4, display: "flex", alignItems: "center", gap: 8 },
-  cardSub:{ fontSize: 13, color: "var(--text-3)", marginBottom: 18 },
-  drop:   (active, hasFile) => ({
-    border: `2px dashed ${hasFile ? "var(--ok)" : active ? "var(--accent)" : "var(--border-strong)"}`,
-    borderRadius: 12, padding: "24px 20px", textAlign: "center", cursor: "pointer",
-    background: active ? "var(--surface-2)" : "transparent", transition: "all 0.2s",
-  }),
-  btnRow: { display: "flex", gap: 10, marginTop: 18, alignItems: "center", flexWrap: "wrap" },
-  btnPrimary: (disabled) => ({
-    padding: "10px 22px", background: disabled ? "var(--surface-2)" : "var(--accent)",
-    color: disabled ? "var(--text-4)" : "var(--accent-fg)", border: "none", borderRadius: 10,
-    cursor: disabled ? "not-allowed" : "pointer", fontSize: 13, fontWeight: 700,
-    display: "inline-flex", alignItems: "center", gap: 7,
-  }),
-  btnSecondary: {
-    padding: "10px 18px", background: "transparent", color: "var(--text-3)",
-    border: "1px solid var(--border)", borderRadius: 10, cursor: "pointer",
-    fontSize: 13, display: "inline-flex", alignItems: "center", gap: 6,
-  },
-  planBox: {
-    background: "var(--surface-2)", borderRadius: 10, padding: 14,
-    border: "1px solid var(--border)",
-  },
-  planStage: {
-    display: "inline-block", padding: "3px 10px", borderRadius: 8,
-    fontSize: 11, fontWeight: 600, background: "var(--surface)", color: "var(--accent)",
-    margin: "3px 3px 0 0",
-  },
-  execStep: (state) => ({
-    display: "flex", alignItems: "center", gap: 12, padding: "9px 0",
-    borderBottom: "1px solid var(--divider)",
-    opacity: state === "pending" ? 0.6 : 1, transition: "opacity 0.3s",
-  }),
-  execDot: (state) => ({
-    width: 10, height: 10, borderRadius: "50%", flexShrink: 0,
-    background: state === "done" ? "var(--ok)" : state === "running" ? "var(--warn)" : "var(--border-strong)",
-    boxShadow: state === "running" ? "0 0 0 3px color-mix(in srgb, var(--warn) 22%, transparent)" : "none",
-    transition: "all 0.3s",
-  }),
-  execLabel: (state) => ({
-    fontSize: 13, flex: 1,
-    color: state === "done" ? "var(--ok)" : state === "running" ? "var(--warn)" : "var(--text-4)",
-    fontWeight: state === "running" ? 600 : 400,
-  }),
-  resultBox: (ok) => ({
-    background: ok ? "var(--ok-soft)" : "var(--bad-soft)", borderRadius: 10, padding: 16,
-    border: `1px solid ${ok ? "var(--ok-soft)" : "var(--bad-soft)"}`, marginTop: 14,
-  }),
-  errBox: {
-    background: "var(--bad-soft)", borderRadius: 8, padding: "10px 14px", marginBottom: 14,
-    color: "var(--bad)", fontSize: 13, display: "flex", gap: 8,
-  },
-  monitorEvent: {
-    fontSize: 12, color: "var(--text-3)", padding: "6px 10px",
-    borderBottom: "1px solid var(--divider)", display: "flex", gap: 10,
-  },
-};
-
-// Step labels are now driven by backend progress (jobState.step).
-// These are fallback labels shown when no backend step is available yet.
+// Step labels are driven by backend progress (jobState.step); these are the
+// fallback labels shown when no backend step is available yet.
 const EXEC_STEPS = [
   "Central Manager pre-flight (validate · predict · optimize)",
   "Authenticating with Azure",
@@ -103,10 +34,10 @@ const STEP_MATCHERS = [
   (t) => t.includes("stage group") || t.includes("monitoring databricks") || t.includes("running notebook"),
 ];
 
-// The tab runs pipelines through the Central Manager (/api/manager/run) so
+// The page runs pipelines through the Central Manager (/api/manager/run) so
 // every run gets validation, assurance, resource/cost pre-checks, and retry
 // handling before the Executor Agent is invoked. Manager state is mapped to
-// the executor-style job shape this tab renders.
+// the executor-style job shape this page renders.
 const MGR_TERMINAL = ["completed", "failed"];
 function mapManagerState(s) {
   return {
@@ -117,14 +48,11 @@ function mapManagerState(s) {
   };
 }
 
-function Spinner({ color = "var(--warn)" }) {
-  return (
-    <span style={{
-      display: "inline-block", width: 13, height: 13,
-      border: "2px solid var(--border)", borderTopColor: color,
-      borderRadius: "50%", animation: "spin 0.7s linear infinite",
-    }} />
-  );
+function StepIcon({ state }) {
+  if (state === "running") return <Spinner size={14} />;
+  if (state === "done")    return <CheckCircle2 size={16} strokeWidth={2} style={{ color: "var(--ok)" }} />;
+  if (state === "failed")  return <XCircle size={16} strokeWidth={2} style={{ color: "var(--bad)" }} />;
+  return <Circle size={14} strokeWidth={2} style={{ color: "var(--text-4)" }} />;
 }
 
 export default function ExecutorTab() {
@@ -150,7 +78,7 @@ export default function ExecutorTab() {
   // fetched fresh from the server after every reload.
   const jobState = rawRun ? mapManagerState(rawRun) : null;
   const running = starting || jobState?.status === "running" || (!!jobId && !rawRun);
-  // Runs this tab did not start (Central Manager, another window, auto-followed).
+  // Runs this page did not start (Central Manager, another window, auto-followed).
   const attachedFrom = !!jobId && runOrigin !== "executor";
 
   // Which step row is active. Read from the executor's progress text; the
@@ -231,290 +159,193 @@ export default function ExecutorTab() {
   }
 
   const canRun = !!csvFile && !!savedPlan && !running;
+  const cfg = savedPlan?.config;
+  const failed = jobState?.status === "failed";
+  const completed = jobState?.status === "completed";
+  const rs = cfg?.recommended_settings || {};
 
   return (
-    <div style={C.page}>
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    <div>
+      <input ref={fileRef} type="file" accept=".csv,.json,.jsonl,.ndjson" hidden
+        onChange={(e) => { pickFile(e.target.files[0]); e.target.value = ""; }} />
 
-      <div style={C.header}>
-        <div style={C.agent}>
-          <span style={C.agentBadge}><Zap size={13} /> Executor Agent</span>
-        </div>
-        <h1 style={C.title}>Run your pipeline</h1>
-        <p style={C.sub}>Runs go through the Central Manager (validation, resource &amp; cost pre-checks, retries), which hands off to the Executor for ADF + Databricks deployment.</p>
-      </div>
+      <PageHeader
+        eyebrow="Run" icon={Zap}
+        title="Executor"
+        description="Deploys the plan to Azure — storage containers, ADF copy, Databricks notebooks — through the Central Manager, which adds validation, pre-checks and retries."
+        actions={jobState && !running
+          ? <Button variant="primary" icon={RotateCcw} onClick={reset}>Run again</Button>
+          : <Button variant="primary" icon={Play} loading={starting || (running && !jobState)} disabled={!canRun} onClick={handleRun}>Run pipeline</Button>}
+      />
 
-      {error && (
-        <div style={C.errBox}><XCircle size={14} style={{ flexShrink: 0 }} />{error}</div>
-      )}
+      {error && <Alert tone="bad" style={{ marginBottom: 14 }}>{error}</Alert>}
 
-      {/* Plan loaded from planner */}
-      <div style={C.card}>
-        <div style={C.cardHdr}><Brain size={16} color="var(--violet)" />Pipeline Plan</div>
-        {savedPlan ? (
-          <>
-            <div style={C.planBox}>
-              <div style={{ fontSize: 13, color: "var(--ok)", fontWeight: 600, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
-                <CheckCircle size={13} /> Plan loaded from Planner Agent
-              </div>
-              <div style={{ marginBottom: 6 }}>
-                {(savedPlan.config?.stages || []).map((s, i) => (
-                  <span key={i} style={C.planStage}>{s.name}</span>
-                ))}
-              </div>
-              {(savedPlan.config?.execution_groups?.length ?? 0) > 0 && (
-                <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 6 }}>
-                  Flow:{" "}
-                  {savedPlan.config.execution_groups.map((g, i) => (
-                    <span key={i}>
-                      {i > 0 && <span style={{ color: "var(--text-4)" }}> → </span>}
-                      <span style={{ color: g.length > 1 ? "var(--violet)" : "var(--text-2)", fontWeight: g.length > 1 ? 600 : 400 }}>
-                        [{g.join(" ∥ ")}]
-                      </span>
-                    </span>
+      {!savedPlan && !jobState ? (
+        <Card>
+          <Empty icon={Brain} title="No plan to run"
+            action={<Button variant="primary" onClick={() => navigate("/planner")}>Open the Planner</Button>}>
+            Design a pipeline in the Planner (or use guided mode), then run it here.
+          </Empty>
+        </Card>
+      ) : (
+        <div className="grid grid-2" style={{ marginBottom: 14, alignItems: "start" }}>
+          <Card title="Plan" icon={Brain} actions={<button className="link" onClick={() => navigate("/planner")}>Change →</button>}>
+            {cfg ? (
+              <div className="stack" style={{ gap: 10 }}>
+                <div className="chips">
+                  {(cfg.stages || []).map((s) => (
+                    <Badge key={s.name} tone={s.type === "copy" ? "accent" : "violet"}>{s.name}</Badge>
                   ))}
-                  {savedPlan.config.execution_groups.some((g) => g.length > 1) && (
-                    <span style={{ marginLeft: 6, color: "var(--violet)" }}>⚡ parallel</span>
-                  )}
                 </div>
-              )}
-              <div style={{ fontSize: 12, color: "var(--text-3)" }}>
-                Cluster: {savedPlan.config?.recommended_settings?.node_type || "auto"} ·
-                Workers: {savedPlan.config?.recommended_settings?.num_workers ?? "auto"} ·
-                DIU: {savedPlan.config?.recommended_settings?.diu ?? "auto"}
-                {savedPlan.used_fallback && <span style={{ marginLeft: 8, color: "var(--warn)" }}>(fallback config)</span>}
-              </div>
-            </div>
-            <button onClick={() => navigate("/planner")} style={{ ...C.btnSecondary, marginTop: 12, fontSize: 12 }}>
-              ← Create different plan
-            </button>
-          </>
-        ) : (
-          <div style={{ textAlign: "center", padding: "20px 0" }}>
-            <div style={{ fontSize: 13, color: "var(--text-3)", marginBottom: 14 }}>No plan loaded — generate one in the Planner Agent first.</div>
-            <button onClick={() => navigate("/planner")} style={C.btnPrimary(false)}>
-              <Brain size={13} /> Go to Planner
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* CSV upload */}
-      {savedPlan && (
-        <div style={C.card}>
-          <div style={C.cardHdr}><Upload size={16} color="var(--accent)" />Data File</div>
-          <input ref={fileRef} type="file" accept=".csv,.json,.jsonl,.ndjson" hidden onChange={(e) => { pickFile(e.target.files[0]); e.target.value = ""; }} />
-
-          {csvRestoring ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--text-3)" }}>
-              <Spinner color="var(--accent)" /> Restoring your data file…
-            </div>
-          ) : csvFile ? (
-            /* File already loaded — from Planner or previous upload */
-            <div style={{ background: "var(--surface-2)", borderRadius: 10, padding: "12px 16px", border: "1px solid var(--ok-line)", display: "flex", alignItems: "center", gap: 10 }}>
-              <CheckCircle size={16} color="var(--ok)" style={{ flexShrink: 0 }} />
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13, color: "var(--ok)", fontWeight: 600 }}>{csvFile.name}</div>
-                <div style={{ fontSize: 12, color: "var(--text-3)", marginTop: 2 }}>
-                  {fileMismatch
-                    ? <span style={{ color: "var(--warn)" }}>
-                        <AlertTriangle size={11} style={{ verticalAlign: "middle", marginRight: 4 }} />
-                        The plan was generated for "{planFileName}". Re-plan in the Planner if this file has different columns.
-                      </span>
-                    : "Carried over from Planner Agent — no re-upload needed."}
-                </div>
-              </div>
-              <button
-                onClick={() => !running && fileRef.current.click()}
-                style={{ fontSize: 12, color: "var(--text-4)", background: "none", border: "1px solid var(--border)", borderRadius: 6, padding: "4px 10px", cursor: "pointer", flexShrink: 0 }}
-              >
-                Change
-              </button>
-            </div>
-          ) : (
-            /* No file yet */
-            <div
-              style={C.drop(dragging, false)}
-              onClick={() => !running && fileRef.current.click()}
-              onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
-              onDragLeave={() => setDragging(false)}
-              onDrop={onDrop}
-            >
-              <Upload size={28} color="var(--text-4)" style={{ marginBottom: 8 }} />
-              <div style={{ fontSize: 13, color: "var(--text-3)" }}>Click or drag your CSV or JSON here</div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Run + execution progress — also shown for a run followed from the
-          Central Manager, even when this browser holds no plan */}
-      {(savedPlan || running || jobState) && (
-        <div style={C.card}>
-          <div style={C.cardHdr}><Zap size={16} color="var(--warn)" />Execution</div>
-
-          {attachedFrom && jobId && (
-            <div style={{
-              display: "flex", alignItems: "center", gap: 8, margin: "8px 0 14px",
-              padding: "8px 12px", borderRadius: 8, fontSize: 12.5,
-              background: "var(--accent-soft)", border: "1px solid var(--accent-line)", color: "var(--text-2)",
-            }}>
-              <Activity size={14} color="var(--accent)" />
-              Following run <span style={{ fontFamily: "var(--font-mono)", color: "var(--text)" }}>{jobId.slice(0, 8)}</span>,
-              started from the Central Manager.
-              <button onClick={() => navigate("/manager")}
-                style={{ marginLeft: "auto", background: "none", border: 0, color: "var(--accent)", cursor: "pointer", fontSize: 12.5, fontWeight: 500 }}>
-                Open in Manager →
-              </button>
-            </div>
-          )}
-
-          {!running && !jobState && (
-            <>
-              <div style={{ fontSize: 13, color: "var(--text-3)", marginBottom: 16 }}>
-                {csvFile ? "Ready to run. Click below to deploy and trigger the pipeline." : "Upload a CSV file above to continue."}
-              </div>
-              <button style={C.btnPrimary(!canRun)} disabled={!canRun} onClick={handleRun}>
-                <Zap size={14} /> Run Pipeline
-              </button>
-            </>
-          )}
-
-          {(running || jobState) && (
-            <>
-              {(rawRun?.plan?.stages?.length || savedPlan?.config?.stages?.length) ? (
-                <div style={{ margin: "6px 0 16px" }}>
-                  <PipelineFlow
-                    plan={rawRun?.plan?.stages?.length ? rawRun.plan : savedPlan.config}
-                    runState={rawRun || { status: "validating", phase: "validating", decisions: [] }}
-                    inputLabel={csvFile?.name}
-                  />
-                </div>
-              ) : null}
-              <div style={{ marginBottom: 14 }}>
-                {EXEC_STEPS.map((label, i) => {
-                  const failed    = jobState?.status === "failed";
-                  const completed = jobState?.status === "completed";
-                  const isLast = i === EXEC_STEPS.length - 1;
-                  let state;
-                  if (completed) {
-                    state = "done";   // finished — every step is done, incl. "Complete"
-                  } else if (failed) {
-                    if (isLast) state = "pending";
-                    else state = execStep > i ? "done" : execStep === i ? "running" : "pending";
-                  } else {
-                    state = execStep > i ? "done" : execStep === i ? "running" : "pending";
-                  }
-                  // Show live backend step name on the currently-running row
-                  const liveLabel = (state === "running" && jobState?.step) ? jobState.step : label;
-                  return (
-                    <div key={i} style={C.execStep(state)}>
-                      <div style={{
-                        ...C.execDot(state),
-                        // override only for the failed step — `undefined` here used to wipe the dot colour
-                        ...(failed && execStep === i ? { background: "var(--bad)" } : null),
-                      }} />
-                      <span style={C.execLabel(state)}>{liveLabel}</span>
-                      {state === "running" && !failed && <Spinner />}
-                      {state === "done"    && <CheckCircle size={13} color="var(--ok)" />}
-                      {failed && execStep === i && <XCircle size={13} color="var(--bad)" />}
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Result */}
-              {jobState && jobState.status !== "running" && (
-                <div style={C.resultBox(jobState.status === "completed")}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-                    <div style={{ fontSize: 15, fontWeight: 700,
-                      color: jobState.status === "completed" ? "var(--ok)" : "var(--bad)" }}>
-                      {jobState.status === "completed" ? "Pipeline completed successfully!" : "Pipeline failed"}
-                    </div>
-                    {jobState.status === "completed" && (jobState.result?.sink_container) && (
-                      <a
-                        href="#"
-                        onClick={(e) => { e.preventDefault(); executor.download(jobState.result.sink_container).catch((err) => setError(err.message)); }}
-                        style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 14px",
-                          background: "var(--accent)", color: "var(--accent-fg)", borderRadius: 8, fontSize: 12,
-                          fontWeight: 600, textDecoration: "none" }}
-                      >
-                        <Download size={13} /> Download output
-                      </a>
-                    )}
+                {(cfg.execution_groups?.length ?? 0) > 0 && (
+                  <div className="mono muted" style={{ fontSize: 12, overflowWrap: "anywhere" }}>
+                    {cfg.execution_groups.map((g) => `[${g.join(" ∥ ")}]`).join(" → ")}
                   </div>
-                  {jobState.error && (
-                    <pre style={{ fontSize: 12, color: "var(--bad)", whiteSpace: "pre-wrap", wordBreak: "break-word", marginBottom: 8 }}>
-                      {jobState.error}
-                    </pre>
-                  )}
-                  {jobState.result?.result?.message && (
-                    <div style={{ fontSize: 12, color: "var(--text-2)", marginBottom: 8, padding: "8px 10px", background: "var(--surface-2)", borderRadius: 6 }}>
-                      ADF: {jobState.result.result.message}
-                    </div>
-                  )}
-                  {jobState.result && (
-                    <details style={{ marginTop: 8 }}>
-                      <summary style={{ cursor: "pointer", fontSize: 12, color: "var(--ok)" }}>Run details</summary>
-                      <pre style={{ marginTop: 8, fontSize: 11, color: "var(--text-2)", overflow: "auto", maxHeight: 180 }}>
-                        {JSON.stringify(jobState.result, null, 2)}
-                      </pre>
-                    </details>
-                  )}
+                )}
+                <div className="muted" style={{ fontSize: 12.5 }}>
+                  Node <span className="mono">{rs.node_type || "auto"}</span> · workers {rs.num_workers ?? "auto"} · DIU {rs.diu ?? "auto"}
+                  {savedPlan.used_fallback && <Badge tone="warn" style={{ marginLeft: 8 }}>fallback</Badge>}
                 </div>
-              )}
-            </>
-          )}
+              </div>
+            ) : <div className="muted">Following a run started elsewhere.</div>}
+          </Card>
 
-          {jobState && !running && (
-            <div style={C.btnRow}>
-              <button style={C.btnPrimary(false)} onClick={reset}><RotateCcw size={13} /> Run again</button>
-            </div>
-          )}
+          <Card title="Data file" icon={FileText}
+            actions={csvFile && !running ? <button className="link" onClick={() => fileRef.current.click()}>Change →</button> : null}>
+            {csvRestoring ? (
+              <div className="row muted" style={{ gap: 8, fontSize: 13 }}><Spinner size={12} /> Restoring your data file…</div>
+            ) : csvFile ? (
+              <div className="stack" style={{ gap: 6, fontSize: 13 }}>
+                <div className="mono" style={{ color: "var(--text)" }}>{csvFile.name}</div>
+                <div className="muted">{(csvFile.size / 1024).toFixed(1)} KB</div>
+                {fileMismatch && (
+                  <Alert tone="warn" style={{ padding: "8px 10px", fontSize: 12.5 }}>
+                    The plan was designed for “{planFileName}”. Design it again if this file has different columns.
+                  </Alert>
+                )}
+              </div>
+            ) : (
+              <div
+                className={`dropzone${dragging ? " over" : ""}`}
+                style={{ padding: "22px 16px" }}
+                onClick={() => !running && fileRef.current.click()}
+                onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+                onDragLeave={() => setDragging(false)}
+                onDrop={onDrop}
+                role="button" tabIndex={0}
+              >
+                <Upload size={18} style={{ color: "var(--text-3)" }} />
+                <div className="muted" style={{ fontSize: 13, marginTop: 6 }}>Drop or choose a CSV / JSON file</div>
+              </div>
+            )}
+          </Card>
         </div>
       )}
 
-      {/* Monitor Agent live feed */}
       {(running || jobState) && (
-        <div style={C.card}>
-          <div style={C.cardHdr}><Activity size={16} color="var(--accent)" />Monitor Agent — Live Feed</div>
-          <div style={{ fontSize: 13, color: "var(--text-3)", marginBottom: 12 }}>
-            ADF events received via WebSocket. Anomalies are flagged automatically.
-          </div>
-          {monEvents.length === 0 ? (
-            <div style={{ fontSize: 13, color: "var(--text-4)", textAlign: "center", padding: "12px 0" }}>
-              Waiting for ADF events… (appears once ADF picks up the triggered run)
+        <Card title="Execution" icon={Zap} style={{ marginBottom: 14 }}
+          subtitle={jobId ? <>Run <span className="mono">{jobId.slice(0, 8)}</span></> : undefined}>
+          {attachedFrom && jobId && (
+            <Alert tone="accent" style={{ marginBottom: 14 }}
+              action={<Button size="sm" onClick={() => navigate("/manager")}>Open in Manager</Button>}>
+              Following run <span className="mono">{jobId.slice(0, 8)}</span>, started from the Central Manager.
+            </Alert>
+          )}
+
+          {(rawRun?.plan?.stages?.length || cfg?.stages?.length) ? (
+            <div style={{ marginBottom: 16 }}>
+              <PipelineFlow
+                plan={rawRun?.plan?.stages?.length ? rawRun.plan : cfg}
+                runState={rawRun || { status: "validating", phase: "validating", decisions: [] }}
+                inputLabel={csvFile?.name}
+              />
             </div>
+          ) : null}
+
+          <div className="list">
+            {EXEC_STEPS.map((label, i) => {
+              const isLast = i === EXEC_STEPS.length - 1;
+              let state;
+              if (completed) state = "done";   // finished — every step is done, incl. "Complete"
+              else if (failed) state = isLast ? "pending" : execStep > i ? "done" : execStep === i ? "failed" : "pending";
+              else state = execStep > i ? "done" : execStep === i ? "running" : "pending";
+              // Show the live backend step name on the running row
+              const text = state === "running" && jobState?.step ? jobState.step : label;
+              return (
+                <div key={i} className="list-row" style={{ opacity: state === "pending" ? 0.6 : 1 }}>
+                  <span style={{ width: 18, display: "inline-flex", justifyContent: "center" }}><StepIcon state={state} /></span>
+                  <span className="grow" style={{
+                    color: state === "failed" ? "var(--bad)" : state === "running" ? "var(--text)" : state === "done" ? "var(--text-2)" : "var(--text-3)",
+                    fontWeight: state === "running" ? 600 : 400,
+                  }}>{text}</span>
+                </div>
+              );
+            })}
+          </div>
+
+          {jobState && jobState.status !== "running" && (
+            <div className="big-status" style={{
+              marginTop: 16,
+              background: completed ? "var(--ok-soft)" : "var(--bad-soft)",
+              borderColor: completed ? "var(--ok-line)" : "var(--bad-line)",
+            }}>
+              <div className="icon" style={{ background: "var(--surface)", color: completed ? "var(--ok)" : "var(--bad)" }}>
+                {completed ? <CheckCircle2 size={20} /> : <XCircle size={20} />}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ color: "var(--text)", fontWeight: 600 }}>{completed ? "Pipeline completed" : "Pipeline failed"}</div>
+                {jobState.error && <pre className="mono" style={{ fontSize: 12, color: "var(--bad)", whiteSpace: "pre-wrap", wordBreak: "break-word", marginTop: 4 }}>{jobState.error}</pre>}
+                {jobState.result?.result?.message && <div className="muted" style={{ fontSize: 12.5, marginTop: 4 }}>ADF: {jobState.result.result.message}</div>}
+                {jobState.result && (
+                  <details style={{ marginTop: 6 }}>
+                    <summary className="link" style={{ fontSize: 12.5 }}>Run details</summary>
+                    <pre className="mono" style={{ marginTop: 8, fontSize: 11.5, color: "var(--text-2)", overflow: "auto", maxHeight: 200, background: "var(--surface)", padding: 10, borderRadius: 8, border: "1px solid var(--border)" }}>
+                      {JSON.stringify(jobState.result, null, 2)}
+                    </pre>
+                  </details>
+                )}
+              </div>
+              {completed && jobState.result?.sink_container && (
+                <Button variant="primary" icon={Download}
+                  onClick={() => executor.download(jobState.result.sink_container).catch((err) => setError(err.message))}>
+                  Download output
+                </Button>
+              )}
+            </div>
+          )}
+        </Card>
+      )}
+
+      {(running || jobState) && (
+        <Card title="Monitor feed" icon={Activity} subtitle="ADF events over WebSocket — anomalies are flagged automatically"
+          actions={<button className="link" onClick={() => navigate("/monitor")}>Open Monitor →</button>}>
+          {monEvents.length === 0 ? (
+            <div className="muted" style={{ fontSize: 13 }}>Waiting for ADF events… they appear once ADF picks up the run.</div>
           ) : (
-            <div style={{ maxHeight: 200, overflowY: "auto" }}>
+            <div className="list" style={{ maxHeight: 240, overflowY: "auto" }}>
               {monEvents.map((ev, i) => (
-                <div key={i} style={C.monitorEvent}>
-                  <span style={{ color: "var(--text-4)", flexShrink: 0 }}>{ev.ts}</span>
+                <div key={i} className="list-row" style={{ fontSize: 12.5 }}>
+                  <span className="mono faint" style={{ width: 80, flexShrink: 0 }}>{ev.ts}</span>
                   {ev.event === "run_completed" ? (
                     <span style={{ color: "var(--ok)" }}>
-                      <CheckCircle size={11} style={{ verticalAlign: "middle", marginRight: 4 }} />
-                      {ev.pipelineName} completed · severity: {ev.severity}
+                      <CheckCircle2 size={12} style={{ verticalAlign: -2, marginRight: 4 }} />
+                      {ev.pipelineName} finished · severity {ev.severity}
                     </span>
-                  ) : ev.event === "live_update" ? (
-                    <span style={{ color: "var(--accent)" }}>
-                      {(ev.runs || []).length} active pipeline(s) in ADF
+                  ) : (
+                    <span className="grow" style={{ color: "var(--text-2)" }}>
+                      {(ev.runs || []).length} active in ADF
                       {(ev.runs || []).map((r) => (
-                        <span key={r.runId} style={{ marginLeft: 6, color: "var(--text-4)" }}>
-                          [{r.pipelineName}
-                          {r.anomaly ? <AlertTriangle size={10} style={{ color: "var(--orange)", marginLeft: 3, verticalAlign: "middle" }} /> : ""}
-                          ]
+                        <span key={r.runId} className="faint" style={{ marginLeft: 6 }}>
+                          [{r.pipelineName}{r.anomaly ? <AlertTriangle size={10} style={{ color: "var(--warn)", marginLeft: 3, verticalAlign: -1 }} /> : ""}]
                         </span>
                       ))}
                     </span>
-                  ) : <span>{ev.event}</span>}
+                  )}
                 </div>
               ))}
             </div>
           )}
-          <button onClick={() => navigate("/monitor")} style={{ ...C.btnSecondary, marginTop: 12, fontSize: 12 }}>
-            <Activity size={12} /> Open Monitor Agent
-          </button>
-        </div>
+        </Card>
       )}
     </div>
   );
