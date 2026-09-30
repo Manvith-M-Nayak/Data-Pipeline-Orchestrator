@@ -426,13 +426,21 @@ def apply_custom_settings(config: dict, custom_settings: dict) -> dict:
     rec.update(custom_settings)
     config["recommended_settings"] = rec
     for s in config.get("stages", []):
+        pinned = set(s.get("pinned_settings") or [])
         if s.get("type") == "copy" and "diu" in custom_settings:
             s["diu"] = custom_settings["diu"]
+            pinned.add("diu")
         elif s.get("type") == "notebook":
             if "num_workers" in custom_settings:
                 s["num_workers"] = custom_settings["num_workers"]
+                pinned.add("num_workers")
             if "shuffle_partitions" in custom_settings:
                 s["shuffle_partitions"] = custom_settings["shuffle_partitions"]
+                pinned.add("shuffle_partitions")
+        if pinned:
+            # The Manager applies Resource/Cost recommendations to the plan at
+            # execution time; settings the user chose explicitly stay as set.
+            s["pinned_settings"] = sorted(pinned)
     return config
 
 
@@ -651,6 +659,8 @@ def build_default_config(
             f"Remaining stages run as Databricks notebooks invoked by ADF."
         ),
     }
+    # Marks the user's explicit settings as pinned on each stage.
+    config = apply_custom_settings(config, custom_settings)
     return apply_prompt_stage_names(config, user_prompt)
 
 

@@ -19,6 +19,8 @@ import time
 import base64
 import threading
 import traceback
+import uuid
+from contextlib import contextmanager
 import requests
 from concurrent.futures import ThreadPoolExecutor
 
@@ -101,7 +103,10 @@ def create_blob_container(token: str, container_name: str):
     elif r.status_code == 409:
         print(f"   Container '{container_name}' already exists")
     else:
-        print(f"   Container '{container_name}' failed -> {r.status_code}: {r.text[:200]}")
+        # Fail here with the real reason instead of a vaguer upload error later.
+        raise RuntimeError(
+            f"Creating container '{container_name}' failed: {r.status_code} {r.text[:200]}"
+        )
 
 
 def purge_container(container_name: str):
@@ -182,6 +187,21 @@ def ensure_workspace_dir(path: str):
     if r.status_code != 200:
         raise RuntimeError(f"Workspace mkdirs '{path}' failed: {r.status_code} {r.text[:200]}")
     print(f"   Workspace dir ready: {path}")
+
+
+def delete_workspace_path(path: str):
+    """Best-effort recursive delete of a workspace folder (per-run notebooks)."""
+    try:
+        r = requests.post(
+            _dbx_url("/api/2.0/workspace/delete"),
+            headers=_dbx_headers(),
+            json={"path": path, "recursive": True},
+            timeout=30,
+        )
+        if r.status_code not in (200, 404):
+            print(f"   Workspace cleanup '{path}' -> {r.status_code} (non-fatal)")
+    except requests.RequestException as exc:
+        print(f"   Workspace cleanup '{path}' failed (non-fatal): {exc}")
 
 
 def upload_notebook(workspace_path: str, source: str):
@@ -661,6 +681,53 @@ def check_pipeline_status(token: str, run_id: str, poll_interval: int = 10, time
 # ────────────────────────────────────────────────────────────────────────────
 # End-to-end driver
 # ────────────────────────────────────────────────────────────────────────────
+# ────────────────────────────────────────────────────────────────────────────
+# Run isolation
+# ────────────────────────────────────────────────────────────────────────────
+# Batch runs purge their containers and every copy stage redefines the single
+# ADF pipeline COPY_PIPELINE_NAME, so two runs touching the same containers (or
+# both using the copy pipeline) would corrupt each other. Runs hold a lock on
+# every resource they touch; runs with disjoint resources still run in
+# parallel. The ADF pipeline name stays fixed on purpose — the monitor groups
+# run history by pipeline name.
+class _ResourceLocks:
+    def __init__(self):
+        self._cond = threading.Condition()
+        self._held: set = set()
+
+    @contextmanager
+    def hold(self, keys: set, on_wait=None):
+        with self._cond:
+            waited = False
+            while keys & self._held:
+                if not waited and on_wait:
+                    on_wait(sorted(keys & self._held))
+                    waited = True
+                self._cond.wait()
+            self._held |= keys
+        try:
+            yield
+        finally:
+            with self._cond:
+                self._held -= keys
+                self._cond.notify_all()
+
+
+_RUN_LOCKS = _ResourceLocks()
+_COPY_PIPELINE_LOCK = f"adf-pipeline:{COPY_PIPELINE_NAME}"
+
+
+def _run_resources(pipeline_config: dict) -> set:
+    keys = set(pipeline_config.get("containers_to_create") or [])
+    for s in pipeline_config.get("stages") or []:
+        for k in ("source_container", "sink_container", "checkpoint_container"):
+            if s.get(k):
+                keys.add(s[k])
+        if s.get("type") == "copy":
+            keys.add(_COPY_PIPELINE_LOCK)
+    return keys
+
+
 def execute_pipeline(
     csv_path: str,
     pipeline_config: dict,
@@ -669,7 +736,46 @@ def execute_pipeline(
     skip_input_upload: bool = False,
     file_format_override: str = None,
 ) -> dict:
-    """Run a pipeline end-to-end.
+    """Run a pipeline end-to-end, isolated from concurrent runs.
+
+    Each run gets a unique tag (monitor id `dbx-<tag>`, job names) and its own
+    workspace folder for notebooks, removed afterwards; it waits for any other
+    run that holds one of its containers or the shared ADF copy pipeline.
+    """
+    # Seconds alone collide for runs starting in the same second.
+    run_tag = f"{int(time.time())}{uuid.uuid4().hex[:6]}"
+    notebook_dir = f"{DATABRICKS_NOTEBOOK_BASE.rstrip('/')}/run-{run_tag}"
+
+    def _on_wait(busy):
+        msg = f"Waiting for another run using {', '.join(busy)}"
+        print(f"\n--- {msg} ---")
+        if progress:
+            progress(msg, None)
+
+    uploaded = {"notebooks": False}
+    with _RUN_LOCKS.hold(_run_resources(pipeline_config), on_wait=_on_wait):
+        try:
+            return _execute_pipeline(
+                csv_path, pipeline_config, schema, progress, skip_input_upload,
+                file_format_override, run_tag, notebook_dir, uploaded,
+            )
+        finally:
+            if uploaded["notebooks"]:
+                delete_workspace_path(notebook_dir)
+
+
+def _execute_pipeline(
+    csv_path: str,
+    pipeline_config: dict,
+    schema: dict,
+    progress,
+    skip_input_upload: bool,
+    file_format_override: str,
+    run_tag: str,
+    notebook_dir: str,
+    uploaded: dict,
+) -> dict:
+    """Run a pipeline end-to-end (caller holds the resource lock).
 
     skip_input_upload: streaming "tick" mode — don't upload a new input file;
       just re-run the stream notebook against the existing source container so
@@ -681,7 +787,6 @@ def execute_pipeline(
         if progress:
             progress(msg, dbx_run_id)
 
-    run_tag = str(int(time.time()))
     mode = (pipeline_config.get("mode") or "batch").lower()
     streaming = mode == "streaming"
     stage_rows: dict = {}   # stage name -> rows_written (from notebook exit JSON)
@@ -699,16 +804,16 @@ def execute_pipeline(
     # with a clear message before any cloud resources are touched.
     unsafe = plan_safety_issues(pipeline_config)
     if unsafe:
-        return {"status": "failed", "message": "Unsafe plan rejected: " + "; ".join(unsafe[:5])}
+        return {"status": "failed", "message": "Unsafe plan rejected: " + "; ".join(unsafe[:5]), "retryable": False}
     if not pipeline_config.get("containers_to_create"):
-        return {"status": "failed", "message": "Config has no containers_to_create"}
+        return {"status": "failed", "message": "Config has no containers_to_create", "retryable": False}
     for s in copy_stages:
         if not s.get("source_dataset") or not s.get("sink_dataset"):
-            return {"status": "failed",
+            return {"status": "failed", "retryable": False,
                     "message": f"Copy stage '{s.get('name', '?')}' missing source_dataset/sink_dataset"}
     for s in compute_stages:
         if not s.get("source_container") or not s.get("sink_container"):
-            return {"status": "failed",
+            return {"status": "failed", "retryable": False,
                     "message": f"{s.get('type', 'compute').title()} stage '{s.get('name', '?')}' missing source_container/sink_container"}
 
     if skip_input_upload:
@@ -736,7 +841,7 @@ def execute_pipeline(
                     stage, AZURE_STORAGE_ACCOUNT, file_format
                 )
         except (UnsupportedTransformError, ValueError) as exc:
-            return {"status": "failed",
+            return {"status": "failed", "retryable": False,
                     "message": f"Plan cannot be compiled to a notebook: {exc}"}
 
     _step("Authenticating with Azure")
@@ -772,10 +877,14 @@ def execute_pipeline(
     notebook_paths: dict = {}
     if compute_stages:
         _step(f"Uploading {len(compute_stages)} notebook(s) to Databricks workspace")
-        ensure_workspace_dir(DATABRICKS_NOTEBOOK_BASE)
+        ensure_workspace_dir(notebook_dir)
+        uploaded["notebooks"] = True     # clean the folder up even if a later step fails
         dbx_ensure_storage_secret()
         for stage in compute_stages:
-            wpath = f"{DATABRICKS_NOTEBOOK_BASE.rstrip('/')}/{stage['name']}"
+            # Per-run folder: concurrent runs/streams with the same stage names
+            # (every stream stage is "Stream_Ingest_Transform") no longer
+            # overwrite each other's notebook.
+            wpath = f"{notebook_dir}/{stage['name']}"
             upload_notebook(wpath, notebook_sources[stage["name"]])
             notebook_paths[stage["name"]] = wpath
 
@@ -789,7 +898,7 @@ def execute_pipeline(
         defined_ds = {ds.get("name") for ds in pipeline_config.get("datasets", [])}
         missing_ds = copy_dataset_names - defined_ds
         if missing_ds:
-            return {"status": "failed",
+            return {"status": "failed", "retryable": False,
                     "message": f"Copy stage references datasets not defined in config: {sorted(missing_ds)}"}
         for ds in pipeline_config.get("datasets", []):
             if ds["name"] in copy_dataset_names:

@@ -13,7 +13,7 @@ records:
 | 1 | Plan safety — name validation at every entry point | H1, M8 (security part) | Done |
 | 2 | Schema plumbing — get the real schema to every agent | H2, H3, H4 | Done |
 | 3 | Learning loops — what feeds the correction factors | H5, H6, M1, M2, M3, M9 | Done |
-| 4 | Execution — concurrent-run isolation, executor issues | H7, H8, M4, run-id collisions, retries | Pending |
+| 4 | Execution — concurrent-run isolation, executor issues | H7, H8, M4, run-id collisions, retries | Done |
 | 5 | Frontend and the rest | M5, M6, M7, M8 (rest), remaining Low | Pending |
 
 ---
@@ -203,3 +203,64 @@ records:
 ### Not changed
 
 - The formula path's own history adjustment (`DAMPING = 0.4`) is left as is. It now acts only on the residual left after the (now correct) Resource correction, so its effect is small.
+
+---
+
+## Stage 4 — Execution
+
+**Commit message:** `fix(executor): isolate concurrent runs and apply resource settings the executor controls`
+
+### Problems
+
+| Id | Problem |
+|---|---|
+| H7 | **No isolation between concurrent runs.** <ul><li>Batch runs purge every container, and container names default to fixed values (`raw`/`bronze`/`silver`).</li><li>One ADF pipeline, `Orchestrator_Copy_Pipeline`, is redefined by every run.</li><li>Notebooks sit at fixed `/Shared/unified_orchestrator/<stage>` paths, and every stream stage is `Stream_Ingest_Transform`.</li></ul> Two runs or stream ticks at once could wipe each other's data or run each other's notebook. |
+| Low | `run_tag = int(time.time())`: runs starting in the same second shared `dbx-<tag>` (the monitor's primary key) and job names. |
+| H8 | The Resource Agent's sizing and cost auto-apply never reached execution: the executor only reads each plan stage's `diu` / `shuffle_partitions`, but was handed the original plan. |
+| M4 | Cost ML rejected every copy-stage DIU reduction: copy "memory" is just `diu × 1.5`, so a lower DIU always "failed" the capacity check. |
+| Low | Deterministic failures (uncompilable or unsafe plan, missing references) were retried with 10 s + 30 s backoff. |
+| Low | A failed container creation was only printed; the run failed later with a vaguer error. |
+
+### Changes
+
+| File | Change | Why |
+|---|---|---|
+| `executor_agent/executor.py` | **Split into two functions:** `execute_pipeline` is now a wrapper around the old body, renamed `_execute_pipeline`. <br>**Run tag:** unique, `"{epoch}{6 hex}"`. <br>**Resource lock:** `_ResourceLocks` holds every container the run touches, plus `adf-pipeline:Orchestrator_Copy_Pipeline` when it has copy stages. Runs sharing any resource wait (logged as "Waiting for another run using …"); disjoint runs, e.g. separate streams, still run in parallel. <br>**Notebooks:** go to a per-run folder `…/run-<tag>/<stage>`, deleted in a `finally` (`delete_workspace_path`) even on failure. | H7 and the id collision. The ADF pipeline name stays fixed because the monitor groups history by pipeline name, so copy runs serialize on it instead. |
+| `executor_agent/executor.py` | Deterministic failures return `"retryable": False`: unsafe plan, no containers, missing dataset/container references, undefined datasets, uncompilable notebook. `create_blob_container` raises on any status other than 200/201/409. | Avoid pointless retries; fail with the real reason. |
+| `central_manager_agent/manager.py` | `execute_with_retry` stops on `retryable: False` and reports the number of attempts actually made. | Retries only help transient failures. |
+| `central_manager_agent/manager.py` | New `_execution_plan(state)`: a copy of the plan with the **final** resource plan applied where the executor can use it — copy-stage `diu` (1..`MAX_DIU`) and notebook/stream `shuffle_partitions`. Settings in the stage's `pinned_settings` are left alone. What was applied goes into `RunState.execution_settings` and a `RESOURCE SETTINGS APPLIED` log line, which says workers/node_type are advisory. The executor gets this copy; `state.plan` is unchanged. | H8: cost auto-apply and Resource sizing now affect DIU and shuffle. Workers and node type can't be set on serverless or an existing cluster (the `DATABRICKS_SPARK_VERSION`/`NODE_TYPE` settings aren't used anywhere), so they're labelled advisory instead of silently ignored. |
+| `planner_agent/planner_common.py` | `apply_custom_settings` records `pinned_settings` on each stage it sets. `build_default_config` now goes through it too. | A user's explicit choice in the Planner must not be overridden by an agent's recommendation. |
+| `cost_optimization_agent/cost_optimizer.py` | For copy stages, `_validated_ml_candidate` recomputes memory from the candidate DIU instead of comparing the old derived value. | M4 |
+
+### Verification
+
+- **Locks**, with the inner function mocked at 0.4 s per run:
+
+  | Scenario | Time | Meaning |
+  |---|---|---|
+  | Two runs, same containers | 0.8 s | serialized |
+  | Two streams, disjoint containers | 0.4 s | parallel |
+  | Two copy runs, disjoint containers | 0.8 s | serialized on the copy pipeline |
+
+- **Run tags and cleanup:**
+  - run tags are unique (e.g. `1790756294d706cd`);
+  - the per-run notebook folder is deleted after a run that raised.
+- **Full executor flow**, cloud calls mocked at the lowest level:
+  - run status `ok`, `dbx_run_id` has the unique tag, `stages_completed ['C', 'T']`, `rows_written 42`;
+  - notebook at `…/run-<tag>/T`, and the folder was cleaned up;
+  - a 403 on container creation raises `Creating container 'raw' failed: 403 …`.
+- **Retries:** a non-retryable failure makes **1** executor attempt ("failed after 1 attempt(s)"); an ordinary failure still makes 3.
+- **Execution plan:** with the user's `custom_settings = {"diu": 8}`, the copy stage is pinned and keeps DIU 8 despite a recommendation of 2; the notebook stage's shuffle goes 8 → 16 as recommended. `state.plan` is unchanged.
+- **M4:** the teammate's `test_copy_deadline_changes_diu` passes (13/13). With a real plan, the candidate is no longer rejected at the capacity check.
+- **Regressions:**
+  - the integration test passes, and `ruff` is clean;
+  - the backend has no tracebacks, and all 25 GET endpoints return 200.
+
+### Notes and decisions
+
+- **Serialize rather than rename.** Container names are user-visible (downloads, the monitor), so batch runs with the same containers now take turns rather than getting unique names. That limits throughput for identical pipelines, but guarantees correctness.
+- **Open decision: the Cost agent still rarely applies anything.**
+  - Its remaining rejection is deliberate policy: *never trade runtime without an explicit deadline*, enforced by the teammate's `test_no_deadline_does_not_allow_slowdown`.
+  - The manager passes no deadline, so candidates that save money but run slower (e.g. DIU 2 → 1) are refused.
+  - Passing the SLA target (900 s) as the deadline would enable those savings. That's a product decision, left for the user.
+- **Workers and node type** would need Databricks job clusters (`new_cluster`) instead of serverless or an existing cluster. That changes compute cost and workspace requirements, so it's out of scope for a logic fix.

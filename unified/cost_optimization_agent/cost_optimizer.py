@@ -176,7 +176,14 @@ class CostOptimizationAgent:
             if not math.isfinite(duration):
                 return None
             memory = float(alloc.get("memory_gb", 0) or 0)
-            capacity = opt["diu"] * 1.5 if feat["stage_is_copy"] else 4 + max(1, opt["workers"]) * NODE_SPECS[opt["node_type"]]["memory_gb"]
+            if feat["stage_is_copy"]:
+                # A copy stage's "memory" is derived from its DIU (diu × 1.5),
+                # not a workload requirement — comparing it against the new
+                # DIU's capacity rejected every DIU reduction. Recompute it.
+                capacity = opt["diu"] * 1.5
+                memory = capacity
+            else:
+                capacity = 4 + max(1, opt["workers"]) * NODE_SPECS[opt["node_type"]]["memory_gb"]
             if not math.isfinite(memory) or memory < 0 or memory > capacity or capacity > MAX_TOTAL_MEM_GB:
                 return None
             ratio = max(ratio, duration / old_duration)

@@ -67,6 +67,8 @@ class RunState:
     # pipeline execution, so learning/assurance compare against this — not
     # the whole managed run (validation, LLM assurance, retry backoff, ...).
     execution_s: Optional[float] = None
+    # Resource settings the Executor actually received (see _execution_plan).
+    execution_settings: dict = field(default_factory=dict)
     decisions: List[Dict[str, Any]] = field(default_factory=list)
     retries: int = 0
     started_at: str = ""
@@ -124,6 +126,48 @@ class CentralManager:
         state.phase = phase
         state.step = step
         self._log(state, f"PHASE:{phase.upper()}", step, "started")
+
+    def _execution_plan(self, state: RunState) -> dict:
+        """Copy of the plan with the final resource plan applied where the
+        Executor can honour it.
+
+        ADF copy DIU and Spark shuffle partitions are real per-stage knobs the
+        Executor passes on. Worker count and node type are NOT: jobs run on
+        serverless compute or an existing cluster, so those recommendations
+        stay advisory. Settings the user pinned in the Planner win over the
+        Resource / Cost agents.
+        """
+        from resource_agent.resource_agent import MAX_DIU
+
+        plan = copy.deepcopy(state.plan)
+        allocs = {a.get("stage_name"): a for a in state.resource_plan.get("allocations", [])}
+        applied: Dict[str, dict] = {}
+        for s in plan.get("stages", []):
+            a = allocs.get(s.get("name"))
+            if not a:
+                continue
+            pinned = set(s.get("pinned_settings") or [])
+            change = {}
+            if s.get("type") == "copy" and "diu" not in pinned:
+                diu = int(a.get("diu") or 0)
+                if 1 <= diu <= MAX_DIU and diu != s.get("diu"):
+                    change["diu"] = diu
+            elif s.get("type") in ("notebook", "stream") and "shuffle_partitions" not in pinned:
+                sp = int(a.get("shuffle_partitions") or 0)
+                if sp > 0 and sp != s.get("shuffle_partitions"):
+                    change["shuffle_partitions"] = sp
+            if change:
+                s.update(change)
+                applied[s["name"]] = change
+        state.execution_settings = applied
+        self._log(
+            state,
+            "RESOURCE SETTINGS APPLIED",
+            "; ".join(f"{n}: {c}" for n, c in applied.items()) or "plan settings already match",
+            "workers/node_type advisory only (serverless / existing cluster)",
+            "info",
+        )
+        return plan
 
     @staticmethod
     def _agent_plan(state: RunState) -> dict:
@@ -878,8 +922,10 @@ class CentralManager:
         from fastapi.concurrency import run_in_threadpool
 
         last_error = ""
+        attempts_made = 0
 
         for attempt in range(self.MAX_RETRIES + 1):
+            attempts_made = attempt + 1
             if attempt > 0:
                 backoff = self.RETRY_BACKOFF_S[
                     min(attempt - 1, len(self.RETRY_BACKOFF_S) - 1)
@@ -941,6 +987,17 @@ class CentralManager:
                     if isinstance(result, dict)
                     else str(result)
                 )
+                if isinstance(result, dict) and result.get("retryable") is False:
+                    # Invalid/uncompilable plan: every retry would fail the same
+                    # way after 10s + 30s of backoff.
+                    self._log(
+                        state,
+                        f"EXECUTE attempt {attempt + 1} FAILED",
+                        last_error[:200],
+                        "abort — not retryable (plan problem, not a transient error)",
+                        "error",
+                    )
+                    break
                 self._log(
                     state,
                     f"EXECUTE attempt {attempt + 1} FAILED",
@@ -960,7 +1017,7 @@ class CentralManager:
                 )
 
         raise RuntimeError(
-            f"Pipeline failed after {self.MAX_RETRIES + 1} attempt(s): {last_error}"
+            f"Pipeline failed after {attempts_made} attempt(s): {last_error}"
         )
 
     # ────────────────────────────────────────────────────────────────────────
@@ -1338,7 +1395,9 @@ class CentralManager:
             # ── Phase 3: Execute ─────────────────────────────────────────
             state.status = "executing"
             self._enter(state, "executing", "Handing off to Executor Agent")
-            result = await self.execute_with_retry(state, csv_path, state.plan, schema)
+            result = await self.execute_with_retry(
+                state, csv_path, self._execution_plan(state), schema
+            )
 
             # ── Phase 4: Assurance ───────────────────────────────────────
             state.status = "assurance"
