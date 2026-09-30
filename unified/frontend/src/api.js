@@ -76,7 +76,8 @@ export const executor = {
     a.href = url;
     a.download = name;
     a.click();
-    URL.revokeObjectURL(url);
+    // Revoking synchronously can cancel the download in some browsers (Firefox).
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   },
 };
 

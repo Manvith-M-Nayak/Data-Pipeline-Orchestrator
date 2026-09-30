@@ -85,7 +85,7 @@ export default function LogsPage() {
     } finally { setLoading(false); }
   }
 
-  useEffect(() => { load(); }, []); // initial load
+  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps -- initial load only
 
   // Auto-refresh when monitor agent finishes analyzing a run
   const onWs = useCallback((data) => {
@@ -128,7 +128,7 @@ export default function LogsPage() {
           <FileText size={40} style={{ marginBottom: 12, color: "#334155" }} />
           <p>No runs found.</p>
           <p style={{ fontSize: 12, color: "#334155", marginTop: 8 }}>
-            Run a pipeline first, or click "Sync history (48h)" in the sidebar to pull recent ADF runs.
+            Run a pipeline first, or click "Sync (48h)" in the header to pull recent ADF runs.
           </p>
         </div>
       ) : (

@@ -135,8 +135,12 @@ export default function PlannerTab() {
   }
 
   // ── pipeline settings (user overrides; null/"" = auto/recommended) ────────
-  const [pipelineMode,   setPipelineMode]   = useState("batch"); // batch | streaming
-  const [streamLayout,   setStreamLayout]   = useState("single"); // single | multi (streaming only)
+  // Start from the restored plan's mode/layout so "Re-generate" after a page
+  // reload doesn't silently turn a streaming plan back into batch.
+  const [pipelineMode,   setPipelineMode]   = useState(
+    () => (plan?.config?.mode === "streaming" ? "streaming" : "batch"));            // batch | streaming
+  const [streamLayout,   setStreamLayout]   = useState(
+    () => (plan?.config?.streaming?.layout === "multi" ? "multi" : "single"));    // single | multi (streaming only)
   const [numStages,      setNumStages]      = useState(null);   // null = model decides
   const [containerNames, setContainerNames] = useState("");
   const [overrides,      setOverrides]      = useState({
@@ -179,9 +183,14 @@ export default function PlannerTab() {
           row_count: result.row_count ?? result.row_count_sample ?? 0,
           size_hint: result.size_hint,
           file_format: result.file_format,
+          file_name: file.name,
         }));
-      } catch {}
-    } catch (e) { setError("Could not read file: " + e.message); }
+      } catch { /* storage full or blocked — Manager falls back to the context schema */ }
+    } catch (e) {
+      // Drop the file too: keeping it without a schema shows "undefined columns".
+      setCsvFile(null);
+      setError("Could not read file: " + e.message);
+    }
     finally { setDetecting(false); }
   }
 
@@ -243,7 +252,10 @@ export default function PlannerTab() {
     );
   }
 
-  function reset() { setCsvFile(null); setDetected(null); setPrompt(""); setPlan(null); setError(""); }
+  function reset() {
+    setCsvFile(null); setDetected(null); setPrompt(""); setPlan(null); setError("");
+    setAssuranceResult(null); setAssuranceFromPlanner(false);
+  }
 
   // ── execution flow (concurrency) editing ──────────────────────────────────
   const cfg = plan?.config;
@@ -305,11 +317,11 @@ export default function PlannerTab() {
           onDragLeave={() => setDragging(false)}
           onDrop={onDrop}
         >
-          <input ref={fileRef} type="file" accept=".csv,.json,.jsonl,.ndjson" hidden onChange={(e) => handleFile(e.target.files[0])} />
+          <input ref={fileRef} type="file" accept=".csv,.json,.jsonl,.ndjson" hidden onChange={(e) => { handleFile(e.target.files[0]); e.target.value = ""; }} />
           <Upload size={32} color={csvFile ? "#22c55e" : dragging ? "#3b82f6" : "#334155"} style={{ marginBottom: 10 }} />
           {detecting ? (
             <div style={{ fontSize: 14, color: "#94a3b8" }}>Detecting schema… <Spinner /></div>
-          ) : csvFile ? (
+          ) : csvFile && detected ? (
             <div style={{ fontSize: 14, color: "#4ade80", fontWeight: 600 }}>
               <CheckCircle size={14} style={{ verticalAlign: "middle", marginRight: 6 }} />
               {csvFile.name} · {detected?.column_count} columns · {(detected?.row_count ?? detected?.row_count_sample)?.toLocaleString()} rows
@@ -334,17 +346,17 @@ export default function PlannerTab() {
                 <tr>
                   <th style={C.th}>Column</th>
                   <th style={C.th}>Type</th>
-                  {detected.preview[0] && Object.keys(detected.preview[0]).slice(0, 3).map((_, i) => (
+                  {detected.preview?.[0] && Object.keys(detected.preview[0]).slice(0, 3).map((_, i) => (
                     <th key={i} style={C.th}>Sample {i + 1}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {Object.entries(detected.columns).map(([col, type]) => (
+                {Object.entries(detected.columns || {}).map(([col, type]) => (
                   <tr key={col}>
                     <td style={{ ...C.td, fontWeight: 600, color: "#f1f5f9" }}>{col}</td>
                     <td style={C.td}><span style={C.typeBadge(type)}>{type}</span></td>
-                    {detected.preview.slice(0, 3).map((row, i) => (
+                    {(detected.preview || []).slice(0, 3).map((row, i) => (
                       <td key={i} style={C.td}>{row[col] ?? "—"}</td>
                     ))}
                   </tr>
@@ -370,7 +382,7 @@ export default function PlannerTab() {
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             placeholder="e.g. Filter active users, group by region, calculate average order value."
-            onKeyDown={(e) => { if (e.key === "Enter" && e.metaKey) handlePlan(); }}
+            onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) handlePlan(); }}
           />
 
           {!plan && (

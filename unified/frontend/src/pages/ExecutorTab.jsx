@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { executor, manager, monitor, connectWS } from "../api.js";
 import { useAppContext } from "../AppContext.jsx";
 import {
-  Zap, Upload, CheckCircle, XCircle, RotateCcw, Brain, AlertTriangle, Activity, Clock, Download,
+  Zap, Upload, CheckCircle, XCircle, RotateCcw, Brain, AlertTriangle, Activity, Download,
 } from "lucide-react";
 
 const C = {
@@ -200,11 +200,25 @@ export default function ExecutorTab() {
   }, []);
   useEffect(() => connectWS(onWs), [onWs]);
 
-  function onDrop(e) {
-    e.preventDefault(); setDragging(false);
-    const f = e.dataTransfer.files[0];
+  function pickFile(f) {
+    if (!f) return;
+    if (!/\.(csv|json|jsonl|ndjson)$/i.test(f.name)) {
+      setError("Upload a .csv or .json file.");
+      return;
+    }
+    setError("");
     setCsvFile(f);
   }
+
+  function onDrop(e) {
+    e.preventDefault(); setDragging(false);
+    pickFile(e.dataTransfer.files[0]);
+  }
+
+  // The plan and schema were built from the file picked in the Planner. A
+  // different file here still runs, but against that file's schema.
+  const planFileName = savedSchema?.file_name;
+  const fileMismatch = !!(csvFile && planFileName && csvFile.name !== planFileName);
 
   async function handleRun() {
     if (!csvFile || !savedPlan) return;
@@ -302,7 +316,7 @@ export default function ExecutorTab() {
       {savedPlan && (
         <div style={C.card}>
           <div style={C.cardHdr}><Upload size={16} color="#38bdf8" />Data File</div>
-          <input ref={fileRef} type="file" accept=".csv,.json,.jsonl,.ndjson" hidden onChange={(e) => { const f = e.target.files[0]; setCsvFile(f); }} />
+          <input ref={fileRef} type="file" accept=".csv,.json,.jsonl,.ndjson" hidden onChange={(e) => { pickFile(e.target.files[0]); e.target.value = ""; }} />
 
           {csvFile ? (
             /* File already loaded — from Planner or previous upload */
@@ -311,7 +325,12 @@ export default function ExecutorTab() {
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 13, color: "#4ade80", fontWeight: 600 }}>{csvFile.name}</div>
                 <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
-                  {"Carried over from Planner Agent — no re-upload needed."}
+                  {fileMismatch
+                    ? <span style={{ color: "#f59e0b" }}>
+                        <AlertTriangle size={11} style={{ verticalAlign: "middle", marginRight: 4 }} />
+                        The plan was generated for "{planFileName}". Re-plan in the Planner if this file has different columns.
+                      </span>
+                    : "Carried over from Planner Agent — no re-upload needed."}
                 </div>
               </div>
               <button
@@ -397,7 +416,7 @@ export default function ExecutorTab() {
                     {jobState.status === "completed" && (jobState.result?.sink_container) && (
                       <a
                         href="#"
-                        onClick={(e) => { e.preventDefault(); executor.download(jobState.result.sink_container).catch((err) => alert(err.message)); }}
+                        onClick={(e) => { e.preventDefault(); executor.download(jobState.result.sink_container).catch((err) => setError(err.message)); }}
                         style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 14px",
                           background: "#0ea5e9", color: "#fff", borderRadius: 8, fontSize: 12,
                           fontWeight: 600, textDecoration: "none" }}

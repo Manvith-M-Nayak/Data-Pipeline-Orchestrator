@@ -1,9 +1,9 @@
 import React, { useEffect, useState, useCallback } from "react";
-import { manager } from "../api.js";
+import { manager, executor } from "../api.js";
 import {
-  BarChart3, Activity, Brain, Zap, Shield, ShieldCheck, Cpu, TrendingUp,
-  DollarSign, ClipboardCheck, Clock, ChevronDown, ChevronRight, AlertTriangle,
-  CheckCircle, XCircle, GitBranch, RefreshCw, Download,
+  Activity, Brain, Zap, Shield, ShieldCheck, Cpu, TrendingUp,
+  DollarSign, Clock, ChevronRight, AlertTriangle,
+  CheckCircle, XCircle, RefreshCw, Download,
 } from "lucide-react";
 
 const S = {
@@ -58,12 +58,6 @@ function usualDuration(p) {
   return p.slower_than_usual
     ? { label: `⚠ slower (usually ≤${Math.round(p.expected_duration_s)}s)`, ok: false }
     : { label: `✔ within usual (≤${Math.round(p.expected_duration_s)}s)`, ok: true };
-}
-
-function fmtSec(s) {
-  if (!s) return "0s";
-  const m = Math.floor(s / 60);
-  return m > 0 ? `${m}m ${Math.round(s % 60)}s` : `${Math.round(s)}s`;
 }
 
 function StatCard({ icon: Icon, color, label, value, sub }) {
@@ -147,6 +141,7 @@ function RunDetail({ runId, onBack }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [downloadError, setDownloadError] = useState("");
 
   useEffect(() => {
     setLoading(true);
@@ -161,7 +156,6 @@ function RunDetail({ runId, onBack }) {
   if (error) return <div style={{ color: "#f87171", textAlign: "center", padding: 40 }}>Error: {error}</div>;
   if (!data) return null;
 
-  const statusColor = data.status === "completed" ? "#4ade80" : data.status === "failed" ? "#f87171" : "#fbbf24";
   const fb = data.feedback || {};
   const ma = data.monitor_analysis || {};
 
@@ -201,7 +195,11 @@ function RunDetail({ runId, onBack }) {
           <div style={{ display: "flex", gap: 0, flexWrap: "wrap" }}>
             {phases.map((p, i) => {
               const label = p.action.replace("PHASE:", "").toLowerCase();
-              const ok = p.outcome !== "abort";
+              // _enter() logs every phase as "started". A failed run still enters
+              // "feedback" to record the outcome, so it failed in the phase before that.
+              const failedIdx = phases[phases.length - 1]?.action === "PHASE:FEEDBACK"
+                ? phases.length - 2 : phases.length - 1;
+              const ok = !(data.status === "failed" && i === failedIdx);
               return (
                 <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 10px" }}>
                   <div style={S.phaseDot(ok ? "#22c55e" : "#f87171")} />
@@ -350,7 +348,7 @@ function RunDetail({ runId, onBack }) {
                   {data.cost_optimization.recommendations.map((r, i) => (
                     <div key={i} style={{ display: "flex", gap: 6, fontSize: 11, color: "#94a3b8", marginBottom: 3 }}>
                       <DollarSign size={10} style={{ flexShrink: 0, marginTop: 2 }} />
-                      <span><b>{r.action}</b> — {r.estimated_saving}</span>
+                      <span><b>{r.change}</b> — {r.estimated_saving}</span>
                     </div>
                   ))}
                 </div>
@@ -485,13 +483,19 @@ function RunDetail({ runId, onBack }) {
           </div>
           {data.executor_result.sink_container && (
             <a
-              href={`/api/executor/download/${encodeURIComponent(data.executor_result.sink_container)}`}
-              download
+              href="#"
+              onClick={(e) => {
+                e.preventDefault();
+                setDownloadError("");
+                // via fetch so the x-api-key header is sent when auth is on
+                executor.download(data.executor_result.sink_container).catch((err) => setDownloadError(err.message));
+              }}
               style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 12px", background: "#0ea5e9", color: "#fff", borderRadius: 8, fontSize: 12, fontWeight: 600, textDecoration: "none", marginTop: 8 }}
             >
               <Download size={12} /> Download output
             </a>
           )}
+          {downloadError && <div style={{ fontSize: 11, color: "#f87171", marginTop: 6 }}>{downloadError}</div>}
         </div>
       )}
     </div>
@@ -502,13 +506,16 @@ export default function RunInsights() {
   const [analytics, setAnalytics] = useState(null);
   const [loading, setLoading] = useState(true);
   const [selectedRun, setSelectedRun] = useState(null);
+  const [error, setError] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
+    setError("");
     try {
       setAnalytics(await manager.analytics());
-    } catch {}
-    finally { setLoading(false); }
+    } catch (e) {
+      setError(`Could not load analytics: ${e.message}`);
+    } finally { setLoading(false); }
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -539,12 +546,18 @@ export default function RunInsights() {
         </button>
       </div>
 
+      {error && (
+        <div style={{ background: "#450a0a", borderRadius: 8, padding: "10px 14px", marginBottom: 14, color: "#f87171", fontSize: 12 }}>
+          {error}
+        </div>
+      )}
+
       {/* Summary stats */}
       <div style={S.grid4}>
         <StatCard icon={Activity} color="#38bdf8" label="Total Runs" value={s.total_runs ?? 0} sub={`${s.completed ?? 0} completed · ${s.failed ?? 0} failed`} />
         <StatCard icon={CheckCircle} color="#22c55e" label="Success Rate" value={`${s.success_rate_pct ?? 0}%`} sub={`${s.in_progress ?? 0} in progress`} />
         <StatCard icon={TrendingUp} color="#c084fc" label="Duration Accuracy" value={da.avg_predicted_vs_actual_ratio ? `${da.avg_predicted_vs_actual_ratio}×` : "—"} sub={`${da.samples || 0} samples`} />
-        <StatCard icon={DollarSign} color="#fbbf24" label="Cost Accuracy" value={ca.avg_error_pct !== null ? `${ca.avg_error_pct}%` : "—"} sub={`$${ca.total_estimated_usd?.toFixed(4) || 0} est. · $${ca.total_actual_usd?.toFixed(4) || 0} actual`} />
+        <StatCard icon={DollarSign} color="#fbbf24" label="Cost Accuracy" value={ca.avg_error_pct != null ? `${ca.avg_error_pct}%` : "—"} sub={`$${ca.total_estimated_usd?.toFixed(4) || 0} est. · $${ca.total_actual_usd?.toFixed(4) || 0} actual`} />
       </div>
 
       {/* Agent health */}
@@ -601,7 +614,7 @@ export default function RunInsights() {
                     <td style={S.td}>{r.stage_count}</td>
                     <td style={S.td}>
                       {r.actual_duration_s ? `${r.actual_duration_s}s` : "—"}
-                      {r.predicted_duration_s && <span style={{ color: "#64748b", fontSize: 10 }}> (pred: {r.predicted_duration_s}s)</span>}
+                      {r.predicted_duration_s != null && <span style={{ color: "#64748b", fontSize: 10 }}> (pred: {r.predicted_duration_s}s)</span>}
                     </td>
                     <td style={S.td}>{r.cost_estimate_usd != null ? `$${r.cost_estimate_usd}` : "—"}</td>
                     <td style={S.td}>{r.actual_cost_usd != null ? `$${r.actual_cost_usd}` : "—"}</td>

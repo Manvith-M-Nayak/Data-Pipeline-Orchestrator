@@ -6,7 +6,7 @@ import StreamingConsole from "./StreamingConsole.jsx";
 import {
   Shield, ShieldCheck, Brain, Zap, ClipboardCheck, TrendingUp, CheckCircle,
   XCircle, AlertTriangle, Clock, Activity, RotateCcw, Download,
-  ChevronRight, DollarSign, Cpu, GitBranch, RefreshCw,
+  DollarSign, Cpu, GitBranch,
 } from "lucide-react";
 
 // ── Phase metadata ────────────────────────────────────────────────────────────
@@ -21,6 +21,17 @@ const PHASES = [
 ];
 
 const PHASE_ORDER = PHASES.map((p) => p.key);
+
+// record_feedback() enters the "feedback" phase even for failed runs, so a
+// failed run's `phase` is "feedback". The phase it actually failed in is the
+// last one entered before that (decision log entries "PHASE:<NAME>").
+function failedPhase(state) {
+  const entered = (state?.decisions || [])
+    .filter((d) => d.action?.startsWith("PHASE:"))
+    .map((d) => d.action.slice(6).toLowerCase())
+    .filter((p) => p !== "feedback");
+  return entered.length ? entered[entered.length - 1] : state?.phase;
+}
 
 const S = {
   page: { maxWidth: 900, margin: "0 auto" },
@@ -98,7 +109,8 @@ function PhaseBar({ currentStatus, currentPhase }) {
       {PHASES.map((p, i) => {
         const isDone    = currentStatus === "completed" ? true : i < activeIdx;
         const isActive  = !isTerminal && PHASE_ORDER[activeIdx] === p.key;
-        const isFailed  = currentStatus === "failed" && isActive;
+        // A failed run keeps the phase it failed in — mark that one red.
+        const isFailed  = currentStatus === "failed" && i === activeIdx;
         const Icon = p.icon;
         return (
           <React.Fragment key={p.key}>
@@ -806,7 +818,7 @@ export default function ManagerTab() {
           {/* Phase bar */}
           <div style={S.card}>
             <div style={S.cardHdr}><Activity size={14} color="#818cf8" />Orchestration Pipeline</div>
-            <PhaseBar currentStatus={status} currentPhase={mgrState.phase} />
+            <PhaseBar currentStatus={status} currentPhase={status === "failed" ? failedPhase(mgrState) : mgrState.phase} />
 
             {/* Current step */}
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
@@ -818,7 +830,7 @@ export default function ManagerTab() {
               </span>
               {mgrState.retries > 0 && (
                 <span style={{ fontSize: 11, color: "#f59e0b", padding: "2px 8px", background: "#451a03", borderRadius: 20 }}>
-                  {mgrState.retries} retry/retries
+                  {mgrState.retries} {mgrState.retries === 1 ? "retry" : "retries"}
                 </span>
               )}
             </div>
@@ -838,7 +850,7 @@ export default function ManagerTab() {
                   {mgrState.executor_result.sink_container && (
                     <a
                       href="#"
-                      onClick={(e) => { e.preventDefault(); executor.download(mgrState.executor_result.sink_container).catch((err) => alert(err.message)); }}
+                      onClick={(e) => { e.preventDefault(); executor.download(mgrState.executor_result.sink_container).catch((err) => setError(err.message)); }}
                       style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 12px", background: "#0ea5e9", color: "#fff", borderRadius: 8, fontSize: 12, fontWeight: 600, textDecoration: "none" }}
                     >
                       <Download size={12} /> Download output

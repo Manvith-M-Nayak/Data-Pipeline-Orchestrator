@@ -27,15 +27,17 @@ export default function LiveDashboard() {
   const [ts,         setTs]         = useState(null);
   const [completed,  setCompleted]  = useState([]);
   const [cancelling, setCancelling] = useState({});
+  const [error,      setError]      = useState("");
 
   async function handleCancel(runId) {
     setCancelling((p) => ({ ...p, [runId]: true }));
+    setError("");
     try {
       await monitor.cancelRun(runId);
       setRuns((prev) => prev.filter((r) => r.runId !== runId));
       monitor.sync(1).catch(() => {});
     } catch (e) {
-      alert("Cancel failed: " + e.message);
+      setError("Cancel failed: " + e.message);
     } finally {
       setCancelling((p) => ({ ...p, [runId]: false }));
     }
@@ -80,6 +82,8 @@ export default function LiveDashboard() {
         {ts && <span style={{ fontSize: 12, color: "#475569" }}><span style={S.dot} />Updated {ts}</span>}
       </div>
 
+      {error && <div style={{ color: "#f87171", fontSize: 13, marginBottom: 12 }}>{error}</div>}
+
       {completed.length > 0 && (
         <div style={{ marginBottom: 20 }}>
           {completed.map((c) => (
@@ -107,9 +111,6 @@ export default function LiveDashboard() {
                   <span style={{ fontSize: 10, color: "#475569" }}>{j.job_id.slice(0, 8)}…</span>
                 </div>
                 <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 6 }}>{j.step || "Running…"}</div>
-                {j.dbx_run_id && (
-                  <div style={{ fontSize: 11, color: "#64748b" }}>DBX run_id: {j.dbx_run_id}</div>
-                )}
               </div>
             ))}
           </div>

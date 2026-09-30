@@ -1,9 +1,15 @@
 import React, { useState, useEffect, useCallback } from "react";
 import {
-  DollarSign, TrendingDown, TrendingUp, RefreshCw,
-  AlertTriangle, CheckCircle, Cpu, Clock, BarChart3, Zap,
+  DollarSign, TrendingDown, RefreshCw,
+  AlertTriangle, CheckCircle, Cpu, BarChart3, Zap,
 } from "lucide-react";
-import { cost } from "../api.js";
+import { cost, manager } from "../api.js";
+
+const usd = (v) => (typeof v === "number" ? `$${v.toFixed(4)}` : "—");
+
+// How many recent runs to look through for one that reached cost optimization
+// (runs that fail validation or pre-checks never get that far).
+const RUN_SCAN_LIMIT = 10;
 
 const S = {
   page:    { maxWidth: 960, margin: "0 auto" },
@@ -66,6 +72,7 @@ function StatCard({ label, value, sub, color = "#38bdf8", Icon }) {
 export default function CostOptimizationTab() {
   const [rates, setRates]       = useState(null);
   const [result, setResult]     = useState(null);
+  const [runId, setRunId]       = useState(null);
   const [loading, setLoading]   = useState(false);
   const [err, setErr]           = useState("");
 
@@ -78,49 +85,29 @@ export default function CostOptimizationTab() {
     }
   }, []);
 
-  useEffect(() => { fetchRates(); }, [fetchRates]);
-
-  async function runOptimize() {
+  // The Central Manager runs the Cost Optimization Agent on every run's real
+  // plan, resource plan and performance prediction (with its duration
+  // ceiling). Show the most recent run's result instead of a made-up plan.
+  const loadLatest = useCallback(async () => {
     setLoading(true);
     setErr("");
     try {
-      const plan = {
-        stages: [
-          { name: "ingest", type: "copy", source_dataset: "DS_Raw", sink_dataset: "DS_Bronze", diu: 8 },
-          { name: "transform", type: "notebook",
-            source_container: "bronze", sink_container: "silver",
-            transformations: ["c1 = expr1", "c2 = expr2", "c3 = expr3"],
-            filter_condition: "amount > 0" },
-          { name: "aggregate", type: "notebook",
-            source_container: "silver", sink_container: "gold",
-            transformations: ["c1 = expr1"],
-            aggregations: { group_by: ["grp"], agg_exprs: ["sum(amount)", "avg(amount)"] } },
-        ],
-        recommended_settings: { node_type: "Standard_D4s_v3", shuffle_partitions: 200 },
-        schema: { row_count: 500000, columns: ["c1", "c2", "c3", "amount", "grp"], size_hint: "medium" },
-        csv_size_bytes: 70 * 1024 * 1024,
-      };
-
-      const perf = { predicted_total_s: 367, throughput_mb_per_s: 15 };
-      const rp   = {
-        allocations: [
-          { stage_name: "ingest", stage_type: "copy", workers: 0, diu: 2, memory_gb: 3, node_type: "Standard_D4s_v3", duration_s: 50 },
-          { stage_name: "transform", stage_type: "notebook", workers: 1, diu: 0, memory_gb: 4.07, node_type: "Standard_D4s_v3", shuffle_partitions: 200, duration_s: 154 },
-          { stage_name: "aggregate", stage_type: "notebook", workers: 4, diu: 0, memory_gb: 4.13, node_type: "Standard_D4s_v3", shuffle_partitions: 200, duration_s: 163 },
-        ],
-        peak_concurrent_workers: 4,
-        estimated_total_s: 367,
-        file_size_mb: 70,
-      };
-
-      const res = await cost.optimize(plan, perf, rp);
-      setResult(res);
+      const runs = await manager.listRuns();
+      let found = null;
+      for (const r of (runs || []).slice(0, RUN_SCAN_LIMIT)) {
+        const st = await manager.status(r.run_id).catch(() => null);
+        if (st?.cost_optimization?.estimated_cost) { found = st; break; }
+      }
+      setResult(found ? found.cost_optimization : null);
+      setRunId(found ? found.run_id : null);
     } catch (e) {
       setErr(e.message);
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
+
+  useEffect(() => { fetchRates(); loadLatest(); }, [fetchRates, loadLatest]);
 
   const costTotal = result?.estimated_cost?.total_usd;
   const recs      = result?.recommendations || [];
@@ -131,8 +118,9 @@ export default function CostOptimizationTab() {
       <div style={S.heading}>Cost Optimization Agent</div>
       <div style={S.sub}>
         Estimates pipeline dollar cost and recommends cost-saving configuration changes
-        via ML model or heuristic fallback. Never breaks deadlines or drops below
-        minimum resources.
+        via ML model or heuristic fallback. Runs automatically for every Central Manager
+        run; never accepts a change that makes the run much slower than this pipeline
+        usually takes, or drops below minimum resources.
       </div>
 
       {/* Engine banner */}
@@ -146,7 +134,8 @@ export default function CostOptimizationTab() {
           />
           {result?.estimated_cost && (
             <span style={{ fontSize: 11, color: "#64748b" }}>
-              estimated ${costTotal?.toFixed(4)} total
+              estimated {usd(costTotal)} total
+              {runId && <> · run <span style={{ fontFamily: "monospace" }}>{runId.slice(0, 8)}</span></>}
             </span>
           )}
         </div>
@@ -156,7 +145,7 @@ export default function CostOptimizationTab() {
       <div style={S.grid3}>
         <StatCard
           label="Estimated Cost"
-          value={costTotal != null ? `$${costTotal.toFixed(4)}` : "—"}
+          value={usd(costTotal)}
           sub="USD (compute + DBU + ADF + storage)"
           Icon={DollarSign}
           color="#4ade80"
@@ -164,7 +153,7 @@ export default function CostOptimizationTab() {
         <StatCard
           label="Recommendations"
           value={recs.length}
-          sub={recs.length > 0 ? `best saves ${recs[0]?.estimated_saving || "—"}` : "run optimize to generate"}
+          sub={recs.length > 0 ? `best saves ${recs[0]?.estimated_saving || "—"}` : result ? "no cheaper safe option found" : "no run yet"}
           Icon={TrendingDown}
           color={recs.length > 0 ? "#38bdf8" : "#475569"}
         />
@@ -185,13 +174,24 @@ export default function CostOptimizationTab() {
         </div>
       )}
 
-      {/* Run optimize button */}
+      {/* Refresh */}
       <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
-        <button style={S.btn} onClick={runOptimize} disabled={loading}>
-          {loading ? <RefreshCw size={13} style={{ animation: "spin 1s linear infinite" }} /> : <Zap size={13} />}
-          {loading ? "Optimizing…" : "Run cost optimization"}
+        <button style={S.btn} onClick={loadLatest} disabled={loading}>
+          <RefreshCw size={13} />
+          {loading ? "Loading…" : "Refresh latest run"}
         </button>
       </div>
+
+      {!loading && !result && !err && (
+        <div style={{ ...S.card, textAlign: "center", color: "#475569", fontSize: 13, padding: "32px 20px" }}>
+          No cost optimization yet — run a pipeline through the Central Manager; its
+          cost analysis will appear here.
+        </div>
+      )}
+
+      {result?.streaming_advice && (
+        <div style={{ ...S.card, fontSize: 12, color: "#38bdf8" }}>{result.streaming_advice}</div>
+      )}
 
       {/* Cost breakdown */}
       {result?.estimated_cost && (
@@ -203,24 +203,24 @@ export default function CostOptimizationTab() {
           <div style={S.kv}>
             <div style={S.kvRow}>
               <span>Compute (VM nodes)</span>
-              <span style={S.kvVal}>${result.estimated_cost.compute_usd.toFixed(4)}</span>
+              <span style={S.kvVal}>{usd(result.estimated_cost.compute_usd)}</span>
             </div>
             <div style={S.kvRow}>
               <span>Databricks DBU</span>
-              <span style={S.kvVal}>${result.estimated_cost.databricks_dbu_usd.toFixed(4)}</span>
+              <span style={S.kvVal}>{usd(result.estimated_cost.databricks_dbu_usd)}</span>
             </div>
             <div style={S.kvRow}>
               <span>ADF activity</span>
-              <span style={S.kvVal}>${result.estimated_cost.adf_usd.toFixed(4)}</span>
+              <span style={S.kvVal}>{usd(result.estimated_cost.adf_usd)}</span>
             </div>
             <div style={S.kvRow}>
               <span>Storage</span>
-              <span style={S.kvVal}>${result.estimated_cost.storage_usd.toFixed(4)}</span>
+              <span style={S.kvVal}>{usd(result.estimated_cost.storage_usd)}</span>
             </div>
             <div style={{ ...S.kvRow, borderBottom: "none", fontSize: 14 }}>
               <span style={{ fontWeight: 700, color: "#f1f5f9" }}>Total</span>
               <span style={{ ...S.kvVal, color: "#4ade80", fontSize: 16 }}>
-                ${result.estimated_cost.total_usd.toFixed(4)}
+                {usd(result.estimated_cost.total_usd)}
               </span>
             </div>
           </div>
@@ -258,7 +258,7 @@ export default function CostOptimizationTab() {
                 <div style={{ fontSize: 11, color: "#64748b" }}>{r.reason}</div>
                 {r.new_cost && (
                   <div style={{ fontSize: 11, color: "#475569", marginTop: 2 }}>
-                    new cost: ${r.new_cost.total_usd?.toFixed(4)}
+                    new cost: {usd(r.new_cost.total_usd)}
                   </div>
                 )}
               </div>
@@ -278,7 +278,7 @@ export default function CostOptimizationTab() {
             {Object.entries(rates.node_hourly_rates).map(([node, rate]) => (
               <div key={node} style={S.kvRow}>
                 <span>{node}</span>
-                <span style={S.kvVal}>${rate.toFixed(2)}/hr</span>
+                <span style={S.kvVal}>{typeof rate === "number" ? `$${rate.toFixed(2)}/hr` : String(rate)}</span>
               </div>
             ))}
           </div>
@@ -291,11 +291,24 @@ export default function CostOptimizationTab() {
           <CheckCircle size={14} color="#64748b" />
           Cost Model Assumptions
         </div>
-        <div style={{ fontSize: 11, color: "#64748b", lineHeight: 1.6 }}>
-          All costs are estimates. No real billing data was available at build time.
-          DBU pricing includes ~2.5× Databricks markup. Off-peak scheduling assumes
-          30% discount. Storage priced at $0.018/GB/month, prorated by runtime.
-        </div>
+        {/* Straight from the backend cost model (GET /cost-optimization/node-rates) */}
+        {rates?.assumptions ? (
+          <div style={S.kv}>
+            {Object.entries(rates.assumptions)
+              .filter(([k]) => k !== "node_hourly_rates" && k !== "note")
+              .map(([k, v]) => (
+                <div key={k} style={S.kvRow}>
+                  <span>{k.replace(/_/g, " ")}</span>
+                  <span style={S.kvVal}>{String(v)}</span>
+                </div>
+              ))}
+            {rates.assumptions.note && (
+              <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>{rates.assumptions.note}</div>
+            )}
+          </div>
+        ) : (
+          <div style={{ fontSize: 11, color: "#64748b" }}>All costs are estimates.</div>
+        )}
       </div>
     </div>
   );

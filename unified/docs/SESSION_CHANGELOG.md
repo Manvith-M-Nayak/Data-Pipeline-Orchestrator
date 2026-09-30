@@ -178,6 +178,15 @@ Insights lookup found data for a real old run.
 
 ---
 
+## 9. Frontend review (logic-fix stage 12)
+
+Full pass over `frontend/src`: 17 issues fixed (wrong field names, a cost tab that
+optimized a hard-coded demo plan, a resource panel that could never show, failed
+runs shown as failing in "feedback", streaming console races, stale/misleading
+states, `alert()` calls, 19 lint findings). One backend change:
+`record_feedback` keeps a failed run's phase and step. Details and verification in
+`LOGIC_FIXES_LOG.md` → Stage 12.
+
 ## Mistakes and dead ends (honest list)
 
 | What happened | Impact | Resolution |

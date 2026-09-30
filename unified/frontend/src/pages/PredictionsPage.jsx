@@ -38,7 +38,7 @@ export default function PredictionsPage() {
       await monitor.sync(48);
       const n = await monitor.getNames();
       setNames(n);
-      if (n.length) setChosen(n[0]);
+      if (n.length) { setChosen(n[0]); setResult(null); }
     } catch (e) {
       setError(`Sync failed: ${e.message}`);
     } finally {
@@ -80,7 +80,7 @@ export default function PredictionsPage() {
       <h1 style={S.title}>Runtime Predictions</h1>
       {error && <div style={{ color: "#f87171", fontSize: 13, marginBottom: 12 }}>{error}</div>}
       <div style={S.row}>
-        <select style={S.select} value={chosen} onChange={(e) => setChosen(e.target.value)}>
+        <select style={S.select} value={chosen} onChange={(e) => { setChosen(e.target.value); setResult(null); }}>
           {names.map((n) => <option key={n} value={n}>{n}</option>)}
         </select>
         <button style={S.btn} onClick={load} disabled={loading}>{loading ? "…" : "Predict"}</button>

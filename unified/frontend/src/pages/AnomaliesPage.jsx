@@ -65,11 +65,11 @@ export default function AnomaliesPage() {
 
       <div style={S.chips}>
         <Chip active={!kind} onClick={() => setKind("")}>All</Chip>
-        {KINDS.map((k) => <Chip key={k} active={kind === k} onClick={() => setKind(k)}>{k.replace("_", " ")}</Chip>)}
+        {KINDS.map((k) => <Chip key={k} active={kind === k} onClick={() => setKind(k)}>{k.replaceAll("_", " ")}</Chip>)}
       </div>
 
       {loading ? <div style={{ color: "#475569" }}>Loading…</div> : events.length === 0 ? (
-        <div style={S.empty}><AlertTriangle size={40} style={{ marginBottom: 12, color: "#334155" }} /><p>No {kind ? kind.replace("_", " ") + " " : ""}anomalies detected yet.</p></div>
+        <div style={S.empty}><AlertTriangle size={40} style={{ marginBottom: 12, color: "#334155" }} /><p>No {kind ? kind.replaceAll("_", " ") + " " : ""}anomalies detected yet.</p></div>
       ) : events.map((e) => {
         const color = SEVERITY_COLOR[e.severity] || "#94a3b8";
         return (
@@ -77,7 +77,7 @@ export default function AnomaliesPage() {
             <AlertTriangle size={18} style={{ color, flexShrink: 0, marginTop: 2 }} />
             <div style={{ flex: 1 }}>
               <div style={{ ...S.name, display: "flex", gap: 8, alignItems: "center" }}>
-                {e.kind.replace("_", " ")}
+                {(e.kind || "").replaceAll("_", " ")}
                 <span style={{ ...S.badge, background: `${color}22`, color }}>{e.severity}</span>
               </div>
               <div style={S.meta}>{e.detected_at} UTC · {e.pipeline_name} · Run {e.run_id?.slice(0, 12)}</div>

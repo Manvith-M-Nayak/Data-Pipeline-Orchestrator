@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { monitor, connectWS } from "../api.js";
+import { useAppContext } from "../AppContext.jsx";
 import {
   Activity, Brain, Zap, AlertTriangle, CheckCircle,
   Clock, ArrowRight, XCircle, RefreshCw,
@@ -75,17 +76,16 @@ function fmtSec(s) {
 }
 function fmtMs(ms) { return ms ? fmtSec(Math.round(ms / 1000)) : "—"; }
 
-function readPlan() {
-  try { return JSON.parse(localStorage.getItem("last_plan") || "null"); } catch { return null; }
-}
-
 export default function HomePage() {
   const navigate = useNavigate();
   const [summary,   setSummary]   = useState(null);
   const [liveRuns,  setLiveRuns]  = useState([]);
   const [wsOk,      setWsOk]      = useState(false);
   const [loading,   setLoading]   = useState(true);
-  const [savedPlan, setSavedPlan] = useState(readPlan);
+  const [loadError, setLoadError] = useState("");
+  const [syncing,   setSyncing]   = useState(false);
+  // Same source the Planner writes to — no separate localStorage read to keep in sync.
+  const { planResult: savedPlan } = useAppContext();
   const refreshRef = useRef();
 
   async function loadSummary() {
@@ -96,8 +96,18 @@ export default function HomePage() {
       ]);
       setSummary(s);
       setLiveRuns(live);
-    } catch {}
-    finally { setLoading(false); }
+      setLoadError("");
+    } catch (e) {
+      setLoadError(`Could not reach the backend: ${e.message}`);
+    } finally { setLoading(false); }
+  }
+
+  async function syncNow() {
+    setSyncing(true);
+    setLoadError("");
+    try { await monitor.sync(48); await loadSummary(); }
+    catch (e) { setLoadError(`Sync failed: ${e.message}`); }
+    finally { setSyncing(false); }
   }
 
   useEffect(() => {
@@ -105,18 +115,6 @@ export default function HomePage() {
     // auto-refresh every 30s
     refreshRef.current = setInterval(loadSummary, 30000);
     return () => clearInterval(refreshRef.current);
-  }, []);
-
-  // Sync savedPlan when localStorage changes (e.g. after returning from PlannerTab)
-  useEffect(() => {
-    function onStorage(e) {
-      if (e.key === "last_plan") setSavedPlan(readPlan());
-    }
-    window.addEventListener("storage", onStorage);
-    // Also check on focus (same-tab navigation doesn't fire storage event)
-    function onFocus() { setSavedPlan(readPlan()); }
-    window.addEventListener("focus", onFocus);
-    return () => { window.removeEventListener("storage", onStorage); window.removeEventListener("focus", onFocus); };
   }, []);
 
   const onWs = useCallback((data) => {
@@ -132,7 +130,8 @@ export default function HomePage() {
 
   useEffect(() => connectWS(onWs), [onWs]);
 
-  const noData = !loading && (!summary || summary.total_runs === 0);
+  // Only "no data" when the backend answered; an unreachable backend is an error, not an empty DB.
+  const noData = !loading && !loadError && (!summary || summary.total_runs === 0);
 
   return (
     <div style={S.page}>
@@ -140,7 +139,7 @@ export default function HomePage() {
       <div style={S.hero}>
         <div>
           <h1 style={S.title}>Pipeline Orchestrator</h1>
-          <p style={S.sub}>Live insights across all three agents.</p>
+          <p style={S.sub}>Live insights across all agents.</p>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 6 }}>
           <span style={{ fontSize: 11, color: wsOk ? "#22c55e" : "#475569", display: "flex", alignItems: "center", gap: 5 }}>
@@ -152,10 +151,20 @@ export default function HomePage() {
         </div>
       </div>
 
+      {loadError && (
+        <div style={{ ...S.noData, color: "#f87171", borderColor: "#7f1d1d" }}>
+          <XCircle size={14} /> {loadError}
+        </div>
+      )}
+
       {noData && (
         <div style={S.noData}>
           <AlertTriangle size={14} color="#f59e0b" />
-          No pipeline data yet. Click <strong style={{ color: "#38bdf8", cursor: "pointer", margin: "0 4px" }} onClick={() => monitor.sync(48).then(loadSummary).catch((e) => console.error("[sync]", e))}>Sync (48h)</strong> in the header to pull recent ADF runs, or run your first pipeline.
+          No pipeline data yet.{" "}
+          <button onClick={syncNow} disabled={syncing} style={{ color: "#38bdf8", background: "none", border: "none", cursor: "pointer", fontWeight: 700, fontSize: 12, padding: 0 }}>
+            {syncing ? "Syncing…" : "Sync the last 48h"}
+          </button>{" "}
+          to pull recent ADF runs, or run your first pipeline.
         </div>
       )}
 

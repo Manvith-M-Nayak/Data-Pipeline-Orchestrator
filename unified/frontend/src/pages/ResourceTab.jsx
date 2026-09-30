@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback } from "react";
 import {
-  Cpu, MemoryStick, Zap, TrendingUp, AlertTriangle,
+  Cpu, Zap, TrendingUp, AlertTriangle,
   CheckCircle, RefreshCw, BarChart3, GitBranch, Clock,
 } from "lucide-react";
 import { resource, monitor } from "../api.js";
+import { useAppContext } from "../AppContext.jsx";
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 const S = {
@@ -141,7 +142,7 @@ function AccuracySection({ report }) {
 }
 
 // ── Live plan analysis section ─────────────────────────────────────────────────
-function LiveAnalysis({ plan, allocations, feasible, violations, warnings, execGroups }) {
+function LiveAnalysis({ allocations, feasible, violations, warnings, execGroups }) {
   if (!allocations || allocations.length === 0) return null;
 
   return (
@@ -245,7 +246,11 @@ export default function ResourceTab() {
   const [factors, setFactors]             = useState(null);
   const [modelInfo, setModelInfo]         = useState(null);
   const [recs, setRecs]                   = useState(null);
-  const [liveRp, setLiveRp]              = useState(null);
+  const [limits, setLimits]               = useState(null);
+  // Resource plan of the run the Central Manager tab is showing (persisted in
+  // context) — the allocations live re-allocation compares against.
+  const { managerState } = useAppContext();
+  const liveRp = managerState?.resource_plan?.allocations?.length ? managerState.resource_plan : null;
   const [loading, setLoading]             = useState(false);
   const [reallocationLoading, setRlLoad] = useState(false);
   const [err, setErr]                     = useState("");
@@ -253,14 +258,16 @@ export default function ResourceTab() {
   const fetchAccuracy = useCallback(async () => {
     setLoading(true);
     try {
-      const [acc, cf, mi] = await Promise.all([
+      const [acc, cf, mi, lim] = await Promise.all([
         resource.accuracy(),
         resource.correctionFactors(),
         resource.modelInfo().catch(() => null),
+        resource.limits().catch(() => null),
       ]);
       setAccuracy(acc);
       setFactors(cf);
       setModelInfo(mi);
+      setLimits(lim);
       setErr("");
     } catch (e) {
       setErr(e.message);
@@ -273,6 +280,7 @@ export default function ResourceTab() {
 
   async function checkReallocate() {
     setRlLoad(true);
+    setErr("");
     try {
       const live = await monitor.getLiveRuns();
       if (!live || live.length === 0) {
@@ -387,6 +395,12 @@ export default function ResourceTab() {
 
       {/* Live resource plan from manager context (if any) */}
       {liveRp && (
+        <div style={{ fontSize: 11, color: "#475569", marginBottom: 8 }}>
+          Resource plan of Central Manager run{" "}
+          <span style={{ fontFamily: "monospace" }}>{managerState?.run_id?.slice(0, 8) || "—"}</span>
+        </div>
+      )}
+      {liveRp && (
         <LiveAnalysis
           allocations={liveRp.allocations}
           feasible={liveRp.feasible}
@@ -414,15 +428,25 @@ export default function ResourceTab() {
       <div style={S.card}>
         <div style={S.cardHdr}><CheckCircle size={14} color="#64748b" />Student-Tier Hard Limits</div>
         <div style={S.kv}>
-          <div style={S.kvRow}><span>Max Databricks workers</span><span style={S.kvVal}>4</span></div>
-          <div style={S.kvRow}><span>Max ADF DIU</span><span style={S.kvVal}>8</span></div>
-          <div style={S.kvRow}><span>Max parallel stages in one group</span><span style={S.kvVal}>3</span></div>
-          <div style={S.kvRow}><span>Max total memory (parallel group)</span><span style={S.kvVal}>64 GB</span></div>
-          <div style={S.kvRow}><span>Default node type</span><span style={S.kvVal}>Standard_D4s_v3 (4 vCPU / 16 GB)</span></div>
-          <div style={{ ...S.kvRow, borderBottom: "none" }}>
-            <span>ADF throughput per DIU</span>
-            <span style={S.kvVal}>~5 MB/s</span>
-          </div>
+          {/* From GET /resource/limits — the constants the agent enforces */}
+          {limits ? (() => {
+            const spec = limits.node_specs?.[limits.default_node];
+            const rows = [
+              ["Max Databricks workers", limits.max_workers],
+              ["Max ADF DIU", limits.max_diu],
+              ["Max parallel stages in one group", limits.max_concurrent],
+              ["Max total memory (parallel group)", `${limits.max_total_mem_gb} GB`],
+              ["Default node type", spec ? `${limits.default_node} (${spec.cpu} vCPU / ${spec.memory_gb} GB)` : limits.default_node],
+              ["ADF throughput per DIU", `~${limits.adf_mb_per_diu_per_s} MB/s`],
+            ];
+            return rows.map(([label, val], i) => (
+              <div key={label} style={i === rows.length - 1 ? { ...S.kvRow, borderBottom: "none" } : S.kvRow}>
+                <span>{label}</span><span style={S.kvVal}>{val}</span>
+              </div>
+            ));
+          })() : (
+            <div style={{ fontSize: 12, color: "#475569" }}>Limits unavailable — backend not reachable.</div>
+          )}
         </div>
       </div>
     </div>

@@ -73,8 +73,9 @@ const RISK_COLOR = {
   high: "#f87171",
 };
 
-function fmtSeconds(s) {
-  if (!s) return "—";
+function fmtSeconds(v) {
+  if (!v) return "—";
+  const s = Math.round(v);
   if (s < 60) return `${s}s`;
   const m = Math.floor(s / 60);
   const rem = s % 60;
@@ -346,18 +347,15 @@ export default function PerformancePredictionTab() {
       const histRes = await perfPrediction.history();
       setHistory(histRes.records || []);
 
-      // 2. Pull latest manager run and grab its performance_prediction block
+      // 2. Newest manager run that got as far as a performance prediction
+      //    (runs are newest-first; one that failed validation has none).
       const runs = await manager.listRuns();
-      if (runs && runs.length > 0) {
-        // Runs are sorted newest-first by the backend
-        const latestRun = runs[0];
-        if (latestRun.run_id) {
-          const state = await manager.status(latestRun.run_id);
-          if (state && state.performance_prediction && state.performance_prediction.outcome) {
-            setLatestPred(state.performance_prediction);
-          }
-        }
+      let pred = null;
+      for (const r of (runs || []).slice(0, 10)) {
+        const state = await manager.status(r.run_id).catch(() => null);
+        if (state?.performance_prediction?.outcome) { pred = state.performance_prediction; break; }
       }
+      setLatestPred(pred);
     } catch (e) {
       setErr(e.message);
     } finally {

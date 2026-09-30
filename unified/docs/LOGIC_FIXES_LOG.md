@@ -21,6 +21,7 @@ records:
 | 9 | Remove the auto-added `processed_time` column everywhere | user request | Done |
 | 10 | Planner self-verifies (assurance as a library); intent check leaves the run path | design change (user request) | Done |
 | 11 | Streaming: single-stage merge fixed + multi-stage streaming, user-selectable; AND/OR filters | bug + feature (user request) | Done |
+| 12 | Frontend review: wrong fields, dead features, demo data, failure display, lint | 17 issues (user request) | Done |
 
 ---
 
@@ -723,3 +724,54 @@ New data flows through the whole chain on every run.
 - **Multi-stage runs cost more.** Each run executes one Databricks job per stage in sequence (about 90 s cold start each).
 - **Streaming aggregations cover only each run's new rows**, in both layouts. Cumulative results would need a stateful design (not in scope).
 - **OR is supported in filters, but single-stage merging only ever combines filters with AND** (steps apply one after another).
+
+
+## Stage 12 — Frontend review
+
+The user asked for a check of the frontend for any issues. I read every file in
+`frontend/src` against the backend responses, linted with React rules
+(`eslint:recommended` + `react` + `react-hooks`, run from a scratch folder so the
+project gets no new config or dependencies), then loaded every page in the browser
+against the running backend.
+
+### Bugs fixed
+
+| # | Where | Problem | Fix |
+|---|---|---|---|
+| 1 | `ManagerTab` phase bar | A failed run never showed the red ✗: `isFailed` required `isActive`, which is forced false for finished runs. | Mark the phase at the failure index. |
+| 2 | Manager + Run Insights | `record_feedback()` enters the "feedback" phase even for failed runs, so every failure looked like it failed in *Feedback* and the step read "Recording outcome to feedback log" instead of the error. | Backend: `record_feedback` restores the failed run's `phase`/`step` after logging. Frontend: for runs saved before this fix, take the last phase before the trailing `PHASE:FEEDBACK`. |
+| 3 | `RunInsights` run detail | Cost recommendations read `r.action`; the field is `change`, so each line rendered as "— ~12%". | Use `r.change`. |
+| 4 | `RunInsights` download | Plain `<a href>` cannot send `x-api-key`; it breaks once `API_KEY` is set. | Use `executor.download` (fetch + blob) like the other tabs. |
+| 5 | `RunInsights` stats | `avg_error_pct !== null` showed "undefined%" when the field was missing; an analytics load failure silently showed zeros. | `!= null`; show the load error. |
+| 6 | `CostOptimizationTab` | "Run cost optimization" optimized a **hard-coded demo plan** (made-up stages, 500k rows, 70 MB), not the user's pipeline. The assumptions text claimed a 30% off-peak discount that the cost model does not have, and the subtitle still said "never breaks deadlines". | Show the Cost agent result the Manager already computes for each run (newest run that has one, with its run id and streaming advice). Assumptions are rendered from `GET /cost-optimization/node-rates`. Subtitle describes the learned-duration limit. |
+| 7 | `ResourceTab` | `liveRp` was never set, so "Stage Allocations" never appeared and "Check live re-allocation" always answered "No active resource plan". The limits card was hard-coded. | Use the resource plan of the run shown in the Manager tab (context); limits come from `GET /resource/limits`. |
+| 8 | `PerformancePredictionTab` | Only looked at the newest run; if that run failed before prediction the tab showed "no data". Durations printed raw decimals (e.g. `12.345s`). | Scan the 10 newest runs for one with a prediction; round durations. |
+| 9 | `StreamingConsole` | A drop or click while a tick ran started a second tick; re-picking the same file did nothing (input value never reset); polling continued forever after Stop; `busy` could stay stuck; leaving the Manager tab lost the stream id while the stream stayed active on the backend. | Guard on `busy`; reset the input; poll only while active; clear `busy` on stop; remember the stream id in `localStorage`, restore it on mount, and clear it if the server returns 404. Added "New stream" after stopping. |
+| 10 | `PlannerTab` | If schema detection failed, the file stayed selected and the card showed "undefined columns · undefined rows". Re-selecting the same file after "Change" did nothing. After a reload, the mode buttons reset to Batch even for a restored streaming plan, so "Re-generate" silently produced a batch plan. `detected.preview[0]` crashed on older saved schemas. Cmd+Enter only (no Ctrl+Enter). | Clear the file on failure; reset the input; seed mode/layout from the restored plan; guard `preview`/`columns`; accept Ctrl+Enter. `reset()` now clears the assurance result too. |
+| 11 | `ExecutorTab` | "Change" / drop accepted any file type (or `undefined`) and never told the user the plan was built from a different file. | Validate the extension. The Planner now stores `file_name` in `last_csv_schema`; the Executor warns when the chosen file differs. |
+| 12 | `HomePage` | An unreachable backend showed "No pipeline data yet". The "Sync" link only logged to the console. The saved plan was re-read from `localStorage` with focus/storage listeners. | Show the load error; the sync link shows its own progress and errors; read the plan from `AppContext`. |
+| 13 | `LiveDashboard`, Manager/Executor download | `alert()` blocks the page (and browser automation). | Inline error messages. |
+| 14 | `PredictionsPage` | After switching pipeline, the previous pipeline's prediction stayed on screen under the new name. | Clear the result on change. |
+| 15 | `AnomaliesPage` | `replace("_", " ")` only replaces the first underscore; `e.kind` unguarded. | `replaceAll`; guard. |
+| 16 | `LogsPage` | Empty-state text pointed to a "sidebar" button that does not exist. | Points to the header's "Sync (48h)". |
+| 17 | `api.js` download | `URL.revokeObjectURL` ran right after `click()`, which can cancel the download in Firefox. | Revoke after 1 s. |
+
+Lint: 19 findings → 0 (unused imports/variables, empty `catch {}` blocks given a
+comment, one intentional mount-only effect marked).
+
+### Verification
+
+- **Lint and build:** ESLint (React rules) reports 0 problems, and `vite build` passes.
+- **Browser**, against the live backend: every route and all four Monitor sub-tabs load with no console errors.
+  - **Resource** now shows the Manager run's allocations.
+  - **Cost** shows run `dcca01c0`'s real result ($0.0318, with streaming advice) and the backend assumptions.
+  - **Performance** shows the latest real prediction.
+  - **Failed run `56fa5439`:** Run Insights and the Manager phase bar now mark *executing* in red, not *feedback*.
+- **Backend change:** checked directly. A failed state keeps `executing` / `Failed: boom`, and the decision log still contains `PHASE:FEEDBACK`. A completed run is unchanged. The test wrote to a temp dir; the real feedback log is untouched.
+
+### Not changed
+
+- **`npm audit`:** `react-router` has a moderate advisory with a non-breaking fix (`npm audit fix`). The `vite`/`esbuild` advisories are dev-server only and need a major Vite upgrade. Left for the user to decide, since it changes `package-lock.json`.
+- **Layout:** fixed-column grids are not responsive on narrow screens. That is cosmetic, and out of scope for a bug pass.
+- **Duplicated run flow:** Executor and Manager tabs both start runs. Both go through the Manager, so behaviour is consistent; merging them is a UX decision.
+

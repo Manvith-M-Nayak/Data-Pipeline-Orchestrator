@@ -2,16 +2,27 @@ import React, { useState, useRef, useEffect, useCallback } from "react";
 import { Radio, Upload, Square, RefreshCw } from "lucide-react";
 import { stream as streamApi } from "../api.js";
 
+// The stream id is remembered so leaving the Manager tab doesn't orphan a
+// stream that is still active on the backend.
+const STREAM_KEY = "stream_id";
+function savedStreamId() {
+  try { return localStorage.getItem(STREAM_KEY); } catch { return null; }
+}
+function saveStreamId(sid) {
+  try { sid ? localStorage.setItem(STREAM_KEY, sid) : localStorage.removeItem(STREAM_KEY); } catch { /* storage unavailable */ }
+}
+
 // Live streaming console: start a stream, drop data → it processes incrementally,
 // outputs appear as each trigger completes. Shown only for streaming-mode plans.
 export default function StreamingConsole({ config, schema, fileFormat = "csv" }) {
-  const [streamId, setStreamId] = useState(null);
+  const [streamId, setStreamIdRaw] = useState(savedStreamId);
   const [status,   setStatus]   = useState(null);
   const [rows,     setRows]     = useState([]);
   const [busy,     setBusy]     = useState(false);
   const [error,    setError]    = useState("");
   const fileRef = useRef();
-  const pollRef = useRef();
+
+  const setStreamId = useCallback((sid) => { setStreamIdRaw(sid); saveStreamId(sid); }, []);
 
   const refresh = useCallback(async (sid) => {
     try {
@@ -20,19 +31,31 @@ export default function StreamingConsole({ config, schema, fileFormat = "csv" })
       const out = await streamApi.output(sid, 200);
       setRows(out.rows || []);
       return s;
-    } catch (e) { setError(e.message); }
-  }, []);
+    } catch (e) {
+      if (e?.status === 404) {
+        // Stream gone (server restarted) — back to the start button.
+        setStreamId(null); setStatus(null); setRows([]); setBusy(false);
+        setError("That stream no longer exists on the server — start a new one.");
+      } else {
+        setError(e.message);
+      }
+    }
+  }, [setStreamId]);
 
-  // Poll while a tick is running so output updates when it finishes.
+  // Restore a remembered stream once on mount.
+  useEffect(() => { if (streamId) refresh(streamId); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Poll while the stream is active so output updates when a tick finishes;
+  // a stopped stream has nothing new to show.
+  const polling = !!streamId && (status === null || !!status.active);
   useEffect(() => {
-    if (!streamId) return;
-    clearInterval(pollRef.current);
-    pollRef.current = setInterval(async () => {
+    if (!polling) return;
+    const t = setInterval(async () => {
       const s = await refresh(streamId);
       if (s && !s.running) { setBusy(false); }
     }, 5000);
-    return () => clearInterval(pollRef.current);
-  }, [streamId, refresh]);
+    return () => clearInterval(t);
+  }, [polling, streamId, refresh]);
 
   async function start() {
     setError(""); setBusy(true);
@@ -45,7 +68,8 @@ export default function StreamingConsole({ config, schema, fileFormat = "csv" })
   }
 
   async function onDrop(file) {
-    if (!file || !streamId) return;
+    // One trigger at a time: a drop while a tick runs would queue a second one.
+    if (!file || !streamId || busy) return;
     if (file.size === 0) { setError("That file is empty — drop a file with data."); return; }
     setError(""); setBusy(true);
     try {
@@ -59,6 +83,7 @@ export default function StreamingConsole({ config, schema, fileFormat = "csv" })
     if (!streamId) return;
     try { await streamApi.stop(streamId); await refresh(streamId); }
     catch (e) { setError(e.message); }
+    finally { setBusy(false); }   // polling ends with the stream, so clear it here
   }
 
   const cols = rows.length ? Object.keys(rows[0]) : [];
@@ -87,7 +112,7 @@ export default function StreamingConsole({ config, schema, fileFormat = "csv" })
           </div>
 
           <div
-            onClick={() => fileRef.current?.click()}
+            onClick={() => !busy && fileRef.current?.click()}
             onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => { e.preventDefault(); onDrop(e.dataTransfer.files[0]); }}
             style={S.drop(busy)}
@@ -101,7 +126,7 @@ export default function StreamingConsole({ config, schema, fileFormat = "csv" })
             </div>
             <input
               ref={fileRef} type="file" accept=".csv,.json,.jsonl,.ndjson" hidden
-              onChange={(e) => onDrop(e.target.files[0])}
+              onChange={(e) => { onDrop(e.target.files[0]); e.target.value = ""; }}
             />
           </div>
 
@@ -109,8 +134,12 @@ export default function StreamingConsole({ config, schema, fileFormat = "csv" })
             <button style={S.ghost} disabled={busy} onClick={() => refresh(streamId)}>
               <RefreshCw size={12} /> Refresh output
             </button>
-            {status?.active && (
+            {status?.active ? (
               <button style={S.ghost} onClick={stop}><Square size={12} /> Stop stream</button>
+            ) : (
+              <button style={S.ghost} onClick={() => { setStreamId(null); setStatus(null); setRows([]); setError(""); }}>
+                <Radio size={12} /> New stream
+              </button>
             )}
           </div>
 

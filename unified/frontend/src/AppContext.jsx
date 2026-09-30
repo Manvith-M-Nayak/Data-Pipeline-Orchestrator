@@ -4,7 +4,7 @@ function lsGet(key, fallback = null) {
   try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; }
 }
 function lsSet(key, val) {
-  try { if (val === null || val === undefined) localStorage.removeItem(key); else localStorage.setItem(key, JSON.stringify(val)); } catch {}
+  try { if (val === null || val === undefined) localStorage.removeItem(key); else localStorage.setItem(key, JSON.stringify(val)); } catch { /* storage full or blocked — state still lives in memory */ }
 }
 
 const AppContext = createContext(null);

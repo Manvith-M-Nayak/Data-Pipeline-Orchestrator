@@ -1146,7 +1146,12 @@ class CentralManager:
         log is the Executor's execution time when the pipeline ran (what every
         prediction describes); runs that never executed keep the elapsed time
         and are excluded from learning by their failed status."""
+        failed_at = (state.phase, state.step) if state.status == "failed" else None
         self._enter(state, "feedback", "Recording outcome to feedback log")
+        if failed_at:
+            # Keep the phase/step the run failed in — the UI shows these, and
+            # "Recording outcome…" would hide where and why it failed.
+            state.phase, state.step = failed_at
         actual_duration_s = state.execution_s or total_elapsed_s
         outcome = final_status or state.status
         try:
