@@ -193,6 +193,20 @@ New tokens, shared components and a sidebar shell. Every page's colours are move
 the tokens, so the light theme and the dark theme work everywhere. Details in
 `LOGIC_FIXES_LOG.md` → Stage 13.
 
+## 11. Redesign part 2 — flow diagrams (stage 14)
+
+Pipeline data-flow graph and agent lifecycle graph (React Flow). Both are themed and
+show live statuses from the existing manager and executor state. They appear on the
+Planner, Central Manager, Executor and Run Insights pages. Details in
+`LOGIC_FIXES_LOG.md` → Stage 14.
+
+## 12. Reload consistency (stage 14.1)
+
+One shared run store in the frontend replaces the per-tab snapshots. The backend saves
+the run at every phase change, and Run Insights reads the live state. The data file is
+kept in IndexedDB, so it survives a refresh. Details in `LOGIC_FIXES_LOG.md` →
+Stage 14.1.
+
 ## Mistakes and dead ends (honest list)
 
 | What happened | Impact | Resolution |

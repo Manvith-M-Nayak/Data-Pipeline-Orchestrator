@@ -1,7 +1,9 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { executor, manager, monitor, connectWS } from "../api.js";
+import { executor, monitor, connectWS } from "../api.js";
 import { useAppContext } from "../AppContext.jsx";
+import { failedPhaseOf } from "../flows/status.js";
+import PipelineFlow from "../flows/PipelineFlow.jsx";
 import {
   Zap, Upload, CheckCircle, XCircle, RotateCcw, Brain, AlertTriangle, Activity, Download,
 } from "lucide-react";
@@ -128,111 +130,59 @@ function Spinner({ color = "var(--warn)" }) {
 export default function ExecutorTab() {
   const navigate = useNavigate();
   const {
-    csvFile, setCsvFile,
+    csvFile, setCsvFile, csvRestoring,
     planResult:      savedPlan,
     plannerPrompt,
-    executorJobId:   jobId,    setExecutorJobId:    setJobId,
-    executorJobState:jobState, setExecutorJobState: setJobState,
-    executorStep:    execStep, setExecutorStep:     setExecStep,
+    detectedSchema, runSchema,
+    runId: jobId, run: rawRun, runOrigin, runError,
+    startRun, clearRun,
   } = useAppContext();
 
-  const savedSchema = (() => { try { return JSON.parse(localStorage.getItem("last_csv_schema") || "null"); } catch { return null; } })();
-
   const [dragging,  setDragging]  = useState(false);
-  const [running,   setRunning]   = useState(false);
-  const [error,     setError]     = useState("");
+  const [starting,  setStarting]  = useState(false);
+  const [localError, setLocalError] = useState("");
   const [monEvents, setMonEvents] = useState([]);
-  const fileRef      = useRef();
-  const pollRef = useRef();
+  const fileRef = useRef();
+  const error = localError || runError;
+  const setError = setLocalError;
 
-  function _handleStaleJob() {
-    clearInterval(pollRef.current);
-    setRunning(false);
-    setJobId(null);
-    setJobState(null);
-    setExecStep(-1);
-    setError("Session expired — server was restarted. Click Run Pipeline to start again.");
+  // The run comes from AppContext — the same copy the Central Manager shows,
+  // fetched fresh from the server after every reload.
+  const jobState = rawRun ? mapManagerState(rawRun) : null;
+  const running = starting || jobState?.status === "running" || (!!jobId && !rawRun);
+  // Runs this tab did not start (Central Manager, another window, auto-followed).
+  const attachedFrom = !!jobId && runOrigin !== "executor";
+
+  // Which step row is active. Read from the executor's progress text; the
+  // furthest step seen for this run is remembered, because a failure replaces
+  // the text with "Failed: …" and the row it failed on must stay marked.
+  const furthest = useRef({ id: null, i: -1 });
+  if (furthest.current.id !== jobId) furthest.current = { id: jobId, i: -1 };
+  let execStep = -1;
+  if (jobState?.status === "completed") execStep = EXEC_STEPS.length - 1;
+  else if (jobState) {
+    const st = (jobState.step || "").toLowerCase();
+    for (let i = STEP_MATCHERS.length - 1; i >= 0; i--) {
+      if (STEP_MATCHERS[i](st)) { execStep = i; break; }
+    }
+    if (execStep === -1 && jobState.status === "running") execStep = 0;
+    furthest.current.i = Math.max(furthest.current.i, execStep);
+    execStep = furthest.current.i;
+    // After a reload a failed run has no progress text left: if it never
+    // reached execution, it failed in the Manager's pre-flight row.
+    if (execStep === -1 && jobState.status === "failed") {
+      execStep = ["validating", "assuring_plan", "pre_checks"].includes(failedPhaseOf(rawRun)) ? 0 : -1;
+    }
   }
 
-  // Apply one manager status snapshot to this tab's job view. Returns true
-  // while the run is still in progress.
-  const _applyStatus = useCallback((raw) => {
-    const s = mapManagerState(raw);
-    setJobState(s);
-    if (s.step) {
-      const st = s.step.toLowerCase();
-      for (let i = STEP_MATCHERS.length - 1; i >= 0; i--) {
-        if (STEP_MATCHERS[i](st)) { setExecStep(i); break; }
-      }
-    }
-    if (s.status !== "running") {
-      clearInterval(pollRef.current);
-      setRunning(false);
-      setExecStep(EXEC_STEPS.length - 1);
-      return false;
-    }
-    return true;
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Extracted poll tick — takes explicit jobId to avoid stale closure
-  const _startPolling = useCallback((jid) => {
-    clearInterval(pollRef.current);
-    pollRef.current = setInterval(async () => {
-      try {
-        if (!_applyStatus(await manager.status(jid))) {
-          // Backend _notify_monitor handles DB sync; this is best-effort UI refresh
-          monitor.sync(2).catch(() => {});
-        }
-      } catch (e) {
-        if (e?.status === 410 || e?.status === 404) {
-          _handleStaleJob();
-        }
-        // Any other error (network blip): interval keeps running, next tick will retry
-      }
-    }, 3000);
-  }, []); // eslint-disable-line
-
-  // On mount: resume polling if context has a running job (user switched tabs mid-run)
+  // Refresh the monitor once when a run finishes (best-effort UI refresh;
+  // the backend's _notify_monitor does the real sync).
+  const lastStatus = useRef(jobState?.status);
   useEffect(() => {
-    if (jobId && jobState?.status === "running") {
-      setRunning(true);
-      _startPolling(jobId);
-    }
-    return () => clearInterval(pollRef.current);
-  }, []); // eslint-disable-line
-
-  // Follow runs started anywhere — the Central Manager tab, another window.
-  // Every run goes through the manager, so its run list is the source of truth;
-  // when nothing is running here, attach to the newest live run.
-  const [attachedFrom, setAttachedFrom] = useState(false);
-  const busyRef = useRef(false);
-  busyRef.current = running;
-  const jobIdRef = useRef(jobId);
-  jobIdRef.current = jobId;
-  useEffect(() => {
-    let alive = true;
-    async function discover() {
-      if (busyRef.current) return;
-      try {
-        const runs = await manager.listRuns();
-        const live = (runs || []).find((r) => !MGR_TERMINAL.includes(r.status));
-        if (!alive || !live || busyRef.current) return;
-        const st = await manager.status(live.run_id);
-        if (!alive || busyRef.current) return;
-        setError("");
-        // A different run than the one this tab started → it came from elsewhere.
-        if (live.run_id !== jobIdRef.current) setAttachedFrom(true);
-        setJobId(live.run_id);
-        if (_applyStatus(st)) {
-          setRunning(true);
-          _startPolling(live.run_id);
-        }
-      } catch { /* backend down — try again next tick */ }
-    }
-    discover();
-    const t = setInterval(discover, 4000);
-    return () => { alive = false; clearInterval(t); };
-  }, [_applyStatus, _startPolling]); // eslint-disable-line react-hooks/exhaustive-deps
+    const prev = lastStatus.current;
+    lastStatus.current = jobState?.status;
+    if (prev === "running" && jobState && jobState.status !== "running") monitor.sync(2).catch(() => {});
+  }, [jobState?.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Monitor WS
   const onWs = useCallback((data) => {
@@ -259,30 +209,25 @@ export default function ExecutorTab() {
 
   // The plan and schema were built from the file picked in the Planner. A
   // different file here still runs, but against that file's schema.
-  const planFileName = savedSchema?.file_name;
+  const planFileName = detectedSchema?.file_name;
   const fileMismatch = !!(csvFile && planFileName && csvFile.name !== planFileName);
 
   async function handleRun() {
     if (!csvFile || !savedPlan) return;
-    setError(""); setRunning(true); setExecStep(0); setJobState(null); setAttachedFrom(false);
-
+    setError(""); setStarting(true); setMonEvents([]);
     try {
-      const res = await manager.run(csvFile, savedPlan.config, savedSchema || {}, plannerPrompt || "");
-      const jid = res.run_id;
-      setJobId(jid);
-      setJobState({ status: "running", step: "Starting…" });
-      // Start polling immediately with explicit run ID — no effect/closure dependency
-      _startPolling(jid);
+      await startRun({ file: csvFile, config: savedPlan.config, schema: runSchema, request: plannerPrompt, origin: "executor" });
     } catch (e) {
-      setRunning(false);
       setError("Failed to start: " + e.message);
+    } finally {
+      setStarting(false);
     }
   }
 
   function reset() {
     // Keep csvFile — user likely wants to run the same file again
-    setRunning(false); setJobId(null); setAttachedFrom(false);
-    setJobState(null); setExecStep(-1); setError(""); setMonEvents([]);
+    clearRun();
+    setError(""); setMonEvents([]);
   }
 
   const canRun = !!csvFile && !!savedPlan && !running;
@@ -360,7 +305,11 @@ export default function ExecutorTab() {
           <div style={C.cardHdr}><Upload size={16} color="var(--accent)" />Data File</div>
           <input ref={fileRef} type="file" accept=".csv,.json,.jsonl,.ndjson" hidden onChange={(e) => { pickFile(e.target.files[0]); e.target.value = ""; }} />
 
-          {csvFile ? (
+          {csvRestoring ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--text-3)" }}>
+              <Spinner color="var(--accent)" /> Restoring your data file…
+            </div>
+          ) : csvFile ? (
             /* File already loaded — from Planner or previous upload */
             <div style={{ background: "var(--surface-2)", borderRadius: 10, padding: "12px 16px", border: "1px solid var(--ok-line)", display: "flex", alignItems: "center", gap: 10 }}>
               <CheckCircle size={16} color="var(--ok)" style={{ flexShrink: 0 }} />
@@ -433,6 +382,15 @@ export default function ExecutorTab() {
 
           {(running || jobState) && (
             <>
+              {(rawRun?.plan?.stages?.length || savedPlan?.config?.stages?.length) ? (
+                <div style={{ margin: "6px 0 16px" }}>
+                  <PipelineFlow
+                    plan={rawRun?.plan?.stages?.length ? rawRun.plan : savedPlan.config}
+                    runState={rawRun || { status: "validating", phase: "validating", decisions: [] }}
+                    inputLabel={csvFile?.name}
+                  />
+                </div>
+              ) : null}
               <div style={{ marginBottom: 14 }}>
                 {EXEC_STEPS.map((label, i) => {
                   const failed    = jobState?.status === "failed";

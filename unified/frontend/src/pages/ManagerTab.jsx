@@ -1,37 +1,15 @@
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { manager, executor } from "../api.js";
-import { useAppContext } from "../AppContext.jsx";
+import { executor } from "../api.js";
+import { useAppContext, isLive } from "../AppContext.jsx";
 import StreamingConsole from "./StreamingConsole.jsx";
+import AgentFlow from "../flows/AgentFlow.jsx";
+import PipelineFlow from "../flows/PipelineFlow.jsx";
 import {
   Shield, ShieldCheck, Brain, Zap, ClipboardCheck, TrendingUp, CheckCircle,
   XCircle, AlertTriangle, Clock, Activity, RotateCcw, Download,
   DollarSign, Cpu, GitBranch,
 } from "lucide-react";
-
-// ── Phase metadata ────────────────────────────────────────────────────────────
-const PHASES = [
-  { key: "validating",   label: "Validate", icon: Shield,         color: "var(--accent)" },
-  { key: "assuring_plan", label: "Verify",  icon: ShieldCheck,    color: "var(--ok)" },
-  { key: "pre_checks",  label: "Pre-checks", icon: Cpu,           color: "var(--accent)" },
-  { key: "executing",   label: "Execute",   icon: Zap,            color: "var(--warn)" },
-  { key: "assurance",   label: "Assurance", icon: ClipboardCheck, color: "var(--ok)" },
-  { key: "feedback",    label: "Feedback",  icon: TrendingUp,     color: "var(--violet)" },
-  { key: "completed",   label: "Done",      icon: CheckCircle,    color: "var(--ok)" },
-];
-
-const PHASE_ORDER = PHASES.map((p) => p.key);
-
-// record_feedback() enters the "feedback" phase even for failed runs, so a
-// failed run's `phase` is "feedback". The phase it actually failed in is the
-// last one entered before that (decision log entries "PHASE:<NAME>").
-function failedPhase(state) {
-  const entered = (state?.decisions || [])
-    .filter((d) => d.action?.startsWith("PHASE:"))
-    .map((d) => d.action.slice(6).toLowerCase())
-    .filter((p) => p !== "feedback");
-  return entered.length ? entered[entered.length - 1] : state?.phase;
-}
 
 const S = {
   page: { maxWidth: 900, margin: "0 auto" },
@@ -95,71 +73,6 @@ function Spinner({ size = 14, color = "var(--accent)" }) {
       border: "2px solid var(--border)", borderTopColor: color,
       borderRadius: "50%", animation: "spin 0.7s linear infinite",
     }} />
-  );
-}
-
-function PhaseBar({ currentStatus, currentPhase }) {
-  const isTerminal = currentStatus === "completed" || currentStatus === "failed";
-  const activeIdx = isTerminal
-    ? (currentStatus === "completed" ? PHASES.length - 1 : PHASE_ORDER.indexOf(currentPhase))
-    : PHASE_ORDER.indexOf(currentPhase);
-
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 0, marginBottom: 20, overflowX: "auto" }}>
-      {PHASES.map((p, i) => {
-        const isDone    = currentStatus === "completed" ? true : i < activeIdx;
-        const isActive  = !isTerminal && PHASE_ORDER[activeIdx] === p.key;
-        // A failed run keeps the phase it failed in — mark that one red.
-        const isFailed  = currentStatus === "failed" && i === activeIdx;
-        const Icon = p.icon;
-        return (
-          <React.Fragment key={p.key}>
-            <div style={{
-              display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
-              minWidth: 72,
-            }}>
-              <div style={{
-                width: 34, height: 34, borderRadius: "50%",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                background:
-                  isFailed  ? "var(--bad-soft)" :
-                  isActive  ? `color-mix(in srgb, ${p.color} 13%, transparent)` :
-                  isDone    ? "var(--ok-soft)" : "var(--surface)",
-                border: `2px solid ${
-                  isFailed  ? "var(--bad)" :
-                  isActive  ? p.color :
-                  isDone    ? "var(--ok)" : "var(--border-strong)"
-                }`,
-                transition: "all 0.3s",
-              }}>
-                {isFailed ? (
-                  <XCircle size={15} color="var(--bad)" />
-                ) : isActive ? (
-                  <Spinner size={13} color={p.color} />
-                ) : isDone ? (
-                  <CheckCircle size={15} color="var(--ok)" />
-                ) : (
-                  <Icon size={14} color="var(--text-4)" />
-                )}
-              </div>
-              <span style={{
-                fontSize: 11, fontWeight: isActive ? 700 : 400,
-                color: isActive ? p.color : isDone ? "var(--ok)" : "var(--text-4)",
-              }}>
-                {p.label}
-              </span>
-            </div>
-            {i < PHASES.length - 1 && (
-              <div style={{
-                flex: 1, height: 2, minWidth: 16,
-                background: isDone ? "var(--ok)" : "var(--surface)",
-                marginBottom: 18, transition: "background 0.3s",
-              }} />
-            )}
-          </React.Fragment>
-        );
-      })}
-    </div>
   );
 }
 
@@ -546,12 +459,12 @@ function AssuranceCard({ assurance }) {
 export default function ManagerTab() {
   const navigate = useNavigate();
   const {
-    csvFile,
+    csvFile, csvRestoring,
     planResult: savedPlan,
     plannerPrompt, setPlannerPrompt,
-    detectedSchema,
-    managerRunId: runId, setManagerRunId: setRunId,
-    managerState: mgrState, setManagerState: setMgrState,
+    detectedSchema, runSchema,
+    runId, run: mgrState, runError, runs: allRuns,
+    startRun, followRun, clearRun,
   } = useAppContext();
 
   // Editable user request — prefilled from the Planner prompt, can be edited
@@ -559,106 +472,35 @@ export default function ManagerTab() {
   const [request, setRequest] = useState(plannerPrompt || "");
   useEffect(() => { setRequest(plannerPrompt || ""); }, [plannerPrompt]);
 
-  const savedSchema = (() => {
-    try { return JSON.parse(localStorage.getItem("last_csv_schema") || "null"); } catch { return null; }
-  })();
+  const [starting, setStarting] = useState(false);
+  const [localError, setLocalError] = useState("");
+  const error = localError || runError;
 
-  const [running, setRunning] = useState(false);
-  const [error,   setError]   = useState("");
-  const pollRef = useRef();
-
-  // ── Polling ────────────────────────────────────────────────────────────────
-  const _startPolling = useCallback((rid) => {
-    clearInterval(pollRef.current);
-    pollRef.current = setInterval(async () => {
-      try {
-        const s = await manager.status(rid);
-        setMgrState(s);
-        if (s.status === "completed" || s.status === "failed") {
-          clearInterval(pollRef.current);
-          setRunning(false);
-        }
-      } catch (e) {
-        if (e?.status === 404) {
-          clearInterval(pollRef.current);
-          setRunning(false);
-          setError("Run session expired — click Run again.");
-          setRunId(null);
-          setMgrState(null);
-        }
-      }
-    }, 2000);
-  }, []); // eslint-disable-line
-
-  // Resume polling on mount if run was in progress
-  useEffect(() => {
-    if (runId && mgrState?.status && !["completed", "failed"].includes(mgrState.status)) {
-      setRunning(true);
-      _startPolling(runId);
-    }
-    return () => clearInterval(pollRef.current);
-  }, []); // eslint-disable-line
-
-  // ── All runs (managed + mirrored executor runs) ────────────────────────────
-  const [allRuns, setAllRuns] = useState([]);
-  const refreshRuns = useCallback(async () => {
-    try { setAllRuns(await manager.listRuns()); } catch { /* backend down — keep last */ }
-  }, []);
-  useEffect(() => {
-    refreshRuns();
-    const iv = setInterval(refreshRuns, 5000);
-    return () => clearInterval(iv);
-  }, [refreshRuns]);
-
-  const isLive = (s) => !["completed", "failed"].includes(s);
-
-  // Attach this tab to a run started elsewhere (Executor tab, another window)
-  // so opening the Manager always shows what is currently executing.
-  useEffect(() => {
-    if (running || (mgrState && isLive(mgrState.status))) return;
-    const live = allRuns.find((r) => isLive(r.status));
-    if (live && live.run_id !== runId) {
-      attachToRun(live.run_id);
-    }
-  }, [allRuns]); // eslint-disable-line
-
-  function attachToRun(rid) {
-    clearInterval(pollRef.current);
-    setError("");
-    setRunId(rid);
-    manager.status(rid).then((s) => {
-      setMgrState(s);
-      if (isLive(s.status)) {
-        setRunning(true);
-        _startPolling(rid);
-      } else {
-        setRunning(false);
-      }
-    }).catch(() => {});
-  }
+  // The run itself (polling, following runs started elsewhere, reload) lives
+  // in AppContext — one copy shared with the Executor and every other page.
+  const running = starting || isLive(mgrState?.status) || (!!runId && !mgrState);
 
   async function handleRun() {
     if (!csvFile || !savedPlan) return;
-    setError(""); setRunning(true); setMgrState(null);
+    setLocalError(""); setStarting(true);
     try {
       setPlannerPrompt(request);   // persist any edits so other tabs stay in sync
-      const res = await manager.run(csvFile, savedPlan.config, savedSchema || {}, request || "");
-      const rid = res.run_id;
-      setRunId(rid);
-      setMgrState({ status: "validating", phase: "validating", step: "Starting…", decisions: [] });
-      _startPolling(rid);
+      await startRun({ file: csvFile, config: savedPlan.config, schema: runSchema, request, origin: "manager" });
     } catch (e) {
-      setRunning(false);
-      setError("Failed to start: " + e.message);
+      setLocalError("Failed to start: " + e.message);
+    } finally {
+      setStarting(false);
     }
   }
 
+  function attachToRun(rid) {
+    setLocalError("");
+    followRun(rid);
+  }
+
   function reset() {
-    clearInterval(pollRef.current);
-    setRunning(false);
-    setRunId(null);
-    setMgrState(null);
-    setError("");
+    clearRun();
+    setLocalError("");
   }
 
   const status = mgrState?.status;
@@ -714,7 +556,11 @@ export default function ManagerTab() {
 
         <div style={{ ...S.card, marginBottom: 0 }}>
           <div style={S.cardHdr}><Zap size={14} color="var(--warn)" />Data File</div>
-          {csvFile ? (
+          {csvRestoring ? (
+            <div style={{ fontSize: 13, color: "var(--text-3)", display: "flex", alignItems: "center", gap: 8 }}>
+              <Spinner size={12} /> Restoring your data file…
+            </div>
+          ) : csvFile ? (
             <>
               <div style={{ fontSize: 12, color: "var(--ok)", marginBottom: 4, display: "flex", alignItems: "center", gap: 6 }}>
                 <CheckCircle size={11} /> {csvFile.name}
@@ -768,7 +614,7 @@ export default function ManagerTab() {
       {savedPlan?.config?.mode === "streaming" && (
         <StreamingConsole
           config={savedPlan.config}
-          schema={savedSchema || (detectedSchema?.columns ? { columns: detectedSchema.columns } : {})}
+          schema={runSchema}
           fileFormat={detectedSchema?.file_format || "csv"}
         />
       )}
@@ -815,10 +661,12 @@ export default function ManagerTab() {
       {/* Active / completed run */}
       {mgrState && (
         <>
-          {/* Phase bar */}
+          {/* Agent lifecycle — which agent is working on this run right now */}
           <div style={S.card}>
-            <div style={S.cardHdr}><Activity size={14} color="var(--accent)" />Orchestration Pipeline</div>
-            <PhaseBar currentStatus={status} currentPhase={status === "failed" ? failedPhase(mgrState) : mgrState.phase} />
+            <div style={S.cardHdr}><Activity size={14} color="var(--accent)" />Orchestration</div>
+            <div style={{ marginBottom: 14 }}>
+              <AgentFlow runState={mgrState} hasPlan />
+            </div>
 
             {/* Current step */}
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
@@ -850,7 +698,7 @@ export default function ManagerTab() {
                   {mgrState.executor_result.sink_container && (
                     <a
                       href="#"
-                      onClick={(e) => { e.preventDefault(); executor.download(mgrState.executor_result.sink_container).catch((err) => setError(err.message)); }}
+                      onClick={(e) => { e.preventDefault(); executor.download(mgrState.executor_result.sink_container).catch((err) => setLocalError(err.message)); }}
                       style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 12px", background: "var(--accent)", color: "var(--accent-fg)", borderRadius: 8, fontSize: 12, fontWeight: 600, textDecoration: "none" }}
                     >
                       <Download size={12} /> Download output
@@ -863,6 +711,18 @@ export default function ManagerTab() {
               </div>
             )}
           </div>
+
+          {/* The pipeline itself, stages lighting up as the executor reaches them */}
+          {(mgrState.plan?.stages?.length || savedPlan?.config?.stages?.length) ? (
+            <div style={S.card}>
+              <div style={S.cardHdr}><GitBranch size={14} color="var(--violet)" />Pipeline</div>
+              <PipelineFlow
+                plan={mgrState.plan?.stages?.length ? mgrState.plan : savedPlan.config}
+                runState={mgrState}
+                inputLabel={csvFile?.name}
+              />
+            </div>
+          ) : null}
 
           {/* Decision audit log */}
           <div style={S.card}>
@@ -919,19 +779,24 @@ export default function ManagerTab() {
         </>
       )}
 
-      {/* Empty state */}
-      {!mgrState && !error && (
-        <div style={{ ...S.card, textAlign: "center", padding: "40px 20px" }}>
-          <Activity size={40} style={{ marginBottom: 12, color: "var(--text-4)" }} />
-          <div style={{ fontSize: 14, color: "var(--text-4)", marginBottom: 8 }}>
-            Central Manager ready
-          </div>
-          <div style={{ fontSize: 12, color: "var(--text-4)" }}>
-            Requires a plan from Planner Agent and a data file (CSV or JSON).
+      {/* After a reload: the run id is known, its state is being fetched */}
+      {runId && !mgrState && !error && (
+        <div style={{ ...S.card, display: "flex", alignItems: "center", gap: 10, fontSize: 13, color: "var(--text-3)" }}>
+          <Spinner size={13} /> Loading run {runId.slice(0, 8)}…
+        </div>
+      )}
+
+      {/* Empty state — what a run will do, before one starts */}
+      {!runId && !mgrState && !error && (
+        <div style={S.card}>
+          <div style={S.cardHdr}><Activity size={14} color="var(--accent)" />How a run works</div>
+          <div style={{ fontSize: 13, color: "var(--text-3)", marginBottom: 14 }}>
+            Each run passes through these agents in order. Needs a plan from the Planner and a data file (CSV or JSON).
             {!savedPlan && (
-              <> <button onClick={() => navigate("/planner")} style={{ color: "var(--accent)", background: "none", border: "none", cursor: "pointer", fontSize: 12 }}>Generate a plan →</button></>
+              <> <button onClick={() => navigate("/planner")} style={{ color: "var(--accent)", background: "none", border: "none", cursor: "pointer", fontSize: 13, padding: 0 }}>Generate a plan →</button></>
             )}
           </div>
+          <AgentFlow hasPlan={!!savedPlan} />
         </div>
       )}
     </div>

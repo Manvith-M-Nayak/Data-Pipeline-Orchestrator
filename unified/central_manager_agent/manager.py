@@ -102,6 +102,7 @@ class CentralManager:
 
     def __init__(self):
         self._runs: Dict[str, RunState] = {}
+        self._persist_tasks: set = set()
 
     # ── Logging ──────────────────────────────────────────────────────────────
     def _log(
@@ -130,6 +131,20 @@ class CentralManager:
         state.phase = phase
         state.step = step
         self._log(state, f"PHASE:{phase.upper()}", step, "started")
+        self._persist_soon(state)
+
+    def _persist_soon(self, state: RunState) -> None:
+        """Save the run in the background at each phase change. Without this
+        sqlite held only the start snapshot ("validating") until the run
+        ended, so every sqlite reader (Run Insights, /runs after a restart)
+        disagreed with the live state for the whole run."""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:          # called from a worker thread — skip
+            return
+        task = loop.create_task(self._persist(state))
+        self._persist_tasks.add(task)  # keep a reference until it finishes
+        task.add_done_callback(self._persist_tasks.discard)
 
     def _execution_plan(self, state: RunState) -> dict:
         """Copy of the plan with the final resource plan applied where the

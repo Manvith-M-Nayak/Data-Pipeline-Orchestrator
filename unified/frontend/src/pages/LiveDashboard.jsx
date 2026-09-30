@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from "react";
-import { connectWS, monitor, manager } from "../api.js";
+import { connectWS, monitor } from "../api.js";
+import { useAppContext, isLive } from "../AppContext.jsx";
 import { AlertTriangle, CheckCircle, Clock, XCircle, Zap } from "lucide-react";
 
 const S = {
@@ -23,7 +24,6 @@ function fmtSec(s) {
 
 export default function LiveDashboard() {
   const [runs,       setRuns]       = useState([]);
-  const [execJobs,   setExecJobs]   = useState([]);
   const [ts,         setTs]         = useState(null);
   const [completed,  setCompleted]  = useState([]);
   const [cancelling, setCancelling] = useState({});
@@ -53,19 +53,12 @@ export default function LiveDashboard() {
     }
   }, []);
 
-  // Poll managed runs every 5s for live run visibility (manager drives the executor)
-  useEffect(() => {
-    function refreshJobs() {
-      manager.listRuns().then((rs) =>
-        setExecJobs(rs
-          .filter((r) => !["completed", "failed"].includes(r.status))
-          .map((r) => ({ job_id: r.run_id, step: r.step, status: r.status })))
-      ).catch(() => {});
-    }
-    refreshJobs();
-    const t = setInterval(refreshJobs, 5000);
-    return () => clearInterval(t);
-  }, []);
+  // In-progress managed runs — from the shared run list (AppContext), so this
+  // view agrees with the Central Manager and Executor tabs.
+  const { runs: managedRuns } = useAppContext();
+  const execJobs = managedRuns
+    .filter((r) => isLive(r.status))
+    .map((r) => ({ job_id: r.run_id, step: r.step, status: r.status }));
 
   useEffect(() => {
     monitor.getLiveRuns().then(setRuns).catch(() => {});

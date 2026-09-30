@@ -1,9 +1,12 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
+import { useAppContext, isLive } from "../AppContext.jsx";
 import { manager, executor } from "../api.js";
+import AgentFlow from "../flows/AgentFlow.jsx";
+import PipelineFlow from "../flows/PipelineFlow.jsx";
 import {
   Activity, Brain, Zap, Shield, ShieldCheck, Cpu, TrendingUp,
   DollarSign, Clock, ChevronRight, AlertTriangle,
-  CheckCircle, XCircle, RefreshCw, Download,
+  CheckCircle, XCircle, RefreshCw, Download, GitBranch,
 } from "lucide-react";
 
 const S = {
@@ -37,8 +40,6 @@ const S = {
     background: ok ? "var(--ok-soft)" : ok === false ? "var(--bad-soft)" : "var(--surface)",
     color: ok ? "var(--ok)" : ok === false ? "var(--bad)" : "var(--text-2)",
   }),
-  phaseRow: { display: "flex", alignItems: "center", gap: 6, marginBottom: 4, fontSize: 12 },
-  phaseDot: (color) => ({ width: 6, height: 6, borderRadius: "50%", background: color, flexShrink: 0 }),
   sectionHdr: { fontSize: 11, fontWeight: 700, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8, marginTop: 16 },
   detailCard: { background: "var(--surface-2)", borderRadius: 10, padding: 14, border: "1px solid var(--divider)", marginBottom: 10 },
   btnPrimary: {
@@ -143,14 +144,26 @@ function RunDetail({ runId, onBack }) {
   const [error, setError] = useState("");
   const [downloadError, setDownloadError] = useState("");
 
+  // Loaded once; re-fetched every few seconds while the run is still in
+  // progress, so this view never lags behind the Central Manager tab.
+  const live = !!data && isLive(data.status);
   useEffect(() => {
+    let alive = true;
     setLoading(true);
     setError("");
     manager.combinedRun(runId)
-      .then(setData)
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
+      .then((d) => alive && setData(d))
+      .catch((e) => alive && setError(e.message))
+      .finally(() => alive && setLoading(false));
+    return () => { alive = false; };
   }, [runId]);
+  useEffect(() => {
+    if (!live) return undefined;
+    const t = setInterval(() => {
+      manager.combinedRun(runId).then(setData).catch(() => {});
+    }, 3000);
+    return () => clearInterval(t);
+  }, [live, runId]);
 
   if (loading) return <div style={{ color: "var(--text-3)", textAlign: "center", padding: 40 }}>Loading run details…</div>;
   if (error) return <div style={{ color: "var(--bad)", textAlign: "center", padding: 40 }}>Error: {error}</div>;
@@ -159,10 +172,6 @@ function RunDetail({ runId, onBack }) {
   const fb = data.feedback || {};
   const ma = data.monitor_analysis || {};
 
-  // Phase timeline from decisions
-  const phases = data.decisions
-    ? data.decisions.filter((d) => d.action?.startsWith("PHASE:"))
-    : [];
 
   return (
     <div>
@@ -189,26 +198,16 @@ function RunDetail({ runId, onBack }) {
       )}
 
       {/* Phase timeline */}
-      {phases.length > 0 && (
+      {/* How the run moved through the agents, and where it stopped */}
+      <div style={S.card}>
+        <div style={S.cardHdr}><Activity size={13} color="var(--accent)" />Orchestration</div>
+        <AgentFlow runState={data} hasPlan />
+      </div>
+
+      {data.plan?.stages?.length > 0 && (
         <div style={S.card}>
-          <div style={S.cardHdr}><Activity size={13} color="var(--accent)" />Phase Timeline</div>
-          <div style={{ display: "flex", gap: 0, flexWrap: "wrap" }}>
-            {phases.map((p, i) => {
-              const label = p.action.replace("PHASE:", "").toLowerCase();
-              // _enter() logs every phase as "started". A failed run still enters
-              // "feedback" to record the outcome, so it failed in the phase before that.
-              const failedIdx = phases[phases.length - 1]?.action === "PHASE:FEEDBACK"
-                ? phases.length - 2 : phases.length - 1;
-              const ok = !(data.status === "failed" && i === failedIdx);
-              return (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 10px" }}>
-                  <div style={S.phaseDot(ok ? "var(--ok)" : "var(--bad)")} />
-                  <span style={{ fontSize: 11, color: ok ? "var(--text-2)" : "var(--bad)", fontWeight: i === phases.length - 1 ? 700 : 400 }}>{label}</span>
-                  {i < phases.length - 1 && <span style={{ color: "var(--text-4)", margin: "0 2px" }}>→</span>}
-                </div>
-              );
-            })}
-          </div>
+          <div style={S.cardHdr}><GitBranch size={13} color="var(--violet)" />Pipeline</div>
+          <PipelineFlow plan={data.plan} runState={data} />
         </div>
       )}
 
@@ -508,17 +507,30 @@ export default function RunInsights() {
   const [selectedRun, setSelectedRun] = useState(null);
   const [error, setError] = useState("");
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (quiet = false) => {
+    if (!quiet) setLoading(true);
     setError("");
     try {
       setAnalytics(await manager.analytics());
     } catch (e) {
       setError(`Could not load analytics: ${e.message}`);
-    } finally { setLoading(false); }
+    } finally { if (!quiet) setLoading(false); }
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // Keep the table in step with the shared run list: refresh while any run is
+  // in progress, and once more when the last one finishes.
+  const { runs: sharedRuns } = useAppContext();
+  const liveKey = sharedRuns.filter((r) => isLive(r.status)).map((r) => `${r.run_id}:${r.status}`).join(",");
+  const firstKey = useRef(true);
+  useEffect(() => {
+    if (firstKey.current) { firstKey.current = false; return undefined; }
+    load(true);
+    if (!liveKey) return undefined;
+    const t = setInterval(() => load(true), 5000);
+    return () => clearInterval(t);
+  }, [liveKey, load]);
 
   if (loading && !analytics) {
     return <div style={{ color: "var(--text-3)", textAlign: "center", padding: 60 }}>Loading analytics…</div>;

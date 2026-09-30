@@ -48,13 +48,15 @@ const ROUTES = NAV.flatMap((g) => g.items.map((i) => ({ ...i, group: g.group }))
 // Reload drops the in-memory File object but keeps derived state (schema/plan)
 // in localStorage — warn the user their restored plan has no file to run against.
 function CsvBanner() {
-  const { csvFile, detectedSchema, csvName } = useAppContext();
-  if (csvFile || !detectedSchema) return null;
+  const { csvFile, csvRestoring, detectedSchema, csvName } = useAppContext();
+  // Normally the file is restored from browser storage; this only shows when
+  // that was impossible (file too large, private mode, storage cleared).
+  if (csvFile || csvRestoring || !detectedSchema) return null;
   return (
     <div className="banner">
       <AlertTriangle size={14} strokeWidth={2} />
-      Restored a saved plan{csvName ? ` for “${csvName}”` : ""}, but the data file was cleared by the page
-      reload. Re-select it in the Planner before running.
+      Restored a saved plan{csvName ? ` for “${csvName}”` : ""}, but its data file could not be restored
+      in this browser. Re-select it in the Planner before running.
     </div>
   );
 }

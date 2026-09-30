@@ -35,16 +35,25 @@ async def _get_db():
     return deps.get_db()
 
 
+def _live_state(run_id: str):
+    """The in-memory state of a run this process is (or was) managing."""
+    from .router import _manager
+
+    return _manager.get_state_dict(run_id)
+
+
 # ── Per-run combined detail ──────────────────────────────────────────────────
 @router.get("/run/{run_id}")
 async def combined_run_detail(run_id: str):
     """Return every agent's result + logs for a single run, merging the
     manager RunState, the feedback record, and the monitor analysis."""
 
-    # 1. Manager state (full RunState with all agent outputs + decisions)
+    # 1. Manager state (full RunState with all agent outputs + decisions).
+    #    Live runs come from memory — same source as /manager/status — so the
+    #    Run Insights view never shows an older snapshot than the Manager tab.
     db = await _get_db()
-    state = None
-    if db is not None:
+    state = _live_state(run_id)
+    if state is None and db is not None:
         state = await db.get_manager_run(run_id)
     if state is None:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -125,6 +134,14 @@ async def combined_analytics(limit: int = Query(default=200, ge=1, le=1000)):
     manager_runs = []
     if db is not None:
         manager_runs = await db.list_manager_runs(limit=limit)
+    # Overlay live in-memory status/phase/step so in-progress runs match the
+    # Manager tab exactly (sqlite is written at phase changes, memory always).
+    from .router import _manager
+
+    live = {r["run_id"]: r for r in _manager.list_runs()}
+    manager_runs = [{**r, **live.get(r["run_id"], {})} for r in manager_runs]
+    known = {r["run_id"] for r in manager_runs}
+    manager_runs = [r for r in live.values() if r["run_id"] not in known] + manager_runs
 
     # ── Feedback records ──────────────────────────────────────────────────
     feedback = _feedback_records()

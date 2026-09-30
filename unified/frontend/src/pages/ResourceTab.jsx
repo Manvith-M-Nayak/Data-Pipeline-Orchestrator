@@ -247,9 +247,9 @@ export default function ResourceTab() {
   const [modelInfo, setModelInfo]         = useState(null);
   const [recs, setRecs]                   = useState(null);
   const [limits, setLimits]               = useState(null);
-  // Resource plan of the run the Central Manager tab is showing (persisted in
-  // context) — the allocations live re-allocation compares against.
-  const { managerState } = useAppContext();
+  // Resource plan of the current run (the one shared by the Manager and
+  // Executor tabs) — the allocations live re-allocation compares against.
+  const { run: managerState } = useAppContext();
   const liveRp = managerState?.resource_plan?.allocations?.length ? managerState.resource_plan : null;
   const [loading, setLoading]             = useState(false);
   const [reallocationLoading, setRlLoad] = useState(false);

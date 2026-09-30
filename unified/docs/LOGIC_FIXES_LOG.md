@@ -24,6 +24,8 @@ records:
 | 12 | Frontend review: wrong fields, dead features, demo data, failure display, lint | 17 issues (user request) | Done |
 | 13 | Redesign 1/4: design system, light + dark themes, sidebar shell | feature (user request) | Done |
 | 13.1 | Text contrast; Executor tab follows runs started in the Central Manager | user request + 1 bug | Done |
+| 14 | Redesign 2/4: pipeline flow + agent flow diagrams (React Flow), live run status | feature (user request) | Done |
+| 14.1 | Reload consistency: one shared run store, live state everywhere, data file survives refresh | bugs (user report) | Done |
 
 ---
 
@@ -875,4 +877,117 @@ only for the failed step.
   - **Dots:** now visible, green when done.
   - **Cleanup:** the test's `exec_*` keys were removed from `localStorage` afterwards.
 - **Light theme:** Run Insights, labels readable.
+
+
+## Stage 14 — Redesign, part 2: flow diagrams
+
+The second redesign stage adds two diagrams, both built with React Flow
+(`@xyflow/react` 12, the only new dependency the user approved). Both follow the app
+theme, and both update live during a run.
+
+### Pipeline flow (`src/flows/PipelineFlow.jsx`)
+
+The plan is drawn as a data-flow graph:
+
+    input file → ADF copy → step 1 (parallel stages stacked) → step 2 → … → output
+
+- **Nodes.** Each shows the stage type (coloured rail), its name, and what it does: transforms, filter, group-by/aggregations, "incremental · checkpointed" for streams, and a warning for pass-through stages.
+- **Edges.** They follow the data: a stage's source is the container another stage writes, and the container name is shown on the edge. Copy stages record ADF *dataset* names (`DS_Transform`), so datasets are matched to containers with the planner's naming rule (`planner_common._dataset_name`). Without container info, each column feeds the next.
+- **Columns.** They follow the executor's grouping exactly (`execution_groups` filtered to compute stages, plus any stage the groups missed).
+
+### Agent flow (`src/flows/AgentFlow.jsx`)
+
+It shows how a run moves through the agents:
+
+    Planner → Validate → Verify plan → {Resource, Performance, Cost} → Execute → Verify output → Learn
+
+The Monitor hangs off Execute with a dashed "observes" link. Without a run, the same
+map is shown as "How a run works".
+
+### Live status (`src/flows/status.js`)
+
+The statuses come from what the backend already reports; no new API was needed.
+
+- **Agents:** from the manager phase.
+- **Stages:** from the executor's own progress text. Examples: "Waiting for ADF copy pipeline…" means the copy stage is running; "Running stage group 2/3 (parallel): A, B" means A and B are running and earlier groups are done; "Monitoring Databricks run … (stage: X)" means X is running.
+- **Finished stages:** from `executor_result.stages_completed` and `stages`.
+- **Failures.** The failed stage is the one the error message names, by stage name or by quoting its filter text. Otherwise it is the first unfinished stage, but only if some stage had already finished. A failure before any stage ran (for example, notebook code generation) blames no stage, and the Executor agent node shows it instead. *Mistake caught in the browser:* the first version always blamed the first stage. That painted the ADF copy red for run `56fa5439`, which actually failed while compiling a notebook's filter.
+- **Old runs:** runs saved before stage 12's backend fix end in the "feedback" phase; the failed phase is taken from the decision log.
+
+### Where they appear
+
+| Page | Change |
+|---|---|
+| Planner | The plan's stage-card grid is replaced by the pipeline flow. |
+| Central Manager | The phase bar is replaced by the agent flow ("Orchestration"). A new "Pipeline" card shows the live pipeline flow. The empty state shows "How a run works". |
+| Executor | Live pipeline flow above the step list, for its own runs and for runs it follows. |
+| Run Insights (run detail) | The text phase timeline is replaced by the agent flow plus that run's pipeline flow, with final statuses. |
+
+### Other details
+
+- **Read-only diagrams:** no dragging, and the page still scrolls over them; zoom buttons are on the pipeline graph.
+- **Alignment:** nodes are vertically centred (`nodeOrigin`), so edges stay straight.
+- **Names:** long snake_case names wrap at underscores.
+- **Bundle:** React Flow is loaded only with the pages that use it (about 59 KB gzipped).
+
+### Verification
+
+- **Tests:** `node src/flows/status.test.mjs` has 15 cases, all passing. They cover idle, pre-checks, copy running, a parallel group, a single stage, completed, failure by error-named stage, failure by quoted filter, a failure before any stage ran, the legacy "feedback" phase, and agent statuses.
+- **Lint and build:** ESLint reports 0 problems, and `vite build` passes.
+- **Browser:**
+  - **Manager:** a completed run shows every agent done.
+  - **Run Insights, failed run `56fa5439`:** Execute shows red, and the notebook stage whose filter failed is red while the copy stage is waiting.
+  - **Executor live:** tested with a stubbed live run. The copy stage is done, the notebook stage is running with an animated edge, and the legend is visible.
+  - **Planner, dark theme:** the computed colours come from the tokens.
+- **Browser caveat:** the screenshot tool mis-captured scrolled pages, so the dark-theme check used computed styles instead.
+
+
+## Stage 14.1 — After a reload, everything agrees
+
+User report: "When I refresh the page, it's like half of the data is there and the other
+is not. And the status of the pipeline shows running in one place and completed in the
+other."
+
+### Root causes
+
+1. **Backend: two copies of a run.** A live run is kept in memory, but saved to SQLite only at start (`validating`) and at the end. `/manager/status` reads memory, while Run Insights (`/manager/combined/run`, `/analytics`) read SQLite only. For the whole run, Run Insights showed "validating" while the Manager showed "executing".
+2. **Frontend: one saved copy per tab.** The Manager (`mgr_state`) and the Executor (`exec_job_state`, `exec_step`) each saved their own snapshot and polled on their own. After a reload each tab showed its own stale copy, and the Executor resumed only if its copy said "running". Live Monitor, Run Insights and the Overview each fetched their own lists at different times, and Run Insights loaded once and never refreshed.
+3. **The schema was duplicated.** It lived in `planner_schema` and in `last_csv_schema`, which only the Planner wrote.
+4. **"Half the data".** A reload kept the plan and schema but dropped the data file (a `File` cannot go into localStorage), and dropped the Planner's self-check result.
+
+### Fixes
+
+**Backend**
+- `CentralManager._enter()` also saves the run in the background at every phase change (`_persist_soon`, tracked tasks, skipped safely off the event loop). SQLite is now at most one phase behind.
+- `combined.py`: run detail prefers the live in-memory state (the same source as `/status`). Analytics overlays the live status, phase and step on SQLite rows, and adds live runs not yet saved.
+
+**Frontend: one shared run store** (`AppContext`)
+- **One copy:** only `run_id` (plus how it was started) is stored. The run state always comes from the server: fetched straight after a reload, then polled every 2.5 s while live.
+- **One run list:** `/manager/runs` every 5 s. When the current run is finished, or there is none, the store follows a newer in-progress run, so a run started anywhere shows everywhere. The followed run's row is overlaid with its live state, so the list and the run panel cannot disagree.
+- **Actions:** `startRun()`, `followRun()`, `clearRun()`, used by the Central Manager and Executor tabs. Their private pollers, discovery loops and snapshots are removed.
+- **Executor step rows:** derived from the live progress text, remembering the furthest step reached. After a reload, a run that failed before execution marks the pre-flight row.
+- **Run schema:** `runSchema` is derived from the single detected schema, which now carries `file_name` (used for the Executor's different-file warning). `last_csv_schema` is gone.
+- **Migration:** on first load, `mgr_run_id` is adopted as `run_id` and the old snapshot keys are deleted.
+- **Other pages on the shared list:** Live Monitor's "Active managed runs" uses it. Run Insights re-fetches analytics while any run is live and once when it finishes; the run detail re-fetches every 3 s while that run is live. The Overview refreshes its counts when a run starts or finishes.
+
+**Frontend: data survives a reload**
+- **Data file:** kept in the browser's IndexedDB (`src/fileStore.js`, up to 200 MB, local only). A reload restores it. Pages show "Restoring your data file…" meanwhile, and the warning banner appears only if restoring was impossible (file too large, private mode, storage cleared).
+- **Planner self-check:** the result (`plan.verification`) is shown again after a reload. Editing the stage groups drops it, because it no longer describes the plan.
+- **Loading state:** after a reload the Manager shows "Loading run …" instead of flashing its empty state.
+
+### Verification
+
+- **Backend:**
+  - **Fake DB:** `_enter()` saved `executing`, then `assurance`, with no tasks left pending, and a call from outside the event loop is a no-op.
+  - **Real DB (read-only):** `combined_analytics` and `combined_run_detail` work.
+  - **Ruff:** no new findings; the 44 pre-existing ones are unchanged, checked by diffing against `HEAD`.
+- **Frontend:** ESLint reports 0 problems, `vite build` passes, and the flow status tests pass (15/15).
+- **Browser, file:** a stored file was restored after a reload; the Manager showed it as ready and the banner was gone.
+- **Browser, simulated run** (`fetch` stubbed for the run list and status):
+  - within one list poll, the Manager, the Executor ("Following run feedc0de") and Live Monitor all showed it as executing;
+  - after flipping it to completed, the Manager panel, the Manager's recent-runs row and the Executor all showed completed, and Live Monitor dropped it.
+- **Browser, real failed run `56fa5439` after a reload:** the Executor showed "Pipeline failed" with the failed row marked; the Manager showed the same run, "failed", with its error. No console errors.
+- **Cleanup:** the test file stored in IndexedDB was deleted afterwards, and the test `run_id` was cleared.
+
+**Needs a backend restart** (unless it runs with `--reload`) for the phase-change saves and the live-state reads in Run Insights.
 

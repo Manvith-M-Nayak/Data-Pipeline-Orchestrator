@@ -2,6 +2,7 @@ import React, { useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { schema as schemaApi, planner, assurance } from "../api.js";
 import { useAppContext } from "../AppContext.jsx";
+import PipelineFlow from "../flows/PipelineFlow.jsx";
 import {
   Upload, Brain, CheckCircle, XCircle, Zap, RotateCcw, ArrowRight, Settings, ShieldCheck,
 } from "lucide-react";
@@ -50,15 +51,6 @@ const C = {
     border: "1px solid var(--border)", borderRadius: 10, cursor: "pointer",
     fontSize: 13, display: "inline-flex", alignItems: "center", gap: 6,
   },
-  stageGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))", gap: 10, marginTop: 14 },
-  stage: { background: "var(--surface-2)", borderRadius: 8, padding: 12, border: "1px solid var(--border)" },
-  stageName: { fontWeight: 700, fontSize: 13, color: "var(--text)", marginBottom: 5, overflowWrap: "anywhere" },
-  stageType: (t) => ({
-    display: "inline-block", padding: "2px 8px", borderRadius: 10, fontSize: 11, fontWeight: 600,
-    background: t === "copy" ? "var(--accent-soft)" : "var(--violet-soft)",
-    color: t === "copy" ? "var(--accent)" : "var(--violet)", marginBottom: 5,
-  }),
-  stageDetail: { fontSize: 11, color: "var(--text-4)", lineHeight: 1.5 },
   successBox: {
     background: "var(--ok-soft)", borderRadius: 10, padding: 16,
     border: "1px solid var(--ok-line)", marginTop: 14,
@@ -106,7 +98,7 @@ const EXAMPLE_PROMPTS = [
 export default function PlannerTab() {
   const navigate = useNavigate();
   const {
-    csvFile, setCsvFile,
+    csvFile, setCsvFile, csvName,
     detectedSchema: detected, setDetectedSchema: setDetected,
     plannerPrompt:  prompt,   setPlannerPrompt:  setPrompt,
     planResult:     plan,     setPlanResult:     setPlan,
@@ -120,9 +112,11 @@ export default function PlannerTab() {
 
   // ── assurance (plan validation) ────────────────────────────────────────────
   const [assuring,        setAssuring]        = useState(false);
-  const [assuranceResult, setAssuranceResult] = useState(null);
+  // Restored with the plan after a reload: the Planner's self-check result is
+  // saved inside the plan (plan.verification), so it is shown again.
+  const [assuranceResult, setAssuranceResult] = useState(() => plan?.verification?.final || null);
   // true when assuranceResult is the Planner's own self-check (vs a manual re-check)
-  const [assuranceFromPlanner, setAssuranceFromPlanner] = useState(false);
+  const [assuranceFromPlanner, setAssuranceFromPlanner] = useState(() => !!plan?.verification?.final);
 
   async function handleValidate() {
     if (!plan?.config) return;
@@ -174,18 +168,9 @@ export default function PlannerTab() {
     setError(""); setCsvFile(file); setDetecting(true); setDetected(null); setPlan(null);
     try {
       const result = await schemaApi.detect(file);
-      setDetected(result);
-      // Persist the schema for the Manager/Executor run. The whole shape, not
-      // just the column map: agents need row_count and size_hint too.
-      try {
-        localStorage.setItem("last_csv_schema", JSON.stringify({
-          columns: result.columns,
-          row_count: result.row_count ?? result.row_count_sample ?? 0,
-          size_hint: result.size_hint,
-          file_format: result.file_format,
-          file_name: file.name,
-        }));
-      } catch { /* storage full or blocked — Manager falls back to the context schema */ }
+      // One stored schema: the run schema (AppContext.runSchema) is derived
+      // from it, and file_name lets the Executor spot a different file.
+      setDetected({ ...result, file_name: file.name });
     } catch (e) {
       // Drop the file too: keeping it without a schema shows "undefined columns".
       setCsvFile(null);
@@ -286,7 +271,8 @@ export default function PlannerTab() {
       (rebuilt[idx[n]] = rebuilt[idx[n]] || []).push(n);
     });
     const cleaned = rebuilt.filter((g) => g && g.length);
-    setPlan({ ...plan, config: { ...cfg, execution_groups: cleaned } });
+    // Groups changed: the saved self-check no longer describes this plan.
+    setPlan({ ...plan, verification: undefined, config: { ...cfg, execution_groups: cleaned } });
     setAssuranceResult(null);   // groups changed — previous validation is stale
   }
 
@@ -595,46 +581,9 @@ export default function PlannerTab() {
             </div>
           )}
 
-          <div style={C.stageGrid}>
-            {(plan.config?.stages || []).map((s, i) => {
-              const transforms = (s.transformations || []).filter((t) => t && t.trim());
-              const srcSink = (s.source_container && s.sink_container)
-                ? `${s.source_container} → ${s.sink_container}` : null;
-              return (
-                <div key={i} style={C.stage}>
-                  <div style={C.stageName} title={s.name}>{s.name}</div>
-                  <div style={C.stageType(s.type)}>{s.type}</div>
-                  {s.type === "copy" ? (
-                    <div style={C.stageDetail}>
-                      Ingests raw files unchanged via ADF Copy
-                      {srcSink ? ` (${srcSink})` : ""} · DIU: {s.diu ?? "auto"}
-                    </div>
-                  ) : (
-                    <>
-                      {srcSink && <div style={C.stageDetail}>{srcSink}</div>}
-                      {transforms.length > 0 && (
-                        <div style={C.stageDetail}>
-                          Transforms: {transforms.slice(0, 3).join(", ")}
-                          {transforms.length > 3 ? ` (+${transforms.length - 3} more)` : ""}
-                        </div>
-                      )}
-                      {s.filter_condition && <div style={C.stageDetail}>Filter: {s.filter_condition}</div>}
-                      {s.aggregation?.aggregations?.length > 0 && (
-                        <div style={C.stageDetail}>
-                          Group by: {s.aggregation.group_by?.join(", ")} ·{" "}
-                          {s.aggregation.aggregations.map((a) => `${a.op}(${a.column})`).join(", ")}
-                        </div>
-                      )}
-                      {isPassThrough(s) && (
-                        <div style={{ ...C.stageDetail, color: "var(--warn)" }}>
-                          Pass-through — copies data unchanged
-                        </div>
-                      )}
-                    </>
-                  )}
-                </div>
-              );
-            })}
+          {/* Stages as a data-flow graph: input → copy → steps (parallel stacked) → output */}
+          <div style={{ marginTop: 14 }}>
+            <PipelineFlow plan={plan.config} inputLabel={csvFile?.name || csvName} />
           </div>
 
           {cfg?.recommended_settings && (

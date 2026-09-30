@@ -1,0 +1,79 @@
+/* React Flow themed with the app tokens (works in light and dark). */
+
+.flow {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background:
+    radial-gradient(circle, var(--border) 1px, transparent 1.2px) 0 0 / 18px 18px,
+    var(--surface-2);
+  overflow: hidden;
+}
+.flow .react-flow__attribution { display: none; }
+.flow .react-flow__edge-path { stroke: var(--border-strong); stroke-width: 1.5; }
+.flow .react-flow__edge.is-active .react-flow__edge-path { stroke: var(--warn); }
+.flow .react-flow__edge.is-done .react-flow__edge-path { stroke: var(--ok); }
+.flow .react-flow__edge.is-dashed .react-flow__edge-path { stroke-dasharray: 4 4; }
+.flow .react-flow__edge-textbg { fill: var(--surface); }
+.flow .react-flow__edge-text { fill: var(--text-3); font: 500 10.5px var(--font-mono); }
+.flow .react-flow__handle { opacity: 0; width: 6px; height: 6px; min-width: 0; min-height: 0; border: 0; }
+
+.flow .react-flow__controls {
+  box-shadow: var(--shadow-sm); border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+}
+.flow .react-flow__controls-button {
+  background: var(--surface); border-bottom: 1px solid var(--divider); color: var(--text-2);
+  width: 26px; height: 26px;
+}
+.flow .react-flow__controls-button:hover { background: var(--surface-hover); }
+.flow .react-flow__controls-button svg { fill: currentColor; }
+
+/* ── nodes ─────────────────────────────────────────────────────────────────── */
+.fnode {
+  position: relative;
+  width: 220px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-sm);
+  padding: 10px 12px 10px 14px;
+  font-size: 12px;
+  color: var(--text-2);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.fnode::before {           /* type rail */
+  content: ""; position: absolute; left: -1px; top: 10px; bottom: 10px; width: 3px;
+  border-radius: 0 3px 3px 0; background: var(--rail, var(--border-strong));
+}
+.fnode.running { border-color: var(--warn); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 18%, transparent); }
+.fnode.failed  { border-color: var(--bad);  box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 16%, transparent); }
+.fnode.done    { border-color: var(--ok-line); }
+.fnode.pending { opacity: 0.7; }
+
+.fnode-top  { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+.fnode-kind { font-size: 10.5px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--rail, var(--text-3)); }
+.fnode-status { margin-left: auto; display: inline-flex; }
+.fnode-name { font: 500 12.5px var(--font-mono); color: var(--text); overflow-wrap: break-word; line-height: 1.35; }
+.fnode-lines { margin-top: 6px; display: flex; flex-direction: column; gap: 2px; }
+.fnode-line { color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fnode-line b { color: var(--text-2); font-weight: 500; }
+
+.fnode.terminal { width: 160px; background: var(--surface-2); border-style: dashed; }
+.fnode.terminal::before { display: none; }
+
+.fnode.agent { width: 150px; padding: 10px 12px; }
+.fnode.agent .fnode-name { font-family: var(--font-sans); font-weight: 600; font-size: 13px; }
+.fnode.agent .fnode-desc { color: var(--text-3); font-size: 11.5px; margin-top: 2px; line-height: 1.35; }
+
+.fgroup-label {
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--text-4); white-space: nowrap;
+}
+
+.flow-legend {
+  position: absolute; left: 10px; bottom: 8px; z-index: 5;
+  display: flex; gap: 12px; font-size: 11px; color: var(--text-3);
+  background: color-mix(in srgb, var(--surface) 85%, transparent);
+  padding: 3px 8px; border-radius: 6px; border: 1px solid var(--divider);
+}
+.flow-legend span { display: inline-flex; align-items: center; gap: 5px; }

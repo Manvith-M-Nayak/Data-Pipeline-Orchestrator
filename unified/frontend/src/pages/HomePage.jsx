@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { monitor, connectWS } from "../api.js";
-import { useAppContext } from "../AppContext.jsx";
+import { useAppContext, isLive } from "../AppContext.jsx";
 import {
   Activity, Brain, Zap, AlertTriangle, CheckCircle,
   Clock, ArrowRight, XCircle, RefreshCw,
@@ -85,7 +85,10 @@ export default function HomePage() {
   const [loadError, setLoadError] = useState("");
   const [syncing,   setSyncing]   = useState(false);
   // Same source the Planner writes to — no separate localStorage read to keep in sync.
-  const { planResult: savedPlan } = useAppContext();
+  const { planResult: savedPlan, runs: managedRuns } = useAppContext();
+  // Refresh the counts when a managed run starts or finishes, instead of
+  // waiting for the 30 s timer — so this page agrees with the Manager tab.
+  const liveKey = managedRuns.filter((r) => isLive(r.status)).map((r) => r.run_id).join(",");
   const refreshRef = useRef();
 
   async function loadSummary() {
@@ -109,6 +112,12 @@ export default function HomePage() {
     catch (e) { setLoadError(`Sync failed: ${e.message}`); }
     finally { setSyncing(false); }
   }
+
+  const firstLive = useRef(true);
+  useEffect(() => {
+    if (firstLive.current) { firstLive.current = false; return; }
+    loadSummary();
+  }, [liveKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     loadSummary();
