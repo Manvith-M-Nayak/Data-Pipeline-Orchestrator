@@ -36,6 +36,7 @@ DATABRICKS_HOST          = settings.get("DATABRICKS_HOST")
 DATABRICKS_TOKEN         = settings.get("DATABRICKS_TOKEN")
 DATABRICKS_NOTEBOOK_BASE = settings.get("DATABRICKS_NOTEBOOK_BASE", "/Shared/unified_orchestrator")
 
+from .plan_safety import plan_safety_issues
 from .notebook_builder import (
     build_notebook_source,
     build_stream_notebook_source,
@@ -696,6 +697,9 @@ def execute_pipeline(
 
     # Validate stage references up front — a malformed config should fail
     # with a clear message before any cloud resources are touched.
+    unsafe = plan_safety_issues(pipeline_config)
+    if unsafe:
+        return {"status": "failed", "message": "Unsafe plan rejected: " + "; ".join(unsafe[:5])}
     if not pipeline_config.get("containers_to_create"):
         return {"status": "failed", "message": "Config has no containers_to_create"}
     for s in copy_stages:

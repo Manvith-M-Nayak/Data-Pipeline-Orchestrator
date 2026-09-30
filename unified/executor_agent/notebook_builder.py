@@ -19,6 +19,8 @@ because they are fixed per stage.
 import ast
 import re
 
+from .plan_safety import is_valid_container
+
 
 # ────────────────────────────────────────────────────────────────────────────
 # ADF-DSL → PySpark expression converter (compact)
@@ -125,6 +127,14 @@ def _flatten_method_chains(expr: str) -> str:
         prev = expr
         expr = _METHOD_CHAIN_RE.sub(r'\2(\1)', expr)
     return expr
+
+
+def _require_container(name, role: str) -> str:
+    """Container names are written into notebook source as string literals —
+    refuse anything that is not a valid Azure container name."""
+    if not is_valid_container(name):
+        raise UnsupportedTransformError(f"invalid {role} container name {name!r}")
+    return name
 
 
 class UnsupportedTransformError(ValueError):
@@ -393,8 +403,8 @@ def build_notebook_source(stage: dict, storage_account: str, file_format: str = 
          preserved end-to-end
       7. Calls dbutils.notebook.exit() with a short JSON status string
     """
-    source_container = stage["source_container"]
-    sink_container   = stage["sink_container"]
+    source_container = _require_container(stage.get("source_container"), "source")
+    sink_container   = _require_container(stage.get("sink_container"), "sink")
     transforms       = stage.get("transformations", []) or []
     filter_condition = stage.get("filter_condition")
     aggregation      = stage.get("aggregation")
@@ -670,9 +680,11 @@ def build_stream_notebook_source(stage: dict, storage_account: str, file_format:
     Re-triggering the job processes only data that arrived since last time —
     "continuously processing" when driven on a schedule / button.
     """
-    source_container    = stage["source_container"]
-    sink_container      = stage["sink_container"]
-    checkpoint_container = stage.get("checkpoint_container") or f"{sink_container}-chk"
+    source_container    = _require_container(stage.get("source_container"), "source")
+    sink_container      = _require_container(stage.get("sink_container"), "sink")
+    checkpoint_container = _require_container(
+        stage.get("checkpoint_container") or f"{sink_container}-chk", "checkpoint"
+    )
     shuffle_parts       = int(stage.get("shuffle_partitions", 8))
 
     cell_transforms, cell_filter, cell_agg, _ = _stage_compute_cells(stage)

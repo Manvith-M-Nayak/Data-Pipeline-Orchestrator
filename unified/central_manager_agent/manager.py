@@ -168,6 +168,12 @@ class CentralManager:
         if not stages:
             issues.append("Plan has no stages")
 
+        # Names flow into notebook source, workspace paths and ADF URLs — a
+        # client-supplied plan must not be able to smuggle code through them.
+        from executor_agent.plan_safety import plan_safety_issues
+
+        issues.extend(plan_safety_issues(plan))
+
         if not plan.get("containers_to_create"):
             issues.append("containers_to_create is empty")
 

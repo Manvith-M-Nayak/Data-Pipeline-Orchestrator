@@ -742,6 +742,53 @@ def _normalize_container_names(config: dict) -> dict:
     return config
 
 
+def _normalize_identifiers(config: dict) -> dict:
+    """Make stage and dataset names safe identifiers, keeping every reference
+    (execution_order, execution_groups, copy-stage dataset refs) consistent.
+
+    LLM output may contain spaces or punctuation in names; those names become
+    Databricks workspace paths and ADF resource names, and the executor
+    rejects anything outside [A-Za-z0-9_-] (see executor_agent/plan_safety)."""
+    def _clean(raw, pattern, fallback, max_len):
+        out = re.sub(pattern, "_", str(raw or "")).strip("_")[:max_len]
+        return out or fallback
+
+    stage_map, used = {}, set()
+    for i, s in enumerate(config.get("stages", [])):
+        old = s.get("name")
+        new = _clean(old, r"[^A-Za-z0-9_-]+", f"Stage_{i}", 100)
+        base, n = new, 1
+        while new in used:
+            n += 1
+            new = f"{base}_{n}"
+        used.add(new)
+        if new != old:
+            stage_map[old] = new
+            s["name"] = new
+    if stage_map:
+        config["execution_order"] = [stage_map.get(n, n) for n in config.get("execution_order", [])]
+        if isinstance(config.get("execution_groups"), list):
+            config["execution_groups"] = [
+                [stage_map.get(n, n) for n in g] if isinstance(g, list) else stage_map.get(g, g)
+                for g in config["execution_groups"]
+            ]
+
+    ds_map = {}
+    for ds in config.get("datasets", []):
+        old = ds.get("name")
+        new = _clean(old, r"[^A-Za-z0-9_]+", "DS_Data", 250)
+        if not new[0].isalpha():
+            new = f"DS_{new}"
+        if new != old:
+            ds_map[old] = new
+            ds["name"] = new
+    for s in config.get("stages", []):
+        for key in ("source_dataset", "sink_dataset"):
+            if s.get(key) in ds_map:
+                s[key] = ds_map[s[key]]
+    return config
+
+
 def _structural_validate(config: dict, schema: dict = None, custom_settings: dict = None) -> dict:
     """Enforce first-stage=copy, later-stages=notebook, processed_time presence,
     validate any aggregation blocks, and normalize container names to Azure-safe.
@@ -751,6 +798,7 @@ def _structural_validate(config: dict, schema: dict = None, custom_settings: dic
     which only guards against LLM-invented values)."""
     schema = schema or {}
     config = _normalize_container_names(config)
+    config = _normalize_identifiers(config)
     stages = config.get("stages", [])
 
     # Rebuild any top-level keys the LLM omitted so downstream consumers

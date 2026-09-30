@@ -49,6 +49,11 @@ class StreamManager:
     ) -> dict:
         if (config.get("mode") or "batch").lower() != "streaming":
             raise ValueError("start() requires a streaming-mode plan")
+        # Stream configs come straight from the client and bypass the
+        # Manager's validation, so check names here before anything runs.
+        unsafe = _ex.plan_safety_issues(config)
+        if unsafe:
+            raise ValueError("Unsafe plan rejected: " + "; ".join(unsafe[:5]))
         stream_stages = [s for s in config.get("stages", []) if s.get("type") == "stream"]
         if not stream_stages:
             raise ValueError("plan has no stream stage")
