@@ -250,8 +250,11 @@ class ResourceAgent:
         rows          = int(schema.get("row_count", 0) or 0)
         transforms    = stage.get("transformations", []) or []
         has_filter    = bool(stage.get("filter_condition"))
-        aggs          = stage.get("aggregations") or {}
-        agg_count     = len(aggs.get("agg_exprs", [])) if isinstance(aggs, dict) else 0
+        # Planner emits aggregation={group_by, aggregations}; older callers use
+        # aggregations={agg_exprs}. The shared counter accepts both.
+        from .ml.feature_spec import stage_agg_count
+
+        agg_count     = stage_agg_count(stage)
         transform_count = len(transforms)
 
         # Duration components

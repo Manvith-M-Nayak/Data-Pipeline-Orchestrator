@@ -58,6 +58,11 @@ class RunState:
     user_request: str = (
         ""  # original Planner prompt — drives the semantic assurance layer
     )
+    # Input data description (schema_utils.normalize_run_schema shape) and
+    # upload size. Kept beside the plan, not inside it: the plan is sent to
+    # the semantic LLM and the executor, neither of which needs them.
+    schema: dict = field(default_factory=dict)
+    csv_size_bytes: int = 0
     decisions: List[Dict[str, Any]] = field(default_factory=list)
     retries: int = 0
     started_at: str = ""
@@ -115,6 +120,13 @@ class CentralManager:
         state.phase = phase
         state.step = step
         self._log(state, f"PHASE:{phase.upper()}", step, "started")
+
+    @staticmethod
+    def _agent_plan(state: RunState) -> dict:
+        """Plan as the Performance / Cost agents expect it: their contract
+        reads the input schema and upload size from plan["schema"] and
+        plan["csv_size_bytes"]. A shallow copy — state.plan is not modified."""
+        return {**state.plan, "schema": state.schema, "csv_size_bytes": state.csv_size_bytes}
 
     # ────────────────────────────────────────────────────────────────────────
     # Phase 1 — Plan validation
@@ -462,7 +474,7 @@ class CentralManager:
         result = PerformancePredictionAgent().predict(
             resource_plan=state.resource_plan,
             predictions=state.predictions,
-            plan=state.plan,
+            plan=self._agent_plan(state),
             sla_target_s=sla_target_s,
         )
 
@@ -691,7 +703,7 @@ class CentralManager:
         from cost_optimization_agent import CostOptimizationAgent
 
         result = CostOptimizationAgent().optimize(
-            plan=state.plan,
+            plan=self._agent_plan(state),
             performance_prediction=state.performance_prediction,
             resource_plan=state.resource_plan,
             constraints=constraints,
@@ -791,7 +803,7 @@ class CentralManager:
         original_alloc = copy.deepcopy(state.resource_plan.get("allocations", []))
 
         modified_rp = CostOptimizationAgent().apply_optimization(
-            plan=state.plan,
+            plan=self._agent_plan(state),
             performance_prediction=state.performance_prediction,
             resource_plan=state.resource_plan,
             constraints=constraints,
@@ -1051,7 +1063,7 @@ class CentralManager:
                 from cost_optimization_agent import CostOptimizationAgent
 
                 actual_cost_breakdown = CostOptimizationAgent().estimate_actual_cost(
-                    plan=state.plan,
+                    plan=self._agent_plan(state),
                     performance_prediction=state.performance_prediction,
                     resource_plan=state.resource_plan,
                     actual_duration_s=actual_duration_s,
@@ -1203,6 +1215,8 @@ class CentralManager:
         """Main orchestration entry point — drives the complete run lifecycle."""
         state = self._runs[run_id]
         state.user_request = user_request or state.user_request
+        state.schema = schema or {}
+        state.csv_size_bytes = int(csv_size or 0)
         t0 = time.time()
 
         # Persist as in-flight immediately, and again on every exit path

@@ -299,12 +299,9 @@ def _parse_json_rows(text: str, sample_limit: int = 200):
 async def detect_schema(csv_file: UploadFile = File(...)):
     contents = await read_upload_capped(csv_file)
     size = len(contents)
-    size_hint = (
-        "small (< 5MB)"    if size < 5_242_880   else
-        "medium (5–50MB)"  if size < 52_428_800  else
-        "large (50–200MB)" if size < 209_715_200 else
-        "xlarge (> 200MB)"
-    )
+    from schema_utils import size_hint_for
+
+    size_hint = size_hint_for(size)
     text = contents.decode("utf-8", errors="replace")
     file_format = detect_file_format(csv_file.filename, text)
 

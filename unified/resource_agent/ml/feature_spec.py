@@ -111,6 +111,11 @@ def _agg_count(agg: dict) -> int:
     return len(exprs) if isinstance(exprs, list) else 0
 
 
+def stage_agg_count(stage: dict) -> int:
+    """Aggregation expressions in a stage, whichever shape it uses."""
+    return _agg_count(_aggregation_block(stage))
+
+
 def _has_groupby(agg: dict) -> int:
     if not agg:
         return 0

@@ -165,8 +165,16 @@ export default function PlannerTab() {
     try {
       const result = await schemaApi.detect(file);
       setDetected(result);
-      // persist schema columns for executor
-      try { localStorage.setItem("last_csv_schema", JSON.stringify(result.columns)); } catch {}
+      // Persist the schema for the Manager/Executor run. The whole shape, not
+      // just the column map: agents need row_count and size_hint too.
+      try {
+        localStorage.setItem("last_csv_schema", JSON.stringify({
+          columns: result.columns,
+          row_count: result.row_count ?? result.row_count_sample ?? 0,
+          size_hint: result.size_hint,
+          file_format: result.file_format,
+        }));
+      } catch {}
     } catch (e) { setError("Could not read file: " + e.message); }
     finally { setDetecting(false); }
   }

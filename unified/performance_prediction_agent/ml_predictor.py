@@ -118,10 +118,11 @@ class MLPredictor:
         parallel_ratio = round(1 - (n_groups / max(stage_count, 1)), 3)
 
         transform_count = sum(len(s.get("transformations", []) or []) for s in stages)
-        agg_count = sum(
-            len((s.get("aggregations") or {}).get("agg_exprs", []))
-            for s in stages if isinstance(s.get("aggregations"), dict)
-        )
+        # Planner emits aggregation={group_by, aggregations}; the shared
+        # counter also accepts the legacy aggregations={agg_exprs} shape.
+        from resource_agent.ml.feature_spec import stage_agg_count
+
+        agg_count = sum(stage_agg_count(s) for s in stages)
 
         corr = resource_plan.get("correction_factors", {}) or {}
         copy_correction     = float(corr.get("copy", 1.0))

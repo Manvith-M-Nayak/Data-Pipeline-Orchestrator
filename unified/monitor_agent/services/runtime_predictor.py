@@ -63,10 +63,13 @@ def _model_prediction(state: Dict, pipeline_name: str) -> Optional[Dict]:
     resource_plan = state.get("resource_plan") or {}
     if not resource_plan.get("allocations"):
         return None
+    plan = {**(state.get("plan") or {}),
+            "schema": state.get("schema") or {},
+            "csv_size_bytes": state.get("csv_size_bytes") or 0}
     pred = PerformancePredictionAgent().predict(
         resource_plan=resource_plan,
         predictions=state.get("predictions") or {},
-        plan=state.get("plan") or {},
+        plan=plan,
     )
     total = float(pred.get("predicted_total_s") or 0)
     scope = "whole run"

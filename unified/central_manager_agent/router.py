@@ -35,6 +35,11 @@ async def start_managed_run(
         schema_dict = json.loads(input_schema)
     except json.JSONDecodeError as exc:
         raise HTTPException(status_code=422, detail=f"Invalid JSON: {exc}") from exc
+    # Canonical {columns, row_count, size_hint} shape; row_count and size_hint
+    # measured from the uploaded file itself (clients sent a bare column map).
+    from schema_utils import normalize_run_schema
+
+    schema_dict = normalize_run_schema(schema_dict, contents, csv_file.filename or "")
 
     # The UI lets users edit execution_groups by hand — repair any data-flow
     # violations (a stage grouped with its dependency) before spending cloud
@@ -141,8 +146,10 @@ from .stream_manager import stream_manager
 @router.post("/stream/start")
 async def stream_start(body: dict):
     """Register a live stream. body: {config, schema, file_format?, interval_s?}."""
+    from schema_utils import normalize_run_schema
+
     config = body.get("config") or {}
-    schema = body.get("schema") or {}
+    schema = normalize_run_schema(body.get("schema"))
     file_format = body.get("file_format") or "csv"
     interval_s = body.get("interval_s") or 0
     try:
