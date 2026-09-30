@@ -159,8 +159,8 @@ export function Field({ label, hint, children }) {
 export function KV({ items }) {
   return (
     <dl className="kv">
-      {items.filter(Boolean).map(([k, v]) => (
-        <React.Fragment key={k}>
+      {items.filter(Boolean).map(([k, v], i) => (
+        <React.Fragment key={i}>
           <dt>{k}</dt>
           <dd>{v ?? "—"}</dd>
         </React.Fragment>

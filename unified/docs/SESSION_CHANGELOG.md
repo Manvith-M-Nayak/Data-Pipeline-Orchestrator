@@ -213,6 +213,12 @@ New `/new` page: Data → Describe → Review → Run → Results, built on the 
 and the flow diagrams, with prompt ideas that use the dataset's own columns. Details
 in `LOGIC_FIXES_LOG.md` → Stage 15.
 
+## 14. Redesign part 4a — read-only pages rebuilt (stage 16)
+
+Overview, the four Monitor tabs and the Resource, Performance and Cost agent pages
+are rebuilt on the shared components. Cancelling an ADF run now needs a second click.
+Details in `LOGIC_FIXES_LOG.md` → Stage 16.
+
 ## Mistakes and dead ends (honest list)
 
 | What happened | Impact | Resolution |

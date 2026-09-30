@@ -1,33 +1,18 @@
 import React, { useEffect, useState } from "react";
-import { monitor } from "../api.js";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, Cell } from "recharts";
 import { TrendingUp } from "lucide-react";
+import { monitor } from "../api.js";
+import { Alert, Badge, Button, Card, Empty, Spinner, Stat } from "../ui/components.jsx";
 
-const CONF = { low: "var(--text-3)", medium: "var(--warn)", high: "var(--ok)" };
+const CONF_TONE = { low: "neutral", medium: "warn", high: "ok" };
 
-const S = {
-  title:  { fontSize: 22, fontWeight: 700, marginBottom: 24, color: "var(--text)" },
-  row:    { display: "flex", gap: 10, marginBottom: 20 },
-  select: { background: "var(--surface)", border: "1px solid var(--border)", color: "var(--text)", borderRadius: 8, padding: "8px 12px", fontSize: 13, flex: 1 },
-  btn:    { background: "var(--accent)", border: "none", color: "var(--accent-fg)", borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontSize: 13 },
-  card:   { background: "var(--surface)", borderRadius: 12, padding: 24, border: "1px solid var(--border)", marginBottom: 16 },
-  val:    { fontSize: 28, fontWeight: 700, color: "var(--text)" },
-  sub:    { fontSize: 13, color: "var(--text-2)", marginTop: 4 },
-  grid:   { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 12, marginTop: 16 },
-  stat:   { background: "var(--surface-2)", borderRadius: 8, padding: 12, textAlign: "center" },
-  statV:  { fontSize: 20, fontWeight: 700, color: "var(--accent)", marginBottom: 4 },
-  statL:  { fontSize: 12, color: "var(--text-3)" },
-  empty:  { color: "var(--text-4)", textAlign: "center", marginTop: 60 },
-};
-
-function fmt(s) { if (s == null) return "—"; const m = Math.floor(s/60); return m > 0 ? `${m}m ${Math.round(s%60)}s` : `${Math.round(s)}s`; }
+function fmt(s) { if (s == null) return "—"; const m = Math.floor(s / 60); return m > 0 ? `${m}m ${Math.round(s % 60)}s` : `${Math.round(s)}s`; }
 
 export default function PredictionsPage() {
   const [names,   setNames]   = useState([]);
   const [chosen,  setChosen]  = useState("");
   const [result,  setResult]  = useState(null);
   const [loading, setLoading] = useState(false);
-
   const [syncing, setSyncing] = useState(false);
   const [error,   setError]   = useState("");
 
@@ -49,14 +34,10 @@ export default function PredictionsPage() {
   useEffect(() => {
     monitor.getNames().then((n) => {
       setNames(n);
-      if (n.length) {
-        setChosen(n[0]);
-      } else {
-        // DB empty — auto-sync ADF history so predictions have data
-        syncAndReload();
-      }
+      if (n.length) setChosen(n[0]);
+      else syncAndReload();     // DB empty — pull ADF history so predictions have data
     }).catch((e) => setError(`Could not load pipelines: ${e.message}`));
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function load() {
     if (!chosen) return;
@@ -70,75 +51,78 @@ export default function PredictionsPage() {
   const p = result?.prediction;
   const s = result?.stats;
   const chartData = p ? [
-    { name: "Min", value: p.range_min_sec },
-    { name: "Predicted", value: p.predicted_duration_sec },
-    { name: "Max", value: p.range_max_sec },
+    { name: "Fastest likely", value: p.range_min_sec },
+    { name: "Predicted",      value: p.predicted_duration_sec },
+    { name: "Slowest likely", value: p.range_max_sec },
   ] : [];
 
   return (
-    <div>
-      <h1 style={S.title}>Runtime Predictions</h1>
-      {error && <div style={{ color: "var(--bad)", fontSize: 13, marginBottom: 12 }}>{error}</div>}
-      <div style={S.row}>
-        <select style={S.select} value={chosen} onChange={(e) => { setChosen(e.target.value); setResult(null); }}>
+    <div className="stack" style={{ gap: 14 }}>
+      {error && <Alert tone="bad">{error}</Alert>}
+
+      <div className="row" style={{ gap: 8 }}>
+        <select className="input" style={{ maxWidth: 360 }} value={chosen} disabled={!names.length}
+          onChange={(e) => { setChosen(e.target.value); setResult(null); }}>
           {names.map((n) => <option key={n} value={n}>{n}</option>)}
         </select>
-        <button style={S.btn} onClick={load} disabled={loading}>{loading ? "…" : "Predict"}</button>
+        <Button variant="primary" icon={TrendingUp} loading={loading} disabled={!chosen} onClick={load}>Predict runtime</Button>
       </div>
 
-      {names.length === 0 && (
-        <div style={S.empty}>
-          <TrendingUp size={40} style={{ marginBottom: 12, color: "var(--text-4)" }} />
+      {names.length === 0 ? (
+        <Card>
           {syncing ? (
-            <p style={{ color: "var(--accent)" }}>Syncing ADF history…</p>
+            <div className="row muted" style={{ gap: 8 }}><Spinner /> Pulling ADF history…</div>
           ) : (
-            <>
-              <p>No pipelines found yet.</p>
-              <p style={{ fontSize: 12, color: "var(--text-3)", marginTop: 8 }}>
-                Run a pipeline first, or{" "}
-                <button onClick={syncAndReload} style={{ background: "none", border: "none", color: "var(--accent)", cursor: "pointer", fontSize: 12, textDecoration: "underline" }}>
-                  sync history now
-                </button>.
-              </p>
-            </>
+            <Empty icon={TrendingUp} title="No pipelines yet"
+              action={<Button onClick={syncAndReload}>Sync history now</Button>}>
+              Predictions need past runs. Run a pipeline, or pull the last 48 hours from ADF.
+            </Empty>
           )}
-        </div>
-      )}
-
-      {names.length > 0 && !result && !loading && (
-        <div style={S.empty}><TrendingUp size={40} style={{ marginBottom: 12, color: "var(--text-4)" }} /><p>Select a pipeline and click Predict.</p></div>
-      )}
-
-      {result && p && (
+        </Card>
+      ) : !result && !loading ? (
+        <Card><Empty icon={TrendingUp} title="Pick a pipeline">Choose one and press “Predict runtime”.</Empty></Card>
+      ) : result && p && (
         <>
-          <div style={S.card}>
-            <div style={S.val}>{fmt(p.predicted_duration_sec)}</div>
-            <div style={S.sub}>
-              Range: {fmt(p.range_min_sec)} – {fmt(p.range_max_sec)} ·{" "}
-              <span style={{ color: CONF[p.confidence] || "var(--text-2)", fontWeight: 600 }}>{p.confidence} confidence</span>
-            </div>
-            {p.reasoning && <div style={{ marginTop: 10, fontSize: 13, color: "var(--text-3)" }}>{p.reasoning}</div>}
-            <div style={{ height: 160, marginTop: 20 }}>
+          <div className="grid grid-3">
+            <Stat label="Predicted runtime" value={fmt(p.predicted_duration_sec)}
+              sub={`likely ${fmt(p.range_min_sec)} – ${fmt(p.range_max_sec)}`} />
+            <Stat label="Confidence" value={<Badge tone={CONF_TONE[p.confidence] || "neutral"} style={{ fontSize: 14, height: 28 }}>{p.confidence}</Badge>}
+              sub={p.source ? `source: ${p.source}` : undefined} />
+            <Stat label="History" value={s?.count ?? 0} sub="successful runs used" />
+          </div>
+
+          <Card title="Predicted range" subtitle={p.reasoning}>
+            <div style={{ height: 190 }}>
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={chartData}>
-                  <XAxis dataKey="name" tick={{ fill: "var(--text-3)", fontSize: 12 }} />
-                  <YAxis tick={{ fill: "var(--text-3)", fontSize: 11 }} tickFormatter={fmt} />
-                  <Tooltip formatter={(v) => [fmt(v), "Duration"]} contentStyle={{ background: "var(--surface-2)", border: "1px solid var(--border)" }} labelStyle={{ color: "var(--text-2)" }} />
-                  <Bar dataKey="value" fill="var(--accent)" radius={[4, 4, 0, 0]} />
+                <BarChart data={chartData} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+                  <XAxis dataKey="name" tick={{ fill: "var(--text-3)", fontSize: 12 }} axisLine={{ stroke: "var(--border)" }} tickLine={false} />
+                  <YAxis tick={{ fill: "var(--text-3)", fontSize: 11 }} tickFormatter={fmt} axisLine={false} tickLine={false} width={56} />
+                  <Tooltip
+                    formatter={(v) => [fmt(v), "Duration"]}
+                    cursor={{ fill: "var(--surface-hover)" }}
+                    contentStyle={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text)" }}
+                    labelStyle={{ color: "var(--text-2)" }}
+                  />
+                  <Bar dataKey="value" radius={[5, 5, 0, 0]} maxBarSize={72}>
+                    {chartData.map((d, i) => <Cell key={i} fill={i === 1 ? "var(--accent)" : "var(--accent-line)"} />)}
+                  </Bar>
                   <ReferenceLine y={p.predicted_duration_sec} stroke="var(--warn)" strokeDasharray="4 4" />
                 </BarChart>
               </ResponsiveContainer>
             </div>
-          </div>
+          </Card>
+
           {s && (
-            <div style={{ ...S.card, padding: 20 }}>
-              <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 10 }}>Historical stats ({s.count} successful runs)</div>
-              <div style={S.grid}>
-                {[["Avg", s.avg], ["Min", s.min], ["Max", s.max], ["p95", s.p95]].map(([l, v]) => (
-                  <div key={l} style={S.stat}><div style={S.statV}>{fmt(v)}</div><div style={S.statL}>{l}</div></div>
+            <Card title={`Past runs of ${chosen}`} subtitle={`${s.count} successful run(s)`}>
+              <div className="grid grid-4">
+                {[["Average", s.avg], ["Fastest", s.min], ["Slowest", s.max], ["95th percentile", s.p95]].map(([l, v]) => (
+                  <div key={l}>
+                    <div className="stat-label">{l}</div>
+                    <div className="stat-value" style={{ fontSize: 20 }}>{fmt(v)}</div>
+                  </div>
                 ))}
               </div>
-            </div>
+            </Card>
           )}
         </>
       )}

@@ -1,139 +1,47 @@
 import React, { useState, useEffect, useCallback } from "react";
-import {
-  Cpu, Zap, TrendingUp, AlertTriangle,
-  CheckCircle, RefreshCw, BarChart3, GitBranch, Clock,
-} from "lucide-react";
+import { BarChart3, Clock, Cpu, GitBranch, RefreshCw, ShieldCheck, TrendingUp, Zap } from "lucide-react";
 import { resource, monitor } from "../api.js";
 import { useAppContext } from "../AppContext.jsx";
+import { Alert, Badge, Button, Card, Empty, KV, PageHeader, Stat } from "../ui/components.jsx";
 
-// ── Styles ────────────────────────────────────────────────────────────────────
-const S = {
-  page:    { maxWidth: 960, margin: "0 auto" },
-  heading: { fontSize: 22, fontWeight: 700, color: "var(--text)", marginBottom: 4 },
-  sub:     { fontSize: 13, color: "var(--text-3)", marginBottom: 28 },
-  grid2:   { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 },
-  grid3:   { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, marginBottom: 16 },
-  card:    {
-    background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12,
-    padding: "16px 20px", marginBottom: 16,
-  },
-  cardHdr: {
-    display: "flex", alignItems: "center", gap: 8,
-    fontSize: 13, fontWeight: 700, color: "var(--text)", marginBottom: 14,
-  },
-  kv:      { display: "flex", flexDirection: "column", gap: 6 },
-  kvRow:   {
-    display: "flex", justifyContent: "space-between", alignItems: "center",
-    fontSize: 12, color: "var(--text-2)", paddingBottom: 6,
-    borderBottom: "1px solid var(--divider)",
-  },
-  kvVal:   { color: "var(--text)", fontWeight: 600 },
-  badge:   (color) => ({
-    display: "inline-block", padding: "2px 8px", borderRadius: 99,
-    fontSize: 11, fontWeight: 700,
-    background: `color-mix(in srgb, ${color} 13%, transparent)`, color: color,
-  }),
-  btn:     {
-    padding: "8px 16px", background: "var(--accent)", color: "var(--accent-fg)",
-    border: "none", borderRadius: 8, cursor: "pointer",
-    fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6,
-  },
-  tag:     (color) => ({
-    padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 700,
-    background: `color-mix(in srgb, ${color} 13%, transparent)`, color: color, marginRight: 4,
-  }),
-  bar:     (pct, color) => ({
-    height: 6, width: `${Math.min(pct, 100)}%`, background: color,
-    borderRadius: 3, transition: "width 0.4s ease",
-  }),
-  barBg:   { height: 6, background: "var(--surface)", borderRadius: 3, marginTop: 4, overflow: "hidden" },
-  stageRow: {
-    padding: "10px 0", borderBottom: "1px solid var(--divider)",
-    display: "flex", flexDirection: "column", gap: 4,
-  },
-  warn:    { display: "flex", gap: 6, fontSize: 11, color: "var(--warn)", marginTop: 6 },
-  error:   { display: "flex", gap: 6, fontSize: 11, color: "var(--bad)", marginTop: 6 },
-};
+const ratioTone = (r) => (Math.abs(r - 1) < 0.2 ? "ok" : Math.abs(r - 1) < 0.5 ? "warn" : "bad");
+const REC_TONE = { ok: "ok", scale_up: "warn", reclaim: "accent", investigate: "bad" };
 
-// ── Mini helpers ──────────────────────────────────────────────────────────────
-function Badge({ text, color = "var(--accent)" }) {
-  return <span style={S.badge(color)}>{text}</span>;
-}
-
-function StatCard({ label, value, sub, color = "var(--accent)", Icon }) {
-  return (
-    <div style={S.card}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-        {Icon && <Icon size={14} color={color} />}
-        <span style={{ fontSize: 12, color: "var(--text-3)" }}>{label}</span>
-      </div>
-      <div style={{ fontSize: 22, fontWeight: 700, color }}>{value}</div>
-      {sub && <div style={{ fontSize: 11, color: "var(--text-4)", marginTop: 4 }}>{sub}</div>}
-    </div>
-  );
-}
-
-// ── Accuracy report section ───────────────────────────────────────────────────
+// ── Accuracy per stage type ───────────────────────────────────────────────────
 function AccuracySection({ report }) {
   if (!report || report.total_records === 0) {
     return (
-      <div style={{ ...S.card, textAlign: "center", color: "var(--text-4)", fontSize: 13, padding: "32px 20px" }}>
-        No prediction history yet — run a pipeline through Central Manager to start collecting data.
-      </div>
+      <Empty icon={BarChart3} title="No prediction history yet">
+        Run a pipeline through the Central Manager; each run records predicted vs actual duration.
+      </Empty>
     );
   }
-
-  const types = Object.entries(report.by_type || {});
   return (
-    <div style={S.grid2}>
-      {types.map(([stype, stats]) => {
-        const accuracyPct = stats.accuracy_pct || 0;
-        const ratioColor  = Math.abs(stats.mean_ratio - 1) < 0.2 ? "var(--ok)"
-                          : Math.abs(stats.mean_ratio - 1) < 0.5 ? "var(--warn)"
-                          : "var(--bad)";
+    <div className="grid grid-2">
+      {Object.entries(report.by_type || {}).map(([stype, st]) => {
+        const acc = st.accuracy_pct || 0;
         return (
-          <div key={stype} style={S.card}>
-            <div style={S.cardHdr}>
-              <BarChart3 size={14} color="var(--violet)" />
-              {stype.charAt(0).toUpperCase() + stype.slice(1)} stage accuracy
-              <span style={{ marginLeft: "auto" }}>
-                <Badge
-                  text={`${accuracyPct}%`}
-                  color={accuracyPct > 80 ? "var(--ok)" : accuracyPct > 60 ? "var(--warn)" : "var(--bad)"}
-                />
-              </span>
+          <div key={stype} style={{ border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: 16 }}>
+            <div className="row" style={{ gap: 8, marginBottom: 12 }}>
+              <span style={{ color: "var(--text)", fontWeight: 600, textTransform: "capitalize" }}>{stype} stages</span>
+              <Badge tone={acc > 80 ? "ok" : "warn"} style={{ marginLeft: "auto" }}>{acc}% accurate</Badge>
             </div>
-            <div style={S.kv}>
-              <div style={S.kvRow}><span>Runs recorded</span><span style={S.kvVal}>{stats.count}</span></div>
-              <div style={S.kvRow}>
-                <span>Mean actual/predicted</span>
-                <span style={{ ...S.kvVal, color: ratioColor }}>{stats.mean_ratio}×</span>
-              </div>
-              <div style={S.kvRow}>
-                <span>Correction factor applied</span>
-                <span style={S.kvVal}>{stats.correction_factor}×</span>
-              </div>
+            <div style={{ height: 6, background: "var(--surface-2)", borderRadius: 3, overflow: "hidden", marginBottom: 14 }}>
+              <div style={{ height: "100%", width: `${Math.min(acc, 100)}%`, background: acc > 80 ? "var(--ok)" : "var(--warn)" }} />
             </div>
-            <div style={{ marginTop: 10 }}>
-              <div style={{ fontSize: 11, color: "var(--text-4)", marginBottom: 4 }}>
-                Recent ratios (actual/predicted)
-              </div>
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                {(stats.recent_ratios || []).map((r, i) => (
-                  <span key={i} style={S.tag(Math.abs(r - 1) < 0.2 ? "var(--ok)" : "var(--warn)")}>
-                    {r}×
-                  </span>
-                ))}
-              </div>
-            </div>
-            <div style={{ marginTop: 8 }}>
-              <div style={{ fontSize: 11, color: "var(--text-4)", marginBottom: 4 }}>
-                Accuracy {accuracyPct}%
-              </div>
-              <div style={S.barBg}>
-                <div style={S.bar(accuracyPct, accuracyPct > 80 ? "var(--ok)" : "var(--warn)")} />
-              </div>
-            </div>
+            <KV items={[
+              ["Runs recorded", st.count],
+              ["Mean actual ÷ predicted", <span key="r" style={{ color: `var(--${ratioTone(st.mean_ratio)})` }}>{st.mean_ratio}×</span>],
+              ["Correction applied", `${st.correction_factor}×`],
+            ]} />
+            {(st.recent_ratios || []).length > 0 && (
+              <>
+                <div className="list-title">Recent ratios</div>
+                <div className="chips">
+                  {st.recent_ratios.map((r, i) => <Badge key={i} tone={ratioTone(r)}>{r}×</Badge>)}
+                </div>
+              </>
+            )}
           </div>
         );
       })}
@@ -141,119 +49,71 @@ function AccuracySection({ report }) {
   );
 }
 
-// ── Live plan analysis section ─────────────────────────────────────────────────
-function LiveAnalysis({ allocations, feasible, violations, warnings, execGroups }) {
-  if (!allocations || allocations.length === 0) return null;
-
+// ── Allocations of the current run ────────────────────────────────────────────
+function Allocations({ rp }) {
+  const allocs = rp.allocations || [];
   return (
-    <div style={S.card}>
-      <div style={S.cardHdr}>
-        <Cpu size={14} color="var(--accent)" />
-        Stage Allocations
-        <span style={{ marginLeft: "auto" }}>
-          <Badge text={feasible ? "Feasible" : "Infeasible"} color={feasible ? "var(--ok)" : "var(--bad)"} />
-        </span>
+    <>
+      {(rp.constraint_violations || []).map((v, i) => <Alert key={`v${i}`} tone="bad" style={{ marginBottom: 8 }}>{v}</Alert>)}
+      {(rp.warnings || []).map((w, i) => <Alert key={`w${i}`} tone="warn" style={{ marginBottom: 8 }}>{w}</Alert>)}
+      <div style={{ overflowX: "auto" }}>
+        <table className="table">
+          <thead><tr><th>Stage</th><th>Type</th><th>Compute</th><th>Memory</th><th>Node</th><th>Est. time</th><th /></tr></thead>
+          <tbody>
+            {allocs.map((a) => (
+              <tr key={a.stage_name}>
+                <td className="mono" style={{ color: "var(--text)" }}>{a.stage_name}</td>
+                <td><Badge tone={a.stage_type === "notebook" ? "violet" : "accent"}>{a.stage_type}</Badge></td>
+                <td>{a.stage_type === "notebook"
+                  ? `${a.workers} worker${a.workers !== 1 ? "s" : ""} · ${a.cpu} vCPU${a.shuffle_partitions != null ? ` · ${a.shuffle_partitions} shuffle` : ""}`
+                  : `${a.diu} DIU`}</td>
+                <td>{a.memory_gb} GB</td>
+                <td className="muted">{a.node_type || "—"}</td>
+                <td><Clock size={11} style={{ verticalAlign: -1 }} /> ~{a.duration_s}s</td>
+                <td>
+                  <div className="row" style={{ gap: 4, justifyContent: "flex-end" }}>
+                    {a.ml_sized && <Badge tone="violet">ML-sized</Badge>}
+                    {a.right_sized && <Badge tone="ok">right-sized</Badge>}
+                    {a.contention_adjusted && <Badge tone="warn">contention-adjusted</Badge>}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
-
-      {violations?.length > 0 && violations.map((v, i) => (
-        <div key={i} style={S.error}><AlertTriangle size={11} />{v}</div>
-      ))}
-      {warnings?.length > 0 && warnings.map((w, i) => (
-        <div key={i} style={S.warn}><AlertTriangle size={11} />{w}</div>
-      ))}
-
-      {allocations.map((a) => {
-        const isNotebook = a.stage_type === "notebook";
-        const workerColor = a.workers === 0 ? "var(--text-3)" : "var(--accent)";
-        return (
-          <div key={a.stage_name} style={S.stageRow}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>{a.stage_name}</span>
-              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                {a.right_sized && <span style={S.tag("var(--ok)")}>right-sized</span>}
-                {a.contention_adjusted && <span style={S.tag("var(--warn)")}>contention-adjusted</span>}
-                <Badge
-                  text={a.stage_type}
-                  color={isNotebook ? "var(--violet)" : "var(--warn)"}
-                />
+      {(rp.execution_groups || []).length > 0 && (
+        <>
+          <div className="list-title"><GitBranch size={11} style={{ verticalAlign: -1 }} /> Execution groups after contention resolution</div>
+          <div className="stack" style={{ gap: 6 }}>
+            {rp.execution_groups.map((g, i) => (
+              <div key={i} className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+                <span className="faint" style={{ fontSize: 12, width: 60 }}>Group {i + 1}</span>
+                {g.map((n) => <Badge key={n} tone={g.length > 1 ? "accent" : "neutral"}>{n}</Badge>)}
+                {g.length > 1 && <span className="faint" style={{ fontSize: 12 }}>parallel</span>}
               </div>
-            </div>
-            <div style={{ display: "flex", gap: 16, fontSize: 11, color: "var(--text-2)", marginTop: 2, flexWrap: "wrap" }}>
-              {isNotebook ? (
-                <>
-                  <span style={{ color: workerColor }}>{a.workers} worker{a.workers !== 1 ? "s" : ""}</span>
-                  <span>{a.memory_gb} GB memory</span>
-                  <span>{a.cpu} vCPU</span>
-                  {a.node_type && <span>{a.node_type}</span>}
-                  {a.shuffle_partitions != null && <span>{a.shuffle_partitions} shuffle</span>}
-                </>
-              ) : (
-                <>
-                  <span style={{ color: "var(--warn)" }}>{a.diu} DIU</span>
-                  <span>{a.memory_gb} GB scratch</span>
-                </>
-              )}
-              {a.ml_sized && <span style={S.tag("var(--violet)")}>ML-sized</span>}
-              <span><Clock size={10} style={{ marginRight: 3, verticalAlign: "middle" }} />~{a.duration_s}s</span>
-            </div>
+            ))}
           </div>
-        );
-      })}
-
-      {execGroups && execGroups.length > 0 && (
-        <div style={{ marginTop: 14 }}>
-          <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 6, display: "flex", gap: 6, alignItems: "center" }}>
-            <GitBranch size={12} /> Execution groups after contention resolution
-          </div>
-          {execGroups.map((group, gi) => (
-            <div key={gi} style={{ display: "flex", gap: 6, marginBottom: 4, alignItems: "center" }}>
-              <span style={{ fontSize: 11, color: "var(--text-4)", minWidth: 60 }}>Group {gi + 1}</span>
-              {group.map((name) => (
-                <span key={name} style={S.tag(group.length > 1 ? "var(--accent)" : "var(--text-3)")}>{name}</span>
-              ))}
-              {group.length > 1 && (
-                <span style={{ fontSize: 11, color: "var(--accent)" }}>parallel</span>
-              )}
-            </div>
-          ))}
-        </div>
+        </>
       )}
-    </div>
+    </>
   );
 }
 
-// ── Dynamic re-allocation panel ───────────────────────────────────────────────
-function ReallocationPanel({ recs }) {
-  if (!recs || recs.length === 0) return null;
-  const colors = { ok: "var(--ok)", scale_up: "var(--warn)", reclaim: "var(--accent)", investigate: "var(--bad)" };
-  return (
-    <div style={S.card}>
-      <div style={S.cardHdr}><Zap size={14} color="var(--warn)" />Dynamic Re-allocation Recommendations</div>
-      {recs.map((r, i) => (
-        <div key={i} style={{ ...S.stageRow, flexDirection: "row", alignItems: "center", gap: 10 }}>
-          <span style={S.tag(colors[r.action] || "var(--text-3)")}>{r.action}</span>
-          <span style={{ fontSize: 12, color: "var(--text)", flex: 1 }}>{r.stage}</span>
-          <span style={{ fontSize: 11, color: "var(--text-3)" }}>{r.reason}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ── Main page ─────────────────────────────────────────────────────────────────
+// ── Page ──────────────────────────────────────────────────────────────────────
 export default function ResourceTab() {
-  const [accuracy, setAccuracy]           = useState(null);
-  const [factors, setFactors]             = useState(null);
-  const [modelInfo, setModelInfo]         = useState(null);
-  const [recs, setRecs]                   = useState(null);
-  const [limits, setLimits]               = useState(null);
-  // Resource plan of the current run (the one shared by the Manager and
-  // Executor tabs) — the allocations live re-allocation compares against.
-  const { run: managerState } = useAppContext();
-  const liveRp = managerState?.resource_plan?.allocations?.length ? managerState.resource_plan : null;
-  const [loading, setLoading]             = useState(false);
-  const [reallocationLoading, setRlLoad] = useState(false);
-  const [err, setErr]                     = useState("");
+  const [accuracy, setAccuracy]   = useState(null);
+  const [factors, setFactors]     = useState(null);
+  const [modelInfo, setModelInfo] = useState(null);
+  const [recs, setRecs]           = useState(null);
+  const [limits, setLimits]       = useState(null);
+  // Resource plan of the current run (shared with the Manager and Executor
+  // pages) — the allocations live re-allocation compares against.
+  const { run } = useAppContext();
+  const liveRp = run?.resource_plan?.allocations?.length ? run.resource_plan : null;
+  const [loading, setLoading]     = useState(false);
+  const [rlLoading, setRlLoading] = useState(false);
+  const [err, setErr]             = useState("");
 
   const fetchAccuracy = useCallback(async () => {
     setLoading(true);
@@ -264,10 +124,7 @@ export default function ResourceTab() {
         resource.modelInfo().catch(() => null),
         resource.limits().catch(() => null),
       ]);
-      setAccuracy(acc);
-      setFactors(cf);
-      setModelInfo(mi);
-      setLimits(lim);
+      setAccuracy(acc); setFactors(cf); setModelInfo(mi); setLimits(lim);
       setErr("");
     } catch (e) {
       setErr(e.message);
@@ -279,17 +136,17 @@ export default function ResourceTab() {
   useEffect(() => { fetchAccuracy(); }, [fetchAccuracy]);
 
   async function checkReallocate() {
-    setRlLoad(true);
+    setRlLoading(true);
     setErr("");
     try {
       const live = await monitor.getLiveRuns();
       if (!live || live.length === 0) {
-        setRecs([]);
+        setRecs([{ stage: "—", action: "ok", reason: "No ADF runs are live right now — nothing to re-allocate." }]);
         return;
       }
       const allocs = liveRp?.allocations || [];
       if (allocs.length === 0) {
-        setRecs([{ stage: "n/a", action: "ok", reason: "No active resource plan — run via Central Manager first." }]);
+        setRecs([{ stage: "—", action: "ok", reason: "No resource plan for the current run — run a pipeline through the Central Manager first." }]);
         return;
       }
       const result = await resource.reallocate(live, allocs, 0);
@@ -297,158 +154,84 @@ export default function ResourceTab() {
     } catch (e) {
       setErr(e.message);
     } finally {
-      setRlLoad(false);
+      setRlLoading(false);
     }
   }
 
   const totalRecords = accuracy?.total_records || 0;
-  const avgAccuracy  = accuracy?.by_type
-    ? Object.values(accuracy.by_type).reduce((s, t) => s + (t.accuracy_pct || 0), 0) /
-      Math.max(Object.keys(accuracy.by_type).length, 1)
-    : null;
+  const types = Object.values(accuracy?.by_type || {});
+  const avgAccuracy = types.length ? types.reduce((s, t) => s + (t.accuracy_pct || 0), 0) / types.length : null;
+  const spec = limits?.node_specs?.[limits?.default_node];
 
   return (
-    <div style={S.page}>
-      <div style={S.heading}>Resource Agent</div>
-      <div style={S.sub}>
-        Recommends right-sized compute settings (workers, DIU, memory, shuffle, node) per
-        stage via a supervised model, resolves contention, enforces student-tier limits,
-        and self-corrects from historical run data. Runtime forecasting is owned by
-        the Performance Prediction Agent.
+    <div>
+      <PageHeader
+        eyebrow="Agents" icon={Cpu}
+        title="Resource agent"
+        description="Sizes each stage (workers, DIU, memory, shuffle, node) with a trained model, resolves contention between parallel stages, enforces the subscription limits, and corrects itself from past runs."
+        actions={<>
+          <Button size="sm" icon={RefreshCw} loading={loading} onClick={fetchAccuracy}>Refresh</Button>
+          <Button size="sm" variant="primary" icon={Zap} loading={rlLoading} onClick={checkReallocate}>Check live re-allocation</Button>
+        </>}
+      />
+
+      {err && <Alert tone="bad" style={{ marginBottom: 14 }}>{err}</Alert>}
+
+      <div className="grid grid-4" style={{ marginBottom: 14 }}>
+        <Stat icon={Cpu} label="Sizing engine"
+          value={modelInfo ? (modelInfo.ml_available ? "ML model" : "Heuristic") : "—"}
+          tone={modelInfo?.ml_available ? "violet" : undefined}
+          sub={modelInfo?.metrics?.rows ? `trained on ${Number(modelInfo.metrics.rows).toLocaleString()} stages` : modelInfo && !modelInfo.ml_available ? "model file missing" : undefined} />
+        <Stat icon={BarChart3} label="Runs recorded" value={totalRecords} sub="used for self-correction" />
+        <Stat icon={TrendingUp} label="Duration accuracy" value={avgAccuracy != null ? `${avgAccuracy.toFixed(1)}%` : "—"}
+          tone={avgAccuracy == null ? undefined : avgAccuracy > 80 ? "ok" : "warn"} sub="actual vs predicted" />
+        <Stat icon={Zap} label="Correction factors" value={factors ? `${factors.copy}× / ${factors.notebook}×` : "—"}
+          sub="copy / notebook (damped)" />
       </div>
 
-      {/* Sizing engine banner */}
-      {modelInfo && (
-        <div style={{ ...S.card, display: "flex", alignItems: "center", gap: 10, padding: "12px 20px" }}>
-          <Cpu size={15} color={modelInfo.ml_available ? "var(--violet)" : "var(--text-3)"} />
-          <span style={{ fontSize: 13, color: "var(--text)", fontWeight: 600 }}>
-            Sizing engine:
-          </span>
-          <Badge
-            text={modelInfo.ml_available ? "ML model" : "Heuristic fallback"}
-            color={modelInfo.ml_available ? "var(--violet)" : "var(--warn)"}
-          />
-          {modelInfo.metrics?.rows && (
-            <span style={{ fontSize: 11, color: "var(--text-3)" }}>
-              trained on {Number(modelInfo.metrics.rows).toLocaleString()} stages
-              {modelInfo.metrics?.targets?.rec_workers?.within1_acc != null &&
-                ` · workers ±1 acc ${(modelInfo.metrics.targets.rec_workers.within1_acc * 100).toFixed(1)}%`}
-            </span>
+      {recs && (
+        <Card title="Re-allocation recommendations" icon={Zap} style={{ marginBottom: 14 }}
+          actions={<button className="link" onClick={() => setRecs(null)}>Dismiss</button>}>
+          {recs.length === 0 ? (
+            <div className="muted">Every live stage is sized correctly.</div>
+          ) : (
+            <div className="list">
+              {recs.map((r, i) => (
+                <div key={i} className="list-row">
+                  <Badge tone={REC_TONE[r.action] || "neutral"}>{(r.action || "").replace("_", " ")}</Badge>
+                  <span className="mono" style={{ color: "var(--text)", flexShrink: 0 }}>{r.stage}</span>
+                  <span className="muted" style={{ flex: 1, minWidth: 0 }}>{r.reason}</span>
+                </div>
+              ))}
+            </div>
           )}
-          {!modelInfo.ml_available && (
-            <span style={{ fontSize: 11, color: "var(--text-3)" }}>
-              train &amp; drop resource_models.pkl into resource_agent/models/
-            </span>
-          )}
-        </div>
+        </Card>
       )}
 
-      {/* Summary stats */}
-      <div style={S.grid3}>
-        <StatCard
-          label="Prediction records"
-          value={totalRecords}
-          sub="runs used for self-correction"
-          Icon={BarChart3}
-          color="var(--accent)"
-        />
-        <StatCard
-          label="Avg prediction accuracy"
-          value={avgAccuracy != null ? `${avgAccuracy.toFixed(1)}%` : "—"}
-          sub="actual vs predicted duration"
-          Icon={TrendingUp}
-          color={avgAccuracy == null ? "var(--text-4)" : avgAccuracy > 80 ? "var(--ok)" : "var(--warn)"}
-        />
-        <StatCard
-          label="Correction factors"
-          value={factors ? `${factors.copy}× / ${factors.notebook}×` : "—"}
-          sub="copy / notebook (damped)"
-          Icon={Zap}
-          color="var(--violet)"
-        />
-      </div>
+      <Card title="Current run's allocations" icon={Cpu} style={{ marginBottom: 14 }}
+        subtitle={liveRp ? <>Run <span className="mono">{run?.run_id?.slice(0, 8)}</span> · {liveRp.feasible === false ? "infeasible" : "within limits"}</> : undefined}
+        actions={liveRp ? <Badge tone={liveRp.feasible === false ? "bad" : "ok"} dot>{liveRp.feasible === false ? "Infeasible" : "Feasible"}</Badge> : null}>
+        {liveRp ? <Allocations rp={liveRp} /> : (
+          <Empty icon={Cpu} title="No run selected">Start or open a run in the Central Manager to see how its stages were sized.</Empty>
+        )}
+      </Card>
 
-      {/* Refresh + dynamic reallocation buttons */}
-      <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
-        <button style={S.btn} onClick={fetchAccuracy} disabled={loading}>
-          <RefreshCw size={13} />
-          {loading ? "Loading…" : "Refresh accuracy"}
-        </button>
-        <button
-          style={{ ...S.btn, background: "var(--violet)" }}
-          onClick={checkReallocate}
-          disabled={reallocationLoading}
-        >
-          <Zap size={13} />
-          {reallocationLoading ? "Checking…" : "Check live re-allocation"}
-        </button>
-      </div>
-
-      {err && (
-        <div style={{ ...S.card, border: "1px solid var(--bad)", color: "var(--bad)", fontSize: 12 }}>
-          {err}
-        </div>
-      )}
-
-      {/* Dynamic re-allocation */}
-      <ReallocationPanel recs={recs} />
-
-      {/* Live resource plan from manager context (if any) */}
-      {liveRp && (
-        <div style={{ fontSize: 11, color: "var(--text-4)", marginBottom: 8 }}>
-          Resource plan of Central Manager run{" "}
-          <span style={{ fontFamily: "monospace" }}>{managerState?.run_id?.slice(0, 8) || "—"}</span>
-        </div>
-      )}
-      {liveRp && (
-        <LiveAnalysis
-          allocations={liveRp.allocations}
-          feasible={liveRp.feasible}
-          violations={liveRp.constraint_violations}
-          warnings={liveRp.warnings}
-          execGroups={liveRp.execution_groups}
-        />
-      )}
-
-      {/* Accuracy history */}
-      <div style={S.card}>
-        <div style={S.cardHdr}>
-          <TrendingUp size={14} color="var(--ok)" />
-          Prediction Accuracy History
-          {totalRecords === 0 && (
-            <span style={{ marginLeft: 8, fontSize: 11, color: "var(--text-4)", fontWeight: 400 }}>
-              — no data yet
-            </span>
-          )}
-        </div>
+      <Card title="Prediction accuracy" icon={TrendingUp} style={{ marginBottom: 14 }}>
         <AccuracySection report={accuracy} />
-      </div>
+      </Card>
 
-      {/* Student tier limits reference */}
-      <div style={S.card}>
-        <div style={S.cardHdr}><CheckCircle size={14} color="var(--text-3)" />Student-Tier Hard Limits</div>
-        <div style={S.kv}>
-          {/* From GET /resource/limits — the constants the agent enforces */}
-          {limits ? (() => {
-            const spec = limits.node_specs?.[limits.default_node];
-            const rows = [
-              ["Max Databricks workers", limits.max_workers],
-              ["Max ADF DIU", limits.max_diu],
-              ["Max parallel stages in one group", limits.max_concurrent],
-              ["Max total memory (parallel group)", `${limits.max_total_mem_gb} GB`],
-              ["Default node type", spec ? `${limits.default_node} (${spec.cpu} vCPU / ${spec.memory_gb} GB)` : limits.default_node],
-              ["ADF throughput per DIU", `~${limits.adf_mb_per_diu_per_s} MB/s`],
-            ];
-            return rows.map(([label, val], i) => (
-              <div key={label} style={i === rows.length - 1 ? { ...S.kvRow, borderBottom: "none" } : S.kvRow}>
-                <span>{label}</span><span style={S.kvVal}>{val}</span>
-              </div>
-            ));
-          })() : (
-            <div style={{ fontSize: 12, color: "var(--text-4)" }}>Limits unavailable — backend not reachable.</div>
-          )}
-        </div>
-      </div>
+      <Card title="Subscription limits" icon={ShieldCheck} subtitle="Hard limits the agent enforces (from the backend)">
+        {limits ? (
+          <KV items={[
+            ["Max Databricks workers", limits.max_workers],
+            ["Max ADF DIU", limits.max_diu],
+            ["Max parallel stages per group", limits.max_concurrent],
+            ["Max memory per parallel group", `${limits.max_total_mem_gb} GB`],
+            ["Default node", spec ? `${limits.default_node} · ${spec.cpu} vCPU / ${spec.memory_gb} GB` : limits.default_node],
+            ["ADF throughput per DIU", `~${limits.adf_mb_per_diu_per_s} MB/s`],
+          ]} />
+        ) : <div className="muted">Limits unavailable — backend not reachable.</div>}
+      </Card>
     </div>
   );
 }

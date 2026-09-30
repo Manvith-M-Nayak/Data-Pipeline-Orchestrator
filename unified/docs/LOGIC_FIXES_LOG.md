@@ -27,6 +27,7 @@ records:
 | 14 | Redesign 2/4: pipeline flow + agent flow diagrams (React Flow), live run status | feature (user request) | Done |
 | 14.1 | Reload consistency: one shared run store, live state everywhere, data file survives refresh | bugs (user report) | Done |
 | 15 | Redesign 3/4: guided "New pipeline" flow (Data → Describe → Review → Run → Results) | feature (user request) | Done |
+| 16 | Redesign 4a: Overview, Monitor (4 tabs), Resource/Performance/Cost rebuilt on shared components | feature (user request) | Done |
 
 ---
 
@@ -1029,4 +1030,43 @@ Overview), walks a first-time user from a file to a finished run in five steps:
   - **Plan:** redesigned from that prompt by the real planner. It has the same shape as before (ingest copy → notebook `predator = 1`), verified, but it is a new plan, not the byte-identical old one.
   - **Run pointer:** cleared.
 - **Observed, not a bug:** with 2 containers the planner's notebook reads and writes the same container. Batch runs purge every container first (`executor.purge_container`), so old output cannot be re-read. The plan's reasoning text said "3 containers", which is cosmetic.
+
+
+## Stage 16 — Redesign, part 4a: read-only pages on the shared components
+
+Stage 16 was split in two so each part fits one commit:
+- **16 (this part):** the pages that mostly display data;
+- **17:** the Planner, Central Manager, Executor, Run Insights and the streaming console.
+
+Data fetching and logic are unchanged unless listed below. Every page now uses
+`PageHeader`, `Card`, `Stat`, `Badge`, `Alert`, `Empty`, `KV`, `Tabs`/`Segmented`,
+and the `.table` / `.list` styles, so it follows both themes with no per-page
+colours.
+
+| Page | What changed |
+|---|---|
+| **Overview** (`HomePage.jsx`) | Page header with a live badge, Refresh and New pipeline. A banner for the managed run in progress (shared store) with a link to the Manager. Four stat cards. "Needs attention" (running now, anomalies, recent failures) and "Recent ADF runs" lists. "Current plan" shows the plan as a pipeline diagram, with Edit in Planner / Run in Manager. The no-data state offers "Sync last 48h" in place. |
+| **Monitor** (`MonitorTab.jsx`) | Shared page header and underline tabs. |
+| Live | Status line; cards for "Just finished" and "Managed runs in progress" (shared list); one card per ADF run. **Cancel now needs a second click** ("Click again to cancel"), because cancelling an ADF run cannot be undone. |
+| Run logs | Filter form (Enter searches), expandable table rows with the AI analysis sections, and a "new runs finished" alert with Refresh. |
+| Anomalies | Kind filter as a segmented control; events and AI verdicts as readable lists with severity badges and metrics. |
+| Runtime predictions | Stat cards (predicted, confidence, history), and the range chart restyled with theme colours (predicted bar in the accent colour, tooltip on the surface colour); past-runs stats. |
+| **Resource agent** | Stats (sizing engine, runs recorded, accuracy, correction factors); re-allocation results in a dismissable card; the current run's allocations as a table (compute, memory, node, time, ML-sized / right-sized / contention badges) plus the execution groups; per-type accuracy cards; subscription limits from the API. |
+| **Performance agent** | Outcome banner, stat cards, stage forecast bars coloured by risk, prediction history as a table with ratio and check badges, and the method summary. |
+| **Cost agent** | Stats (cost, cheaper options, engine), streaming advice, breakdown including the learned correction, recommendations (change, saving, risk, reason, trade-off, new total), node rates and backend assumptions. |
+
+### Small fixes found while rebuilding
+
+- **Resource:** "Check live re-allocation" showed nothing when no ADF run was live (an empty list rendered no panel). It now says "No ADF runs are live right now — nothing to re-allocate."
+- **`KV` component:** it keyed rows by their label, and the Cost page's node-rate labels are elements, which gives duplicate keys. It now keys by index.
+
+### Verification
+
+- **Lint and build:** ESLint reports 0 problems, and `vite build` passes.
+- **Browser, every page against the live backend:** Overview; Resource, Performance and Cost; Monitor → Live, Run logs (76 rows), Anomalies (7) and Runtime predictions. None crashed, and no `console.error` was reported (React key warnings included), in dark and light.
+- **Real data shown:**
+  - **Resource:** run `b88bd9a0`'s allocations (copy 2 DIU; notebook 4 vCPU, 8 shuffle).
+  - **Performance:** the latest slowdown prediction.
+  - **Cost:** $0.0364 with the learned ×0.8644 correction.
+- **Capture artifact, not a bug:** some screenshots looked faded because the page's 0.18 s fade-in is paused while the tab is in the background; computed opacity was 1.
 
