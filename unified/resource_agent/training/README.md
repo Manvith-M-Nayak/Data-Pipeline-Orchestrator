@@ -4,7 +4,7 @@ The Resource Agent recommends the best compute **settings** for each pipeline st
 (`workers`, `DIU`, `peak memory`, `shuffle partitions`, `node type`) with a supervised
 regression model, falling back to a transparent heuristic when the model is absent.
 
-> Duration / runtime / SLA prediction is **not** here — it belongs to the Performance
+> Duration / runtime prediction is **not** here — it belongs to the Performance
 > Prediction Agent. See `../../docs/RESPONSIBILITIES.md`.
 
 ## Layout

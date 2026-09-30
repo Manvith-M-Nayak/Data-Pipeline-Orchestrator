@@ -9,7 +9,7 @@ The Performance Prediction Agent sits in **Phase 2 (pre-checks)** of the Central
 1. How long will this pipeline take in total?
 2. Which stage is the bottleneck?
 3. Will it succeed, slow down, or fail — and how confident are we?
-4. Will it breach the SLA target (default: 15 minutes)?
+4. Is it expected to run slower than this pipeline usually does (learned from its own past runs — there is no fixed time limit)?
 5. What is the expected throughput in MB/s?
 
 The agent has **two prediction paths**:
@@ -96,7 +96,9 @@ If `outcome == "failure"`, the Manager **aborts the run immediately** before tou
 - `class_probabilities` — all three class probabilities
 - `stage_forecasts` — per-stage durations distributed proportionally from the total prediction
 - `bottleneck_stage` — stage with highest proportional share
-- `sla_breach_risk` — `predicted_total_s > 900s`
+- `expected_duration_s` — p95 of this pipeline's last 20 comparable runs (same pipeline, completed, input size within 0.5–2×, no cost-accepted slowdown); `null` until 3 such runs exist
+- `slower_than_usual` — `predicted_total_s > expected_duration_s`
+- `max_acceptable_s` — ceiling the Cost agent may use: `min(prediction × 1.2, expected_duration_s)`, never below the prediction; `null` without history
 - `throughput_mb_per_s` — `file_size_mb / predicted_total_s` (None if file size unknown)
 - `prediction_source` — `"ml_model"` (tells dashboard which path ran)
 
@@ -207,8 +209,7 @@ Request:
 {
   "resource_plan": { ... },   // ResourceAgent.analyze() output
   "predictions":   { ... },   // state.predictions dict
-  "plan":          { ... },   // raw Planner plan
-  "sla_target_s":  900        // optional, default 900
+  "plan":          { ... }    // raw Planner plan
 }
 
 Response:
@@ -217,8 +218,11 @@ Response:
   "bottleneck_stage": "Transform_Bronze_To_Silver",
   "outcome": "success",
   "confidence": 0.86,
-  "sla_breach_risk": false,
-  "sla_target_s": 900,
+  "expected_duration_s": 214.0,
+  "expected_duration_basis": "history",
+  "expected_duration_runs": 7,
+  "slower_than_usual": false,
+  "max_acceptable_s": 214.0,
   "throughput_mb_per_s": 0.0,
   "throughput_rows_per_s": null,
   "stage_forecasts": [...],
@@ -243,7 +247,7 @@ On load makes two API calls:
 1. `GET /api/performance-prediction/history`
 2. `GET /api/manager/runs` → then `GET /api/manager/status/<latest_run_id>` to pull `performance_prediction` block
 
-Shows: outcome banner with rationale, 4 stat cards (runtime, outcome+confidence, SLA risk, adjustment factor), 2 throughput cards, per-stage bar chart with bottleneck tagged, key findings, prediction history table, and a "How Predictions Are Made" reference card.
+Shows: outcome banner with rationale, 4 stat cards (runtime, outcome+confidence, slower-than-usual, adjustment factor), 2 throughput cards, per-stage bar chart with bottleneck tagged, key findings, prediction history table, and a "How Predictions Are Made" reference card.
 
 The rationale text is the quickest way to tell which path ran:
 - `"ML model prediction (RandomForest classifier..."` → ML path ran
@@ -298,9 +302,9 @@ Right now `network_quality` defaults to 0.7 at inference. The Monitor Agent alre
 
 Check `models/metrics.json` spot-check value. If the spot-check prediction is still > 2× actual, the issue is that `baseline_s` (the Resource Agent's estimate) is too high — the ML model's strongest feature is `baseline_s` (importance ~0.91), so if the Resource Agent overestimates, the ML model will too. Fix: improve the Resource Agent's duration constants for your specific Azure tier.
 
-### To change SLA target
+### To tune the learned usual duration
 
-Pass `sla_target_s` when calling `predict_performance(state, sla_target_s=<value>)` in `manager.py`.
+Constants at the top of `performance_agent.py`: `EXPECTED_MIN_RUNS` (runs needed before a pipeline's usual duration is trusted), `EXPECTED_WINDOW`, `EXPECTED_SIZE_BAND` (what counts as a comparable input size) and `COST_SLOWDOWN_MARGIN` (the most extra runtime a cost saving may add).
 
 ### To change slowdown/failure thresholds (formula path)
 

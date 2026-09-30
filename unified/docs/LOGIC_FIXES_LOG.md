@@ -14,7 +14,8 @@ records:
 | 2 | Schema plumbing — get the real schema to every agent | H2, H3, H4 | Done |
 | 3 | Learning loops — what feeds the correction factors | H5, H6, M1, M2, M3, M9 | Done |
 | 4 | Execution — concurrent-run isolation, executor issues | H7, H8, M4, run-id collisions, retries | Done |
-| 5 | Frontend and the rest | M5, M6, M7, M8 (rest), remaining Low | Pending |
+| 5 | Learned expected duration — replaces the fixed time limit ("SLA") everywhere | design change (user request) | Done |
+| 6 | Frontend and the rest | M5, M6, M7, M8 (rest), remaining Low | Pending |
 
 ---
 
@@ -264,3 +265,78 @@ records:
   - The manager passes no deadline, so candidates that save money but run slower (e.g. DIU 2 → 1) are refused.
   - Passing the SLA target (900 s) as the deadline would enable those savings. That's a product decision, left for the user.
 - **Workers and node type** would need Databricks job clusters (`new_cluster`) instead of serverless or an existing cluster. That changes compute cost and workspace requirements, so it's out of scope for a logic fix.
+
+---
+
+## Stage 5 — Learned expected duration (the fixed "SLA" limit is removed)
+
+**Commit message:** `feat(performance): replace fixed SLA with a per-pipeline expected duration learned from past runs`
+
+### Why
+
+The project had two separate, unconnected "SLA" (time-limit) values:
+- **A hard-coded 900 s prediction target** (`DEFAULT_SLA_TARGET_S`; `manager.predict_performance(sla_target_s=900)`). It only drove an "SLA breach risk" warning, and it wasn't configurable for managed runs.
+- **An `SLA_SECONDS` env value for a `sla_breach` anomaly.** It was unset, so the anomaly never fired.
+
+One fixed limit makes no sense when pipelines range from 1 KB test files to 200 MB datasets. At the user's request, the concept was removed entirely and replaced by what each pipeline normally does.
+
+This stage also settles the open decision from stage 4: the Cost agent now gets a deadline, but a learned and bounded one.
+
+### Design
+
+`PerformancePredictionAgent._expected_duration(plan, predictions, predicted_total_s)`:
+
+- **Comparable runs:** same `pipeline_key`; `final_status == "completed"`; `executed`; input size within **0.5–2×** of this run's (a 10× bigger file is not "slow"); and **not** a run where the Cost agent accepted a slower configuration (`cost_slowdown_applied`).
+- **Expected duration** = 95th percentile of the last 20 comparable runs, needing at least 3 of them. Otherwise `expected_duration_basis = "insufficient_history"` and nothing is flagged.
+- **`slower_than_usual`** = prediction > expected duration.
+- **`max_acceptable_s`** (the Cost agent's ceiling) = `min(prediction × 1.2, expected)`, never below the prediction:
+  - at most +20% extra runtime;
+  - and only within the pipeline's usual range;
+  - `None` without history, so the Cost agent keeps its fail-closed "never trade runtime" default.
+- **Ratchet guard:** runs where the Cost agent accepted a slowdown are excluded from learning, so accepted slowdowns can't raise the target and permit bigger ones.
+
+### Changes
+
+| File | Change |
+|---|---|
+| `performance_prediction_agent/performance_agent.py` | **Removed:** `DEFAULT_SLA_TARGET_S`, the `sla_target_s` parameter, and the `sla_breach_risk` / `sla_target_s` output fields. **Added:** `_expected_duration()` and the constants `EXPECTED_MIN_RUNS`, `EXPECTED_WINDOW`, `EXPECTED_SIZE_BAND`, `COST_SLOWDOWN_MARGIN`. **Output fields:** `expected_duration_s`, `expected_duration_basis`, `expected_duration_runs`, `slower_than_usual`, `max_acceptable_s`. `predict()` wraps the ML/formula paths (now `_predict_core`) and adds these fields to every result. |
+| `performance_prediction_agent/router.py` | `sla_target_s` request field removed. |
+| `central_manager_agent/manager.py` | <ul><li>`predict_performance(state)` has no limit parameter, and logs "slower than usual (this pipeline normally takes ≤Xs)".</li><li>After the learning correction changes the prediction, the expected-duration fields are recomputed, so they describe the corrected number.</li><li>New `_cost_constraints(state)` → `{"deadline_s": max_acceptable_s}` or `{}`, used by `optimize_cost` and `auto_apply_cost_optimization`.</li><li>New `RunState.cost_slowdown_applied`, set when auto-apply lengthened any stage.</li><li>Feedback records `file_size_mb` and `cost_slowdown_applied`.</li></ul> |
+| `monitor_agent/services/anomaly_detector.py` | `sla_breach` kind and `_sla_seconds()` / `SLA_SECONDS` removed. `slow_runtime` already compares each run with its own pipeline's p95. |
+| `monitor_agent/routers/anomalies.py`, `services/db_service.py` | Kind list and comments updated. |
+| `frontend/src/pages/ManagerTab.jsx`, `RunInsights.jsx` | "SLA breach risk" → **"vs usual duration"**: `✔ within usual (≤Xs)` / `⚠ slower (usually ≤Xs)` / `still learning (n/3 runs)`; `—` for runs saved before this change. |
+| `frontend/src/pages/PerformancePredictionTab.jsx` | The runtime card shows "Usually ≤ X" (or "still learning"). The "SLA breach risk" card becomes **"Slower than usual"**. The reference table explains how the usual duration is learned. |
+| `frontend/src/pages/AnomaliesPage.jsx`, `api.js`, `ResourceTab.jsx` | `sla_breach` filter chip removed; `slaTargetS` argument removed; wording updated. |
+| Docs and comments | `unified/README.md` (the `SLA_SECONDS` row), `Performance_Prediction_Agent.md` (fields, API example, tuning section), `docs/RESPONSIBILITIES.md`, `PROJECT_STATUS_REPORT.md`, the teammate's `COST_MODEL_AUDIT.md` and `cost_optimization_agent/README.md` ("SLA validation" → "runtime validation"), Resource Agent comments, the Kaggle notebook note, and a `generate_cost_dataset.py` comment. |
+| `scripts/seed_anomalies.py` | The demo `sla_breach` event becomes a `slow_runtime` event. |
+
+**Deliberately left:** `Datasets/.../ORIGINAL_DATASETS_OVERVIEW.md` says the *external raw dataset* has "no SLA tiers". That describes third-party data, not a feature of this project. The earlier review and changelog docs mention SLA as history.
+
+### Verification
+
+- **`_expected_duration`**, with a temp feedback log:
+
+  | Case | Result |
+  |---|---|
+  | No history | `insufficient_history`, no verdict, no ceiling |
+  | 3 runs of 100 / 120 / 110 s, prediction 150 s | expected 120 s, **slower**, ceiling 150 (no slack: already above usual) |
+  | Same history, prediction 105 s | within usual, ceiling 120 |
+  | 3 runs on 10× bigger input | not comparable → insufficient |
+  | Plus 5 cost-slowed runs of 900 s | ignored (expected stays 120) |
+  | Failed/aborted runs; another pipeline's runs | ignored |
+
+- **Manager flow, mocked executor and temp logs:**
+  - First run (no history): the Cost agent gets `{}`, so no trade-offs.
+  - After 3 comparable runs (400/420/410 s): prediction 207 s, expected 420 s → Cost gets `{"deadline_s": 248.4}`, i.e. 207 × 1.2, within the usual range.
+  - A simulated slower pick sets `cost_slowdown_applied = True`, and the feedback records `file_size_mb` and `cost_slowdown_applied`.
+- **API:** `POST /api/performance-prediction/predict` works without the old field and returns no `sla*` keys.
+- **No SLA references are left** in project code or docs (repo-wide grep), apart from the history docs and the external dataset description.
+- **Regressions:**
+  - the integration test passes, and so do the teammate's 13 cost tests;
+  - `ruff` is clean, and the frontend builds;
+  - the backend has no tracebacks, and all 25 GET endpoints return 200.
+
+### Notes
+
+- **Cost savings become possible, but only after history exists.** A new pipeline needs 3 completed runs of similar input size first; until then the Cost agent stays fail-closed.
+- **No saved data changes.** Old saved runs still contain `sla_breach_risk`; the UI now ignores it.

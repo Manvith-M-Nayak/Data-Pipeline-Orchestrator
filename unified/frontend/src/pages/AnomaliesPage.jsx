@@ -17,7 +17,7 @@ const S = {
 };
 
 const KINDS = ["failure", "timeout", "retry_storm", "slow_runtime", "cold_start",
-               "zero_rows", "sla_breach", "cost_spike", "schema_drift"];
+               "zero_rows", "cost_spike", "schema_drift"];
 const SEVERITY_COLOR = { high: "#ef4444", medium: "#f97316", low: "#eab308" };
 
 function fmtSec(s) { if (!s) return "0s"; const m = Math.floor(s/60); return m > 0 ? `${m}m ${Math.round(s%60)}s` : `${Math.round(s)}s`; }

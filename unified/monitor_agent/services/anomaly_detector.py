@@ -15,7 +15,6 @@ Kinds detected here and the signal each uses:
     slow_runtime  duration > 1.2x the pipeline's historical p95 (needs >=3 runs)
     cold_start    slow_runtime AND >6h gap since the pipeline's previous run
     zero_rows     run succeeded but the final stage wrote 0 rows
-    sla_breach    duration > SLA_SECONDS (config, 0/unset disables)
     cost_spike    manager cost estimate > 2x the trailing average (needs >=3)
     schema_drift  input columns differ from the pipeline's last-seen columns
 
@@ -47,15 +46,6 @@ COLD_GAP_S = 6 * 3600
 SLOW_FACTOR = 1.2         # duration > p95 * this → slow_runtime
 COST_FACTOR = 2.0         # cost > trailing avg * this → cost_spike
 MIN_HISTORY = 3           # baseline runs needed before slow/cost verdicts
-
-
-def _sla_seconds() -> float:
-    """SLA target from env / config.py; 0 disables sla_breach detection."""
-    import settings
-    try:
-        return float(settings.get("SLA_SECONDS", "0"))
-    except ValueError:
-        return 0.0
 
 
 def _engine_name(result: Optional[Dict]) -> str:
@@ -218,14 +208,6 @@ async def detect_and_store(
                  f"({stats['p95']:.0f}s over {stats['count']} runs).",
                  {"duration_s": duration_s, "avg_s": stats["avg"],
                   "p95_s": stats["p95"], "count": stats["count"]})
-
-    # ── sla_breach ───────────────────────────────────────────────────────────
-    sla = _sla_seconds()
-    if sla > 0 and duration_s > sla:
-        _add("sla_breach", "high",
-             f"Ran {duration_s:.0f}s against an SLA of {sla:.0f}s "
-             f"({duration_s / sla:.2f}x the target).",
-             {"duration_s": duration_s, "sla_s": sla})
 
     # ── zero_rows ────────────────────────────────────────────────────────────
     rows_written = (result or {}).get("rows_written")

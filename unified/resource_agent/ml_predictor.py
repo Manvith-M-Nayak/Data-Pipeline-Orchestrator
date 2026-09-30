@@ -8,7 +8,7 @@ Mirrors the Performance Prediction Agent's ml_predictor pattern exactly:
               used whenever the bundle is missing or inference fails.
 
 The model recommends compute SETTINGS only (workers / DIU / peak memory /
-shuffle partitions / node type). Duration, runtime and SLA prediction live in
+shuffle partitions / node type). Duration and runtime prediction live in
 the Performance Prediction Agent — see docs/RESPONSIBILITIES.md.
 """
 

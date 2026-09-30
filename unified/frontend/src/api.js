@@ -107,7 +107,7 @@ export const resource = {
   modelInfo:         () => req("/resource/model-info"),
 };
 export const perfPrediction = {
-  predict: (resourcePlan, predictions, plan, slaTargetS = 900) =>
+  predict: (resourcePlan, predictions, plan) =>
     req("/performance-prediction/predict", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -115,7 +115,6 @@ export const perfPrediction = {
         resource_plan: resourcePlan,
         predictions,
         plan,
-        sla_target_s: slaTargetS,
       }),
     }),
   history: () => req("/performance-prediction/history"),

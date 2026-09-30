@@ -8,7 +8,7 @@ Sits one level above the Resource Agent: while the Resource Agent says
   - What is the total expected wall-clock runtime?
   - Which stage is the bottleneck?
   - Will this run succeed, slow down, or fail — and how confident are we?
-  - Will it breach the SLA (target time)?
+  - Is it expected to run slower than this pipeline usually does?
 
 Inputs (all already on RunState after Phase 2a):
   - resource_plan  : ResourceAgent.analyze() output (allocations, execution_groups,
@@ -23,8 +23,11 @@ Outputs (PerformancePrediction dataclass → serialised dict):
   - bottleneck_stage        : stage name most likely to be the slowest
   - outcome                 : "success" | "slowdown" | "failure"
   - confidence              : 0.0 – 1.0
-  - sla_breach_risk         : bool  (True if predicted_total_s > sla_target_s)
-  - sla_target_s            : the threshold used (default 900 s / 15 min)
+  - expected_duration_s     : how long THIS pipeline usually takes (p95 of its
+                              own comparable past runs), None until learned
+  - slower_than_usual       : bool  (predicted_total_s > expected_duration_s)
+  - expected_duration_basis : "history" | "insufficient_history"
+  - max_acceptable_s        : ceiling for cost trade-offs (None without history)
   - stage_forecasts         : per-stage {name, predicted_s, risk_level}
   - history_runs_used       : how many historical records informed this prediction
   - adjustment_factor       : multiplier derived from history (1.0 = no correction)
@@ -48,7 +51,13 @@ _DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 _FEEDBACK_LOG = os.path.join(_DATA_DIR, "manager_feedback.jsonl")
 
 # ── Tuneable constants ────────────────────────────────────────────────────────
-DEFAULT_SLA_TARGET_S = 900          # 15 min — matches student-tier expectations
+# ── Learned expected duration (no fixed time limit) ─────────────────────────
+# A pipeline's normal duration is learned from its own executed runs; there is
+# no global deadline. See _expected_duration().
+EXPECTED_MIN_RUNS     = 3           # comparable past runs needed to learn a target
+EXPECTED_WINDOW       = 20          # most recent comparable runs considered
+EXPECTED_SIZE_BAND    = (0.5, 2.0)  # "comparable" = input size within this ratio
+COST_SLOWDOWN_MARGIN  = 1.2         # cost trade-offs: at most +20% over the prediction
 SLOWDOWN_RATIO       = 1.6          # predicted > 1.6× baseline → "slowdown"
 FAILURE_RATIO        = 3.0          # predicted > 3.0× baseline → "failure"
 MIN_HISTORY_FOR_ML   = 5            # need at least this many runs before using history
@@ -72,8 +81,6 @@ class PerformancePrediction:
     bottleneck_stage:     str
     outcome:              str            # "success" | "slowdown" | "failure"
     confidence:           float          # 0.0 – 1.0
-    sla_breach_risk:      bool
-    sla_target_s:         int
     stage_forecasts:      List[StageForecast]
     history_runs_used:    int
     adjustment_factor:    float
@@ -91,11 +98,18 @@ class PerformancePredictionAgent:
         resource_plan: dict,
         predictions:   dict,
         plan:          dict,
-        sla_target_s:  int = DEFAULT_SLA_TARGET_S,
     ) -> dict:
         """
         Main prediction entry point. Called by the Central Manager during Phase 2.
+        Every result carries the learned expected duration (see
+        _expected_duration) — the ML and formula paths below only predict.
+        """
+        result = self._predict_core(resource_plan, predictions, plan)
+        result.update(self._expected_duration(plan, predictions, result.get("predicted_total_s") or 0))
+        return result
 
+    def _predict_core(self, resource_plan: dict, predictions: dict, plan: dict) -> dict:
+        """
         Primary path:  trained ML model (RandomForest + GradientBoosting),
                        loaded locally from performance_prediction_agent/models/.
         Fallback path: transparent formula (critical path + history damping),
@@ -106,13 +120,13 @@ class PerformancePredictionAgent:
         execution_groups = resource_plan.get("execution_groups", [])
 
         if not allocations:
-            return self._empty_prediction("No allocations in resource plan", sla_target_s)
+            return self._empty_prediction("No allocations in resource plan")
 
         # ── Try ML model first ──────────────────────────────────────────
         try:
             ml_result = MLPredictor.predict(resource_plan, predictions, plan)
             return self._build_ml_response(
-                ml_result, allocations, resource_plan, predictions, sla_target_s
+                ml_result, allocations, resource_plan, predictions
             )
         except MLNotAvailable as exc:
             # Falls through to the formula below — this is expected and
@@ -178,13 +192,10 @@ class PerformancePredictionAgent:
             if predicted_total_s > 0 and row_count > 0
             else None
         )
-        # ── 7. SLA breach check ───────────────────────────────────────────
-        sla_breach = predicted_total_s > sla_target_s
-
-        # ── 8. Build rationale ────────────────────────────────────────────
+        # ── 7. Build rationale ────────────────────────────────────────────
         rationale = self._build_rationale(
             baseline_s, adj_factor, predicted_total_s, bottleneck,
-            outcome, confidence, history_used, sla_breach, sla_target_s,
+            outcome, confidence, history_used,
             resource_plan.get("correction_factors", {}),
         )
 
@@ -193,8 +204,6 @@ class PerformancePredictionAgent:
             bottleneck_stage=bottleneck,
             outcome=outcome,
             confidence=round(confidence, 3),
-            sla_breach_risk=sla_breach,
-            sla_target_s=sla_target_s,
             stage_forecasts=stage_forecasts,
             history_runs_used=history_used,
             adjustment_factor=round(adj_factor, 3),
@@ -205,6 +214,60 @@ class PerformancePredictionAgent:
         d = asdict(result)
         d["prediction_source"] = "formula"
         return d
+
+    def _expected_duration(self, plan: dict, predictions: dict, predicted_total_s: float) -> dict:
+        """How long this pipeline normally takes, learned from its own runs.
+
+        Comparable runs: same pipeline_key, the pipeline actually executed and
+        completed, input size within EXPECTED_SIZE_BAND of this run (a 10x
+        bigger file is not "slow"), and the Cost agent did not deliberately
+        trade runtime for money on that run — otherwise every accepted
+        slowdown would raise the target and allow the next one (ratchet).
+
+        expected_duration_s = p95 of the last EXPECTED_WINDOW comparable runs.
+        max_acceptable_s    = the most the Cost agent may let this run take:
+                              min(prediction × COST_SLOWDOWN_MARGIN, expected),
+                              never below the prediction itself.
+        Without EXPECTED_MIN_RUNS comparable runs nothing is learned yet:
+        no "slower than usual" verdict and no room for cost trade-offs.
+        """
+        out = {
+            "expected_duration_s": None,
+            "expected_duration_basis": "insufficient_history",
+            "expected_duration_runs": 0,
+            "slower_than_usual": False,
+            "max_acceptable_s": None,
+        }
+        key = self._pipeline_key(plan)
+        if not key or predicted_total_s <= 0:
+            return out
+        size_mb = float(predictions.get("file_size_mb") or 0)
+        lo, hi = EXPECTED_SIZE_BAND
+        durations = []
+        for r in self._load_feedback():
+            if (r.get("pipeline_key") != key or r.get("final_status") != "completed"
+                    or not r.get("executed") or r.get("cost_slowdown_applied")):
+                continue
+            prev_mb = r.get("file_size_mb")
+            if size_mb > 0 and prev_mb and not (lo <= prev_mb / size_mb <= hi):
+                continue
+            if (r.get("actual_duration_s") or 0) > 0:
+                durations.append(float(r["actual_duration_s"]))
+        durations = durations[-EXPECTED_WINDOW:]
+        out["expected_duration_runs"] = len(durations)
+        if len(durations) < EXPECTED_MIN_RUNS:
+            return out
+        d = sorted(durations)
+        expected = d[min(int(len(d) * 0.95), len(d) - 1)]
+        out.update({
+            "expected_duration_s": round(expected, 1),
+            "expected_duration_basis": "history",
+            "slower_than_usual": predicted_total_s > expected,
+            "max_acceptable_s": round(
+                max(predicted_total_s, min(predicted_total_s * COST_SLOWDOWN_MARGIN, expected)), 1
+            ),
+        })
+        return out
 
     @staticmethod
     def _pipeline_key(plan: dict):
@@ -222,7 +285,6 @@ class PerformancePredictionAgent:
         allocations: List[dict],
         resource_plan: dict,
         predictions: dict,
-        sla_target_s: int,
     ) -> dict:
         """
         Wraps the ML model's two predictions (predicted_total_s, outcome)
@@ -267,8 +329,6 @@ class PerformancePredictionAgent:
         for f in stage_forecasts:
             f.is_bottleneck = (f.name == bottleneck)
 
-        sla_breach = predicted_total_s > sla_target_s
-
         file_size_mb = predictions.get("file_size_mb", 0) or 0
         throughput_mb_per_s = (
             round(file_size_mb / predicted_total_s, 3)
@@ -285,16 +345,12 @@ class PerformancePredictionAgent:
             f"Class probabilities: {proba_str}. "
             f"Bottleneck stage (proportionally distributed): '{bottleneck}'."
         )
-        if sla_breach:
-            rationale += f" SLA BREACH RISK: predicted {predicted_total_s}s > target {sla_target_s}s."
 
         result = PerformancePrediction(
             predicted_total_s=predicted_total_s,
             bottleneck_stage=bottleneck,
             outcome=outcome,
             confidence=confidence,
-            sla_breach_risk=sla_breach,
-            sla_target_s=sla_target_s,
             stage_forecasts=stage_forecasts,
             history_runs_used=0,   # ML doesn't use the jsonl history directly
             adjustment_factor=1.0, # not applicable to the ML path
@@ -501,8 +557,6 @@ class PerformancePredictionAgent:
         outcome:           str,
         confidence:        float,
         history_used:      int,
-        sla_breach:        bool,
-        sla_target_s:      int,
         correction_factors: dict,
     ) -> str:
         parts = [
@@ -513,11 +567,6 @@ class PerformancePredictionAgent:
             f"Bottleneck stage: '{bottleneck}'.",
             f"Outcome: {outcome.upper()} (confidence {confidence:.0%}).",
         ]
-        if sla_breach:
-            parts.append(
-                f"SLA BREACH RISK: predicted {predicted_total_s}s > "
-                f"target {sla_target_s}s."
-            )
         if correction_factors:
             cf_str = ", ".join(f"{k}={v:.3f}" for k, v in correction_factors.items())
             parts.append(f"Resource Agent correction factors: {cf_str}.")
@@ -529,14 +578,12 @@ class PerformancePredictionAgent:
         return " ".join(parts)
 
     # ── Empty fallback ────────────────────────────────────────────────────────
-    def _empty_prediction(self, reason: str, sla_target_s: int) -> dict:
+    def _empty_prediction(self, reason: str) -> dict:
         return asdict(PerformancePrediction(
             predicted_total_s=0,
             bottleneck_stage="unknown",
             outcome="unknown",
             confidence=0.0,
-            sla_breach_risk=False,
-            sla_target_s=sla_target_s,
             stage_forecasts=[],
             history_runs_used=0,
             adjustment_factor=1.0,

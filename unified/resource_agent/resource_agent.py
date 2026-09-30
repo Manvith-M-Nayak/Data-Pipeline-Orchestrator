@@ -3,7 +3,7 @@ Resource Agent — owns RESOURCE MANAGEMENT for the pipeline.
 
 Given a plan + its data, it recommends the compute SETTINGS every stage should
 run with and guarantees they fit the student-tier hard limits. It deliberately
-does NOT own runtime / SLA / outcome prediction — that is the Performance
+does NOT own runtime / outcome prediction — that is the Performance
 Prediction Agent's job (see docs/RESPONSIBILITIES.md). The per-stage `duration_s`
 fields here are an INTERNAL sizing aid only (used to compare allocation options
 and to drive mid-run reallocation); they are never the plan's authoritative
@@ -94,7 +94,7 @@ class StageRequirements:
     estimated_workers: int          # Databricks workers (0 = driver-only), clamped to MAX_WORKERS
     estimated_diu:     int          # ADF DIU (copy stages only), clamped to MAX_DIU
     estimated_duration_s: int       # INTERNAL sizing aid only — NOT the plan's
-                                    # runtime. Runtime/SLA is owned by the
+                                    # runtime. Runtime is owned by the
                                     # Performance Prediction Agent (see docs/RESPONSIBILITIES.md).
     confidence:        float        # 0–1 based on data richness
     rationale:         str          # human-readable reasoning

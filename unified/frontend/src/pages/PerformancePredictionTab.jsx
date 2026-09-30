@@ -139,7 +139,8 @@ function PredictionStats({ pred }) {
   if (!pred) return null;
   const outcomeColor = OUTCOME_COLOR[pred.outcome] || "#64748b";
   const confPct      = Math.round((pred.confidence || 0) * 100);
-  const slaColor     = pred.sla_breach_risk ? "#f87171" : "#4ade80";
+  const learned      = pred.expected_duration_basis === "history";
+  const usualColor   = !learned ? "#94a3b8" : pred.slower_than_usual ? "#f87171" : "#4ade80";
 
   const throughputVal = pred.throughput_mb_per_s != null
     ? `${pred.throughput_mb_per_s} MB/s`
@@ -159,7 +160,7 @@ function PredictionStats({ pred }) {
         <StatCard
           label="Predicted total runtime"
           value={fmtSeconds(pred.predicted_total_s)}
-          sub={`SLA target: ${fmtSeconds(pred.sla_target_s)}`}
+          sub={learned ? `Usually ≤ ${fmtSeconds(pred.expected_duration_s)}` : "Usual duration: still learning"}
           Icon={Clock}
           color="#38bdf8"
         />
@@ -171,11 +172,15 @@ function PredictionStats({ pred }) {
           color={outcomeColor}
         />
         <StatCard
-          label="SLA breach risk"
-          value={pred.sla_breach_risk ? "Yes" : "No"}
-          sub={pred.sla_breach_risk ? "Predicted to exceed target time" : "Within target time"}
+          label="Slower than usual"
+          value={!learned ? "—" : pred.slower_than_usual ? "Yes" : "No"}
+          sub={!learned
+            ? `Learning from this pipeline's runs (${pred.expected_duration_runs || 0}/3)`
+            : pred.slower_than_usual
+            ? "Predicted slower than this pipeline normally runs"
+            : "Within this pipeline's normal duration"}
           Icon={Target}
-          color={slaColor}
+          color={usualColor}
         />
         <StatCard
           label="Adjustment factor"
@@ -480,8 +485,8 @@ export default function PerformancePredictionTab() {
             <span style={S.kvVal}>≥ 3.0× resource estimate or &gt;50% historical failure rate</span>
           </div>
           <div style={{ ...S.kvRow, borderBottom: "none" }}>
-            <span>SLA target</span>
-            <span style={S.kvVal}>900s (15 min) — student tier default</span>
+            <span>Usual duration</span>
+            <span style={S.kvVal}>Learned per pipeline — p95 of its last 20 comparable runs (similar input size); cost savings may add at most 20%</span>
           </div>
         </div>
       </div>

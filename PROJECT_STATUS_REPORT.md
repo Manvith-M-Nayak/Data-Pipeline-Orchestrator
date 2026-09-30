@@ -160,7 +160,7 @@ What it does, end to end:
 - **What:** forecasts whole-plan runtime, throughput, and likely outcome
   (success / slowdown / failure) *before* the plan runs.
 - **Distinct from Resource Agent:** the Resource Agent says "*this allocation* will take ~X min";
-  the Performance Agent reasons about the *plan as a whole*: bottleneck stages, SLA breaches,
+  the Performance Agent reasons about the *plan as a whole*: bottleneck stages, runs slower than the pipeline's usual duration,
   failure risk.
 - **Why now:** the natural next link in the chain. It consumes the Resource Agent's allocation
   estimates and is unblocked by the real execution data the Executor + Monitor are already

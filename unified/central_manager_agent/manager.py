@@ -69,6 +69,10 @@ class RunState:
     execution_s: Optional[float] = None
     # Resource settings the Executor actually received (see _execution_plan).
     execution_settings: dict = field(default_factory=dict)
+    # True when cost auto-apply accepted a configuration predicted to run
+    # slower than the original plan. Such runs are excluded when learning a
+    # pipeline's expected duration, so accepted slowdowns can't ratchet it up.
+    cost_slowdown_applied: bool = False
     decisions: List[Dict[str, Any]] = field(default_factory=list)
     retries: int = 0
     started_at: str = ""
@@ -168,6 +172,15 @@ class CentralManager:
             "info",
         )
         return plan
+
+    @staticmethod
+    def _cost_constraints(state: RunState) -> dict:
+        """How much slower the Cost agent may make this run: the learned
+        ceiling from the Performance agent (at most +20% over the prediction
+        and within this pipeline's usual duration). No history → no deadline,
+        so the Cost agent never trades runtime (its fail-closed default)."""
+        ceiling = state.performance_prediction.get("max_acceptable_s")
+        return {"deadline_s": ceiling} if ceiling else {}
 
     @staticmethod
     def _agent_plan(state: RunState) -> dict:
@@ -501,11 +514,7 @@ class CentralManager:
     # ────────────────────────────────────────────────────────────────────────
     # Phase 2b.5 — Performance prediction (via Performance Prediction Agent)
     # ────────────────────────────────────────────────────────────────────────
-    def predict_performance(
-        self,
-        state: "RunState",
-        sla_target_s: int = 900,
-    ) -> dict:
+    def predict_performance(self, state: "RunState") -> dict:
         """
         Calls the PerformancePredictionAgent with the already-populated
         state.resource_plan and state.predictions (set by predict_resources).
@@ -523,7 +532,6 @@ class CentralManager:
             resource_plan=state.resource_plan,
             predictions=state.predictions,
             plan=self._agent_plan(state),
-            sla_target_s=sla_target_s,
         )
 
         # ── Learning & Policy Update Agent: apply the learned duration ──────
@@ -552,6 +560,14 @@ class CentralManager:
                         1, round(result["predicted_total_s"] * factor)
                     )
                     result["learning_correction_applied"] = factor
+                    # "slower than usual" and the cost ceiling must describe
+                    # the corrected prediction the rest of the run uses.
+                    result.update(
+                        PerformancePredictionAgent()._expected_duration(
+                            self._agent_plan(state), state.predictions,
+                            result["predicted_total_s"],
+                        )
+                    )
         except Exception as exc:
             self._log(
                 state,
@@ -576,12 +592,16 @@ class CentralManager:
         total_s = result.get("predicted_total_s", 0)
         bottleneck = result.get("bottleneck_stage", "?")
         confidence = result.get("confidence", 0.0)
-        sla_risk = result.get("sla_breach_risk", False)
+        slower = result.get("slower_than_usual", False)
+        slower_note = (
+            f"  ⚠ slower than usual (this pipeline normally takes ≤{result.get('expected_duration_s')}s)"
+            if slower else ""
+        )
 
         level = "ok"
         if outcome == "failure":
             level = "error"
-        elif outcome == "slowdown" or sla_risk:
+        elif outcome == "slowdown" or slower:
             level = "warn"
 
         correction_note = ""
@@ -595,7 +615,8 @@ class CentralManager:
             state,
             "PERF PREDICT",
             f"outcome={outcome} · total={total_s}s · bottleneck='{bottleneck}' · "
-            f"confidence={confidence:.0%}{'  ⚠ SLA BREACH RISK' if sla_risk else ''}"
+            f"confidence={confidence:.0%}"
+            f"{slower_note}"
             f"{correction_note}",
             f"history_runs_used={result.get('history_runs_used', 0)} · "
             f"adj_factor={result.get('adjustment_factor', 1.0):.3f}",
@@ -750,6 +771,8 @@ class CentralManager:
         """
         from cost_optimization_agent import CostOptimizationAgent
 
+        if constraints is None:
+            constraints = self._cost_constraints(state)
         result = CostOptimizationAgent().optimize(
             plan=self._agent_plan(state),
             performance_prediction=state.performance_prediction,
@@ -838,7 +861,8 @@ class CentralManager:
 
         Returns True if the resource_plan was modified.
         """
-        constraints = constraints or {}
+        if constraints is None:
+            constraints = self._cost_constraints(state)
         if not constraints.get("auto_apply_cost", True):
             self._log(
                 state, "COST AUTO-APPLY", "disabled by constraint", "skipped", "info"
@@ -858,6 +882,11 @@ class CentralManager:
         )
 
         state.resource_plan = modified_rp
+        old_dur = {a.get("stage_name"): a.get("duration_s", 0) for a in original_alloc}
+        state.cost_slowdown_applied = any(
+            (a.get("duration_s") or 0) > (old_dur.get(a.get("stage_name")) or 0)
+            for a in modified_rp.get("allocations", [])
+        )
 
         new_peak = modified_rp.get("peak_concurrent_workers", 0)
         changed = (
@@ -1156,6 +1185,9 @@ class CentralManager:
                 "final_status": outcome,
                 "total_elapsed_s": round(total_elapsed_s, 1),
                 "executed": state.execution_s is not None,
+                # inputs to the learned expected duration (Performance agent)
+                "file_size_mb": state.predictions.get("file_size_mb"),
+                "cost_slowdown_applied": state.cost_slowdown_applied,
                 # per-pipeline identity (same key the anomaly detector uses)
                 # so history-based checks compare like with like
                 "pipeline_key": self._pipeline_key(state),

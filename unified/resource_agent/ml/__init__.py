@@ -13,6 +13,6 @@ This package holds the supervised-regression pieces:
                       (job_runs, pipeline_runs, queries, dbquery_statistics,
                       utilization) that ground the synthetic label generator.
 
-Duration / runtime / SLA prediction deliberately lives in the Performance
+Duration / runtime prediction deliberately lives in the Performance
 Prediction Agent, not here — see docs/RESPONSIBILITIES.md.
 """

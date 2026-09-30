@@ -387,11 +387,24 @@ function ContextCard({ request, setRequest, disabled, detectedSchema, savedPlan 
   );
 }
 
+// How this run compares with the pipeline's own history (learned per pipeline,
+// no fixed time limit). Older runs saved before this existed show "—".
+function usualDuration(p) {
+  if (!p || p.expected_duration_basis === undefined) return { label: "—", ok: true };
+  if (p.expected_duration_basis !== "history") {
+    return { label: `still learning (${p.expected_duration_runs || 0}/3 runs)`, ok: true };
+  }
+  return p.slower_than_usual
+    ? { label: `⚠ slower (usually ≤${Math.round(p.expected_duration_s)}s)`, ok: false }
+    : { label: `✔ within usual (≤${Math.round(p.expected_duration_s)}s)`, ok: true };
+}
+
 // Performance prediction (gap in the hub view — computed by the manager but
 // not previously surfaced).
 function PerformancePredictionCard({ perf }) {
   if (!perf || !perf.outcome) return null;
-  const ok = perf.outcome === "success" && !perf.sla_breach_risk;
+  const usual = usualDuration(perf);
+  const ok = perf.outcome === "success" && usual.ok;
   return (
     <div style={S.card}>
       <div style={S.cardHdr}>
@@ -403,8 +416,8 @@ function PerformancePredictionCard({ perf }) {
         <div style={S.kvRow}><span>Bottleneck stage</span><span style={S.kvVal}>{perf.bottleneck_stage || "—"}</span></div>
         <div style={S.kvRow}><span>Confidence</span><span style={S.kvVal}>{Math.round((perf.confidence || 0) * 100)}%</span></div>
         <div style={S.kvRow}>
-          <span>SLA breach risk</span>
-          <span style={S.kvVal}><span style={S.chip(!perf.sla_breach_risk)}>{perf.sla_breach_risk ? "⚠ at risk" : "✔ ok"}</span></span>
+          <span>vs usual duration</span>
+          <span style={S.kvVal}><span style={S.chip(usual.ok)}>{usual.label}</span></span>
         </div>
         {perf.history_runs_used !== undefined && (
           <div style={S.kvRow}><span>History runs used</span><span style={S.kvVal}>{perf.history_runs_used}</span></div>

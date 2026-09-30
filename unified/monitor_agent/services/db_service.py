@@ -90,7 +90,7 @@ class DBService:
                 )
             """)
             # Real-time anomaly events: one row per detected anomaly KIND per
-            # run (a run can raise several — e.g. slow_runtime + sla_breach).
+            # run (a run can raise several — e.g. slow_runtime + cost_spike).
             # Written by monitor_agent/services/anomaly_detector.py.
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS anomaly_events (

@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Any, Dict
 
-from .performance_agent import PerformancePredictionAgent, DEFAULT_SLA_TARGET_S
+from .performance_agent import PerformancePredictionAgent
 
 router = APIRouter()
 _agent = PerformancePredictionAgent()
@@ -21,7 +21,6 @@ class PredictRequest(BaseModel):
     resource_plan: Dict[str, Any]
     predictions:   Dict[str, Any]           # Manager's state.predictions dict
     plan:          Dict[str, Any]           # raw Planner plan
-    sla_target_s:  int = DEFAULT_SLA_TARGET_S
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -31,7 +30,8 @@ def predict(req: PredictRequest):
     Full performance prediction for a plan.
 
     Call after ResourceAgent.analyze() has run (i.e. resource_plan is populated).
-    Returns predicted_total_s, bottleneck_stage, outcome, confidence, sla_breach_risk,
+    Returns predicted_total_s, bottleneck_stage, outcome, confidence,
+    expected_duration_s / slower_than_usual (learned from this pipeline's own runs),
     per-stage forecasts, and a plain-English rationale.
     """
     if not req.resource_plan.get("allocations"):
@@ -43,7 +43,6 @@ def predict(req: PredictRequest):
         resource_plan=req.resource_plan,
         predictions=req.predictions,
         plan=req.plan,
-        sla_target_s=req.sla_target_s,
     )
 
 

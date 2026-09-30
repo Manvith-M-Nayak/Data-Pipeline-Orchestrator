@@ -48,6 +48,18 @@ const S = {
   },
 };
 
+// How this run compares with the pipeline's own history (learned per pipeline,
+// no fixed time limit). Older runs saved before this existed show "—".
+function usualDuration(p) {
+  if (!p || p.expected_duration_basis === undefined) return { label: "—", ok: true };
+  if (p.expected_duration_basis !== "history") {
+    return { label: `still learning (${p.expected_duration_runs || 0}/3 runs)`, ok: true };
+  }
+  return p.slower_than_usual
+    ? { label: `⚠ slower (usually ≤${Math.round(p.expected_duration_s)}s)`, ok: false }
+    : { label: `✔ within usual (≤${Math.round(p.expected_duration_s)}s)`, ok: true };
+}
+
 function fmtSec(s) {
   if (!s) return "0s";
   const m = Math.floor(s / 60);
@@ -290,7 +302,7 @@ function RunDetail({ runId, onBack }) {
                 <div style={S.kvRow}><span>Predicted total</span><span style={S.kvVal}>~{data.performance_prediction.predicted_total_s}s</span></div>
                 <div style={S.kvRow}><span>Bottleneck</span><span style={S.kvVal}>{data.performance_prediction.bottleneck_stage || "—"}</span></div>
                 <div style={S.kvRow}><span>Confidence</span><span style={S.kvVal}>{Math.round((data.performance_prediction.confidence || 0) * 100)}%</span></div>
-                <div style={S.kvRow}><span>SLA breach risk</span><span style={S.kvVal}><span style={S.chip(!data.performance_prediction.sla_breach_risk)}>{data.performance_prediction.sla_breach_risk ? "⚠ at risk" : "✔ ok"}</span></span></div>
+                <div style={S.kvRow}><span>vs usual duration</span><span style={S.kvVal}><span style={S.chip(usualDuration(data.performance_prediction).ok)}>{usualDuration(data.performance_prediction).label}</span></span></div>
                 {data.performance_prediction.prediction_source && (
                   <div style={S.kvRow}><span>Source</span><span style={S.kvVal}>{data.performance_prediction.prediction_source}</span></div>
                 )}

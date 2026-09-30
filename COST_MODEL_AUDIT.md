@@ -1,6 +1,6 @@
 # Cost model audit — 2026-09-29
 
-**Historical findings below describe the pre-fix model.** A subsequent safety rebuild added deadline features, corrected copy labels/pricing, excluded infeasible training cases, retrained on 30,000 rows, and made public optimization fail closed. All 12 tests in test_cost_model_safety.py pass. cost_model_audit_results.json now contains the post-fix audit on 5,000 independent synthetic examples (seed 20260930). Worker R² is 0.9616, DIU R² 0.9925, memory R² 0.9713, shuffle R² 0.9784 and node balanced accuracy 0.9939. The former deadline violation is rejected, empty plans return no recommendations, node prices affect cost, and copy-only plans no longer incur notebook charges. Real billing/production SLA validation remains outstanding.
+**Historical findings below describe the pre-fix model.** A subsequent safety rebuild added deadline features, corrected copy labels/pricing, excluded infeasible training cases, retrained on 30,000 rows, and made public optimization fail closed. All 12 tests in test_cost_model_safety.py pass. cost_model_audit_results.json now contains the post-fix audit on 5,000 independent synthetic examples (seed 20260930). Worker R² is 0.9616, DIU R² 0.9925, memory R² 0.9713, shuffle R² 0.9784 and node balanced accuracy 0.9939. The former deadline violation is rejected, empty plans return no recommendations, node prices affect cost, and copy-only plans no longer incur notebook charges. Real billing/production runtime validation remains outstanding.
 
 Final safety verification: **13 regression tests passed** after adding a missing-workload guard. The broader pipeline integration test stopped at missing FastAPI in the isolated environment. No cloud execution was performed.
 
@@ -10,7 +10,7 @@ Original audit of the existing cost_models.pkl, before retraining or changing ag
 
 - Default Python (NumPy 1.26.4, sklearn 1.7.0) could not deserialize the bundle: PCG64 BitGenerator error. An isolated environment with NumPy 2.2.6 and sklearn 1.6.1 loaded it successfully. The requirements pin sklearn but allow NumPy 1.26, which was insufficient for this artifact in the tested environment.
 - Bundle metadata: sklearn 1.6.1, 200,001 training rows, expected 16 features.
-- Evaluated 5,002 fresh synthetic stages from the repository generator, seed 20260929. These are not real production workloads; accuracy measures agreement with the synthetic generator, not actual cost savings or SLA compliance.
+- Evaluated 5,002 fresh synthetic stages from the repository generator, seed 20260929. These are not real production workloads; accuracy measures agreement with the synthetic generator, not actual cost savings or runtime compliance.
 
 | Target | Fresh MAE | Fresh R² |
 |---|---:|---:|
@@ -29,7 +29,7 @@ Node balanced accuracy: 98.96%. Worker accuracy after rounding both predictions 
 4. **High: savings are not recalculated against changed runtime and node allocation.** Reducing workers leaves duration unchanged; `_estimate_cost` reads node type from plan recommended settings instead of allocation node types. Changing only the allocation from D8s_v3 to DS2_v2 produced exactly the same estimated cost (0.230833). Copy-only plans were also charged notebook compute and DBUs (0.092083 for 300 seconds, besides the ADF fee).
 5. **Medium: empty allocations crash when ML is available.** `optimize({}, {}, {})` raised `ValueError: max() iterable argument is empty` in the ML suggestion path.
 6. **Medium: copy training cannot optimize DIU meaningfully.** Its labeler loops over DIU but passes zero to the duration function, uses constant copy cost, and never checks the copy deadline. It selects DIU 1 before adding noise.
-7. **Medium: reported validation is misleading.** README claims perfect worker/DIU metrics, unlike both saved metrics and this audit. The trainer compares rounded worker/DIU predictions with unrounded Gaussian-noisy labels for its exact-match metric, explaining misleadingly low saved exact-match scores. Small train/test gaps do not demonstrate SLA safety.
+7. **Medium: reported validation is misleading.** README claims perfect worker/DIU metrics, unlike both saved metrics and this audit. The trainer compares rounded worker/DIU predictions with unrounded Gaussian-noisy labels for its exact-match metric, explaining misleadingly low saved exact-match scores. Small train/test gaps do not demonstrate runtime safety.
 
 ## Recommended next steps
 

@@ -9,7 +9,7 @@ combos.
 The label minimizes dollar cost subject to finishing within a per-stage deadline.
 Without a deadline constraint, the cheapest node always wins (cost is invariant
 to worker count).  Deadlines create realistic diversity: large datasets with
-tight SLAs need bigger/faster nodes.
+tight deadlines need bigger/faster nodes.
 
 Usage:
     python -m cost_optimization_agent.training.generate_cost_dataset --rows 200000

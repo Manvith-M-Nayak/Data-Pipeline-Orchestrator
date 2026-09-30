@@ -16,5 +16,5 @@ async def get_anomaly_events(
 ):
     """Real-time classified anomaly events (anomaly_detector.py) — one row per
     detected KIND per run: failure, timeout, retry_storm, slow_runtime,
-    cold_start, zero_rows, sla_breach, cost_spike, schema_drift."""
+    cold_start, zero_rows, cost_spike, schema_drift."""
     return await get_db().get_anomaly_events(kind=kind, limit=limit)

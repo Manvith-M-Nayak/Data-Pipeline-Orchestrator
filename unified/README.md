@@ -34,7 +34,6 @@ Settings resolve **environment / `.env` → legacy `config.py` → default** (`s
 | `AZURE_*`, `DATABRICKS_*` | Cloud credentials. The storage key reaches Databricks jobs through the secret scope `DATABRICKS_SECRET_SCOPE`, never as a job parameter. |
 | `GROQ_API_KEY`, `GROQ_MODEL` | Monitor AI analysis and the Groq planner fallback (default model `openai/gpt-oss-120b`). |
 | `PLANNER_BACKEND`, `OLLAMA_HOST`, `PLANNER_MODEL`, `OLLAMA_AUTOSTART` | Planner LLM. `OLLAMA_AUTOSTART=0` stops the backend from launching Ollama. |
-| `SLA_SECONDS` | Enables the `sla_breach` anomaly (0 = off). |
 | `DOWNLOAD_CONTAINER_ALLOWLIST`, `MAX_UPLOAD_BYTES`, `ALLOWED_ORIGINS` | Download / upload / CORS limits. |
 
 ## Layout

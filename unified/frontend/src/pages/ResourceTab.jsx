@@ -305,7 +305,7 @@ export default function ResourceTab() {
       <div style={S.sub}>
         Recommends right-sized compute settings (workers, DIU, memory, shuffle, node) per
         stage via a supervised model, resolves contention, enforces student-tier limits,
-        and self-corrects from historical run data. Runtime &amp; SLA forecasting is owned by
+        and self-corrects from historical run data. Runtime forecasting is owned by
         the Performance Prediction Agent.
       </div>
 

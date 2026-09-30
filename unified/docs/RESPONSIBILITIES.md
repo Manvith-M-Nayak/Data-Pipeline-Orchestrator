@@ -27,7 +27,7 @@ booleans the owners return (feasible / assured / outcome).
 | **Compute settings per stage** (workers, DIU, peak memory, shuffle partitions, node type) | **Resource Agent** | Performance, Executor, Manager, UI |
 | Plan fits the student-tier hard limits (feasibility) | **Resource Agent** | Manager (hard gate) |
 | Mid-run compute re-allocation from live telemetry | **Resource Agent** (`dynamic_reallocate`) | Manager, Monitor UI |
-| **Total runtime / bottleneck / SLA / success-or-fail outcome** | **Performance Prediction Agent** | Manager (hard gate on `outcome == "failure"`) |
+| **Total runtime / bottleneck / slower-than-usual / success-or-fail outcome** | **Performance Prediction Agent** | Manager (hard gate on `outcome == "failure"`) |
 | $ cost estimate | **Central Manager** (`estimate_cost`) | UI, Cost Optimization |
 | Cost optimization suggestions (downsize, off-peak, merge, tune) | **Cost Optimization Agent** | Central Manager, UI |
 | Live run status, anomalies, per-pipeline runtime from *history* | **Monitor Agent** | UI, Resource (`dynamic_reallocate`) |
@@ -58,7 +58,8 @@ fed on each other:
 
 - **Performance Prediction Agent → the single pre-execution runtime/outcome authority.**
   It *consumes* the Resource Agent's chosen settings and forecasts total runtime,
-  bottleneck stage, SLA breach risk, and success/slowdown/failure. It no longer double-owns
+  bottleneck stage, whether it is slower than the pipeline's usual (learned) duration,
+  and success/slowdown/failure. It no longer double-owns
   sizing.
 
 - **Monitor Agent → post-hoc / live only.** It reports what is happening or has happened to
@@ -83,7 +84,7 @@ Phase 2 (pre_checks):
   analyze_parallelism()   # Manager owns the execution-group graph
   predict_resources()     # Resource Agent: settings + feasibility  (HARD GATE: feasible)
   estimate_cost()         # Manager: $ estimate from settings
-  predict_performance()   # Performance Agent: runtime/outcome/SLA  (HARD GATE: outcome!=failure)
+  predict_performance()   # Performance Agent: runtime/outcome/usual duration  (HARD GATE: outcome!=failure)
   optimize_cost()         # Cost Optimization Agent: cheaper alternatives (non-blocking)
 ```
 
