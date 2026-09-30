@@ -32,11 +32,10 @@ import math
 
 from .feature_spec import (
     NODE_TYPES_BY_MEM,
-    DEFAULT_NODE,
     SHUFFLE_TIERS,
     snap_shuffle,
 )
-from ..resource_agent import NODE_SPECS, MAX_WORKERS, MAX_DIU, MAX_TOTAL_MEM_GB
+from ..resource_agent import DEFAULT_NODE, NODE_SPECS, MAX_WORKERS, MAX_DIU, MAX_TOTAL_MEM_GB
 
 # ── Throughput anchors (calibrated to job_runs / pipeline_runs) ──────────────
 ROWS_PER_CORE_PER_S = 1600.0     # light-notebook throughput per vCPU

@@ -9,18 +9,12 @@ Selects the planning backend at import time via PLANNER_BACKEND
 Both expose decide_pipeline_config(schema, user_prompt, ...) -> (config, used_fallback).
 """
 
-import os
 
 
 def _planner_backend() -> str:
-    try:
-        import config as _c
-        val = getattr(_c, "PLANNER_BACKEND", None)
-        if val:
-            return str(val).lower()
-    except ImportError:
-        pass
-    return os.getenv("PLANNER_BACKEND", "ollama").lower()
+    import settings
+
+    return settings.get("PLANNER_BACKEND", "ollama").lower()
 
 
 if _planner_backend() == "groq":

@@ -195,6 +195,8 @@ Insights lookup found data for a real old run.
 | `[ollama]` status lines never showed in the captured log (stdout buffering). | Couldn't confirm startup from logs. | Confirmed via Ollama's `/api/ps` instead. |
 | The WebSocket test client printed nothing during the shutdown test. | Client-side confirmation missing. | Server log showed `connection open` → `connection closed`. |
 | Asked some questions several times with the question tool while the user still wanted to clarify. | Extra back-and-forth. | Switched to plain-text explanations, then asked again. |
+| `ruff --fix` (commit `6f8904c`) removed `DEFAULT_NODE` from `resource_agent/ml/feature_spec.py` as "unused", but `calibration.py` imported it from there. The post-cleanup check only imported modules the app loads, and `calibration` is only used by the training data generator. | `resource_agent.training.generate_resource_dataset` crashed on import, so the Resource model could not be retrained. The running app was unaffected. | Found in the follow-up full scan. `calibration.py` now imports `DEFAULT_NODE` from `resource_agent.py`, where it is defined; the generator was re-run successfully. |
+| `assurance_agent/semantic.py` and `planner_agent/__init__.py` still read `config.py` before the environment (the reverse of `settings.py`). | A stray `config.py` would silently override `.env`. | Found in the follow-up full scan; both now use `settings.get`. |
 
 **Unverified at the time of each change:**
 - The frontend was only build-checked, never clicked through in a browser.

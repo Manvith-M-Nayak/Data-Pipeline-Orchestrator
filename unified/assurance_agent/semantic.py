@@ -17,7 +17,6 @@ marked available=False and is NOT counted against the plan.
 """
 
 import json
-import os
 
 import requests
 
@@ -45,15 +44,10 @@ SYSTEM_PROMPT = (
 
 
 def _cfg(name: str, default: str) -> str:
-    """Read a setting from config.py, then env, else default (mirrors planner)."""
-    try:
-        import config as _c
-        val = getattr(_c, name, None)
-        if val:
-            return str(val)
-    except ImportError:
-        pass
-    return os.getenv(name, default)
+    """Read a setting from env/.env, then config.py, else default (mirrors planner)."""
+    import settings
+
+    return settings.get(name, default)
 
 
 def _ollama_host() -> str:
