@@ -45,11 +45,11 @@ Settings resolve **environment / `.env` → legacy `config.py` → default** (`s
 | Path | API prefix | What it does |
 |---|---|---|
 | `planner_agent/` | `/api/planner` | Turns a prompt + CSV schema into a pipeline plan (fine-tuned Qwen via Ollama; Groq fallback). |
-| `assurance_agent/` | `/api/assurance` | Structural + semantic checks on a plan. |
+| `assurance_agent/` | `/api/assurance` | Plan-checking **library**: structural rules + intent (LLM) check. The Planner runs both on its own plan before returning it (`planner_agent/self_check.py`, one re-plan on problems); the Manager runs the structural rules as its run-time gate. `/api/assurance/validate` backs the Planner page's "Re-check Plan" button. |
 | `resource_agent/` | `/api/resource` | Per-stage compute sizing (ML model, heuristic fallback). |
 | `performance_prediction_agent/` | `/api/performance-prediction` | Run duration / outcome forecast (ML model, formula fallback). |
 | `cost_optimization_agent/` | `/api/cost-optimization` | Cost estimate + cheaper-config recommendations (ML model). |
-| `central_manager_agent/` | `/api/manager` | Runs a plan end to end: validate → assure → pre-checks → execute (with retries) → post-assurance → feedback. Also streaming runs and the combined Run Insights API (`/api/manager/combined`). |
+| `central_manager_agent/` | `/api/manager` | Runs a plan end to end: validate → structural gate → pre-checks → execute (with retries) → post-assurance → feedback. Also streaming runs and the combined Run Insights API (`/api/manager/combined`). |
 | `executor_agent/` | `/api/executor` | Builds Databricks notebooks, deploys ADF copy pipelines, runs jobs, downloads output. Runs only start via the manager. |
 | `monitor_agent/` | `/api/monitor/*`, `/ws/live` | Polls ADF, stores run history (SQLite), AI analysis, runtime predictions, anomaly events. |
 | `learning_policy_agent/` | `/api/learning` | Learns correction factors from feedback; retrains / rolls back models. |

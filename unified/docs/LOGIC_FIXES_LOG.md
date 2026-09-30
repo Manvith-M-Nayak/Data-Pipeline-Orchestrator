@@ -19,7 +19,7 @@ records:
 | 7 | Remaining low-severity items | Low list (analytics, assurance order, contention, monitor duplicates, learning cycle, deploy gate, dead code, single-worker) | Done |
 | 8 | Semantic (intent) check false flags — reported on `zv.csv` | user report | Done |
 | 9 | Remove the auto-added `processed_time` column everywhere | user request | Done |
-| 10 | Planner self-verifies (assurance as a library); intent check leaves the run path | design change (user request) | Pending |
+| 10 | Planner self-verifies (assurance as a library); intent check leaves the run path | design change (user request) | Done |
 
 ---
 
@@ -583,3 +583,74 @@ Both claims were wrong:
 
 - **Old prototype folders at the repo root.** `py_files/`, `databricks/`, `planner_finetune/` and `resource_finetune/` still add `processed_time`, but no code in `unified/` imports them; only three docs mention them.
 - **The fine-tuned adapter and existing datasets are unchanged.** The model keeps the habit until it's retrained on newly generated data; the planner strips its output meanwhile.
+
+---
+
+## Stage 10 — The Planner verifies its own plan (assurance becomes a library)
+
+**Commit message:** `feat(planner): self-verify plans with the assurance library and re-plan once; manager keeps a structural gate`
+
+### Why (user decision)
+
+- **Assurance "contradicted" the Planner after the fact.** It ran as a separate step, so plans were flagged after being handed over; the real run history shows 10 of 11 runs flagged, all false alarms.
+- **A disagreement is only useful if something acts on it,** so the fix loop moved into planning, where it can.
+- **Assurance is kept as a library,** not deleted: the checks are needed either way. Plans can still be hand-edited in the UI or sent straight to `/api/manager/run`, so the run itself keeps a cheap, deterministic gate.
+
+### Design
+
+**Planner** — new `planner_agent/self_check.py`, `plan_with_verification(build, schema, prompt)`:
+1. `build(review_feedback)` produces a plan: the model call, all deterministic repairs, the user's execution groups, and the streaming conversion. The plan is verified in its final form.
+2. It verifies with `AssuranceAgent().assure(..., run_semantic=True)`: structural rules plus the intent check (with the stage 8 fixes).
+3. If a structural check failed or the intent check reported valid issues, it re-plans **once** (`MAX_REPLANS = 1`) with the problems as `REVIEW FEEDBACK`.
+4. **The deterministic fallback** (model unreachable) is verified but never re-planned: a retry would hit the same unreachable model.
+5. **The best attempt wins:** fewest structural failures, then fewest intent issues; on a tie, the later attempt, since it was made with the feedback.
+6. **It returns a `verification` report:** `verified`, `attempts`, `replanned`, per-attempt `history`, and `final` (the full AssuranceResult, in the same shape as `/api/assurance/validate`).
+
+**Feedback goes only to the model.** `decide_pipeline_config(..., review_feedback=None)` in both backends appends it to the LLM message only. Every deterministic step (container count from numbered stages, filter restoration, stage naming, timestamp stripping) keeps using the user's original prompt, so issue text such as "Stage 7" can't change the plan's shape.
+
+**Manager** — `run_plan_assurance` runs **structural rules only** (`run_semantic = False`), still as a hard gate. That removes 3–5 s (up to a 120 s timeout) from every run, and plans are no longer re-judged at run time.
+
+**UI** (`PlannerTab.jsx`):
+- The Planner's own verification is shown as soon as a plan arrives: "Planner self-check: verified on the first attempt / after re-planning (N attempts)".
+- "Validate Plan" is now **"Re-check Plan"**, an on-demand check after manual edits.
+- The "Fix & Re-plan" button still appears when advisories remain.
+
+### Changes
+
+| File | Change |
+|---|---|
+| `planner_agent/self_check.py` *(new)* | The verify → re-plan loop and the report. |
+| `planner_agent/router.py` | `/api/planner/plan` builds through `_build`, runs `plan_with_verification` in the threadpool, and returns `verification`. |
+| `planner_agent/ollama_planner.py`, `groq_planner.py` | `review_feedback` parameter, used only in the model message. |
+| `central_manager_agent/manager.py` | The plan phase is a structural gate only; comments and log label updated. |
+| `frontend/src/pages/PlannerTab.jsx` | Shows the self-check; the button is renamed. |
+| `unified/README.md`, `docs/RESPONSIBILITIES.md` | Assurance described as a library used by the Planner and the Manager gate. |
+
+### Verification
+
+- **Loop** (mocked build, mocked intent check):
+
+  | Scenario | Result |
+  |---|---|
+  | Passes first time | 1 attempt |
+  | Unknown column, then fixed | 2 attempts, the fixed plan is returned, and the feedback contained the violation |
+  | Fallback plan | 1 attempt, no retry |
+  | Fails twice | 2 attempts, `verified False`, history recorded |
+  | Intent issue | the retry feedback carries the issue |
+
+- **Feedback routing** (mocked Ollama HTTP): the model message contains `REVIEW FEEDBACK`, and feedback mentioning "Stage 7" / "step 9" did **not** change the container count (still 3).
+- **Manager:** with the intent check replaced by a function that fails if called, the plan gate passed and the semantic layer did not run.
+- **Live, end to end** (real fine-tuned planner + qwen, `/api/planner/plan`, `zv.csv` columns, "Keep only the animals that are predators"):
+  - **batch:** verified on the first attempt; stages ingest → `predator = 1`; no `processed_time`; intent "The plan matches the user request." (33 s);
+  - **streaming:** verified; one stream stage with `predator = 1` (34 s).
+- **Regressions:**
+  - the integration test passes, and so do the teammate's 13 cost tests;
+  - `ruff` is clean, and the frontend builds;
+  - all 6 assurance examples behave as designed;
+  - the backend has no tracebacks, and all 25 GET endpoints return 200.
+
+### Limits
+
+- **Planning is slower when a re-plan happens:** one more model call (about 20–30 s with the local planner).
+- **A re-plan can't fix a persistent model mistake.** The best attempt is returned with `verified: false` and its open issues shown, and the user can still "Fix & Re-plan" or edit.
+- **The re-plan path wasn't triggered in the live runs.** The model produced a correct plan first time; the retry path is covered by the mocked tests.

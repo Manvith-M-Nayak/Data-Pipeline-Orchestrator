@@ -44,8 +44,13 @@ def decide_pipeline_config(
     num_containers: int = None,
     custom_settings: dict = None,
     container_names: list = None,
+    review_feedback: str = None,
 ) -> tuple:
     """
+    review_feedback: problems the plan self-check found in a previous attempt
+    (planner_agent/self_check.py). Sent to the model ONLY — every
+    deterministic step below keeps using the user's original prompt.
+
     Ask Groq LLaMA 3.3 70B to design the unified pipeline config.
     Returns (config_dict, used_fallback_bool).
 
@@ -181,6 +186,7 @@ Sample Data:
 {json.dumps(schema['samples'][:3], indent=2)}
 
 User Prompt: "{user_prompt}"
+{review_feedback or ""}
 
 Number of stages: {num_containers}
 Container names : {clist}

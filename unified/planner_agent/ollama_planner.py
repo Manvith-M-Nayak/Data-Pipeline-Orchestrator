@@ -64,8 +64,13 @@ def decide_pipeline_config(
     num_containers: int = None,
     custom_settings: dict = None,
     container_names: list = None,
+    review_feedback: str = None,
 ) -> tuple:
     """
+    review_feedback: problems the plan self-check found in a previous attempt
+    (planner_agent/self_check.py). Sent to the model ONLY — every
+    deterministic step below keeps using the user's original prompt.
+
     Ask the local fine-tuned planner (served by Ollama) to design the config.
     Returns (config_dict, used_fallback_bool).
 
@@ -92,8 +97,11 @@ def decide_pipeline_config(
             print(f"   Prompt numbers {needed - 2} stage(s) — raising containers {num_containers} → {needed}")
         num_containers = needed
 
+    model_prompt = user_prompt
+    if review_feedback:
+        model_prompt = f"{user_prompt}\n\n{review_feedback}"
     user_message = json.dumps(
-        {"schema": schema, "user_prompt": user_prompt},
+        {"schema": schema, "user_prompt": model_prompt},
         ensure_ascii=False,
     )
 

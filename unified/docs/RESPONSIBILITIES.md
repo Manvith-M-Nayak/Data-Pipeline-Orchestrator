@@ -22,7 +22,7 @@ booleans the owners return (feasible / assured / outcome).
 |---|---|---|
 | Pipeline design: stages, containers, execution order, transformations | **Planner Agent** | everyone |
 | `recommended_settings` (workers/DIU/node/shuffle) as an *initial hint* | **Planner Agent** | Resource Agent (may override) |
-| Plan is structurally & semantically valid | **Assurance Agent** | Manager (hard gate) |
+| Plan is structurally & semantically valid | **Assurance library** — run by the **Planner** on its own plan (structure + intent, one re-plan on problems) | Manager (structural rules only, hard gate for edited / API-submitted plans) |
 | Dependency graph → parallel execution groups | **Central Manager** (`analyze_parallelism`) | Resource, Performance |
 | **Compute settings per stage** (workers, DIU, peak memory, shuffle partitions, node type) | **Resource Agent** | Performance, Executor, Manager, UI |
 | Plan fits the student-tier hard limits (feasibility) | **Resource Agent** | Manager (hard gate) |

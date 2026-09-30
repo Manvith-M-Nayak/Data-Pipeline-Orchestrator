@@ -121,10 +121,12 @@ export default function PlannerTab() {
   // ── assurance (plan validation) ────────────────────────────────────────────
   const [assuring,        setAssuring]        = useState(false);
   const [assuranceResult, setAssuranceResult] = useState(null);
+  // true when assuranceResult is the Planner's own self-check (vs a manual re-check)
+  const [assuranceFromPlanner, setAssuranceFromPlanner] = useState(false);
 
   async function handleValidate() {
     if (!plan?.config) return;
-    setError(""); setAssuring(true); setAssuranceResult(null);
+    setError(""); setAssuring(true); setAssuranceResult(null); setAssuranceFromPlanner(false);
     try {
       const res = await assurance.validate(prompt, plan.config, { columns: detected?.columns || {} });
       setAssuranceResult(res);
@@ -199,6 +201,11 @@ export default function PlannerTab() {
       const fullPrompt = extra ? `${prompt}\n\n${extra}` : prompt;
       const result = await planner.plan(buildSchemaPayload(), fullPrompt, buildPlanOpts());
       setPlan(result);
+      // The Planner already verified this plan (structure + intent) — show it.
+      if (result?.verification?.final) {
+        setAssuranceResult(result.verification.final);
+        setAssuranceFromPlanner(true);
+      }
     } catch (e) { setError("Planner failed: " + e.message); }
     finally { setPlanning(false); }
   }
@@ -647,6 +654,14 @@ export default function PlannerTab() {
                   <ShieldCheck size={13} style={{ verticalAlign: "middle", marginRight: 6 }} />
                   {assuranceResult.summary}
                 </div>
+                {assuranceFromPlanner && plan?.verification && (
+                  <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 6 }}>
+                    Planner self-check: {plan.verification.verified ? "verified" : "open issues remain"}
+                    {plan.verification.replanned
+                      ? ` after re-planning (${plan.verification.attempts} attempts)`
+                      : " on the first attempt"}
+                  </div>
+                )}
                 {failures.map((c) => (
                   <div key={c.check} style={{ fontSize: 12, color: "#f87171", marginBottom: 4 }}>
                     ✗ {c.label}: {c.message}
@@ -686,7 +701,7 @@ export default function PlannerTab() {
               <Zap size={13} /> Send to Manager <ArrowRight size={13} />
             </button>
             <button style={{ ...C.btnSecondary, color: "#4ade80", borderColor: "#166534" }} disabled={assuring} onClick={handleValidate}>
-              <ShieldCheck size={13} />{assuring ? <><Spinner /> Validating…</> : "Validate Plan"}
+              <ShieldCheck size={13} />{assuring ? <><Spinner /> Checking…</> : "Re-check Plan"}
             </button>
             <button style={C.btnSecondary} onClick={() => { setPlan(null); }}>
               <RotateCcw size={13} /> Re-plan

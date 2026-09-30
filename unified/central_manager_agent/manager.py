@@ -290,20 +290,21 @@ class CentralManager:
         return result
 
     # ────────────────────────────────────────────────────────────────────────
-    # Phase 1.5 — Independent plan assurance (Assurance Agent)
-    #   Structural layer (deterministic) is an authoritative gate: a failure
-    #   aborts the run. Semantic layer (base LLM) is advisory — it warns about
-    #   intent mismatches but never aborts. Independent of the Planner: shares
-    #   no generation logic and uses clean base weights (no LoRA adapter).
+    # Phase 1.5 — Plan gate (assurance library, structural rules only)
+    #   The deterministic rules are an authoritative gate: a failure aborts
+    #   the run. They are needed here because plans can be edited in the UI
+    #   or sent straight to /api/manager/run. The intent (LLM) check runs in
+    #   the Planner when the plan is made (planner_agent/self_check.py), not
+    #   on every run — it would add seconds per run and re-judge a plan the
+    #   planner already verified.
     # ────────────────────────────────────────────────────────────────────────
     async def run_plan_assurance(self, state: RunState, schema: dict) -> dict:
         from assurance_agent import AssuranceAgent
         from fastapi.concurrency import run_in_threadpool
 
-        self._enter(state, "assuring_plan", "Verifying plan with Assurance Agent")
+        self._enter(state, "assuring_plan", "Checking plan structure (assurance rules)")
 
-        # Semantic layer only runs if we have the original request to compare against.
-        run_semantic = bool(state.user_request)
+        run_semantic = False  # intent is checked at planning time
         try:
             agent = AssuranceAgent()
             result = await run_in_threadpool(

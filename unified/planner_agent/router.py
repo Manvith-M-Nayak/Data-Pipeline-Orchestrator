@@ -2,6 +2,7 @@ from fastapi import APIRouter
 from fastapi.concurrency import run_in_threadpool
 from . import decide_pipeline_config
 from .planner_common import sanitize_execution_groups, to_streaming_plan
+from .self_check import plan_with_verification
 
 router = APIRouter()
 
@@ -48,23 +49,31 @@ async def plan_pipeline(body: dict):
     if not isinstance(container_names, list):
         container_names = None
 
-    config, used_fallback = await run_in_threadpool(
-        decide_pipeline_config, schema, prompt,
-        num_containers, custom_settings, container_names,
-    )
-
-    # User-requested concurrency plan overrides whatever the model produced;
-    # sanitize_execution_groups repairs any data-dependency violations.
-    if isinstance(execution_groups, list) and execution_groups:
-        config = sanitize_execution_groups(config, execution_groups)
-
-    # Streaming mode: reshape the batch plan into a single incremental stream
-    # stage, reusing the transforms/filter the model already extracted.
     mode = (body.get("mode") or "batch").lower()
-    if mode == "streaming":
-        config = to_streaming_plan(config, container_names)
+
+    def _build(review_feedback=None):
+        config, used_fallback = decide_pipeline_config(
+            schema, prompt, num_containers, custom_settings, container_names,
+            review_feedback=review_feedback,
+        )
+        # User-requested concurrency plan overrides whatever the model produced;
+        # sanitize_execution_groups repairs any data-dependency violations.
+        if isinstance(execution_groups, list) and execution_groups:
+            config = sanitize_execution_groups(config, execution_groups)
+        # Streaming mode: reshape the batch plan into a single incremental
+        # stream stage, reusing the transforms/filter the model extracted.
+        if mode == "streaming":
+            config = to_streaming_plan(config, container_names)
+        return config, used_fallback
+
+    # The planner verifies its own plan (structural rules + intent check from
+    # the assurance library) and replans once with the problems as feedback,
+    # so the user gets a checked plan instead of one a later step contradicts.
+    config, used_fallback, verification = await run_in_threadpool(
+        plan_with_verification, _build, schema, prompt,
+    )
 
     # Also inside the config: the plan travels alone to the Manager, whose
     # validate_plan warning and feedback log read plan["used_fallback"].
     config["used_fallback"] = bool(used_fallback)
-    return {"config": config, "used_fallback": used_fallback}
+    return {"config": config, "used_fallback": used_fallback, "verification": verification}
