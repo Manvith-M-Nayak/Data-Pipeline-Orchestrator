@@ -567,8 +567,7 @@ export default function ManagerTab() {
           setRunning(false);
         }
       } catch (e) {
-        const msg = e?.message || "";
-        if (msg.startsWith("404")) {
+        if (e?.status === 404) {
           clearInterval(pollRef.current);
           setRunning(false);
           setError("Run session expired — click Run again.");

@@ -19,7 +19,11 @@ async function req(path, opts = {}) {
     } catch {
       /* non-JSON error body — fall back to status text */
     }
-    throw new Error(detail || `${res.status} ${res.statusText}`);
+    // Keep the HTTP status on the error: callers branch on it (404 = gone),
+    // and the message is the backend's detail text, not the status code.
+    const err = new Error(detail || `${res.status} ${res.statusText}`);
+    err.status = res.status;
+    throw err;
   }
   return res.json();
 }

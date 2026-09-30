@@ -217,7 +217,8 @@ def _is_float(v: str) -> bool:
 
 
 def _infer_type(values: list) -> str:
-    non_empty = [v.strip() for v in values if v.strip()]
+    # csv.DictReader fills fields missing from a short row with None.
+    non_empty = [v.strip() for v in values if v and v.strip()]
     if not non_empty:
         return "string"
     n = len(non_empty)
@@ -329,7 +330,8 @@ async def detect_schema(csv_file: UploadFile = File(...)):
             row_count += 1
             if len(sample) < 200:
                 sample.append(row)
-        headers = list(sample[0].keys()) if sample else []
+        # DictReader keys a row's EXTRA fields under None — not a column.
+        headers = [h for h in reader.fieldnames or [] if h is not None]
         columns = {
             col: _infer_type([r.get(col, "") for r in sample]) for col in headers
         }

@@ -35,14 +35,20 @@ class CostMLPredictor:
     _bundle = None
     _load_attempted = False
     _load_error: Optional[str] = None
+    _loaded_sig = None   # files_signature() of what is loaded (or failed to load)
 
     @classmethod
     def _ensure_loaded(cls):
-        if cls._load_attempted:
+        from model_files import files_signature
+
+        sig = files_signature(_BUNDLE_PATH)
+        if cls._load_attempted and sig == cls._loaded_sig:
             if cls._bundle is None:
                 raise MLNotAvailable(cls._load_error or "bundle not loaded")
             return
+        # First load, or the file changed (retrain / repaired file): reload.
         cls._load_attempted = True
+        cls._loaded_sig = sig
         try:
             import joblib
 

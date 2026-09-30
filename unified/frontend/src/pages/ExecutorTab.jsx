@@ -175,8 +175,7 @@ export default function ExecutorTab() {
           monitor.sync(2).catch(() => {});
         }
       } catch (e) {
-        const msg = e?.message || "";
-        if (msg.startsWith("410") || msg.startsWith("404")) {
+        if (e?.status === 410 || e?.status === 404) {
           _handleStaleJob();
         }
         // Any other error (network blip): interval keeps running, next tick will retry

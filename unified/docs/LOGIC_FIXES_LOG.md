@@ -15,7 +15,8 @@ records:
 | 3 | Learning loops — what feeds the correction factors | H5, H6, M1, M2, M3, M9 | Done |
 | 4 | Execution — concurrent-run isolation, executor issues | H7, H8, M4, run-id collisions, retries | Done |
 | 5 | Learned expected duration — replaces the fixed time limit ("SLA") everywhere | design change (user request) | Done |
-| 6 | Frontend and the rest | M5, M6, M7, M8 (rest), remaining Low | Pending |
+| 6 | User-facing bugs — model reload, missing-run detection, ragged CSV, streams, planner | M5, M6, M7, M8 (rest), 3 Low | Done |
+| 7 | Remaining low-severity items | Low list (analytics, assurance order, contention, monitor duplicates, learning cycle, deploy gate, dead code) | Pending |
 
 ---
 
@@ -340,3 +341,54 @@ This stage also settles the open decision from stage 4: the Cost agent now gets 
 
 - **Cost savings become possible, but only after history exists.** A new pipeline needs 3 completed runs of similar input size first; until then the Cost agent stays fail-closed.
 - **No saved data changes.** Old saved runs still contain `sla_breach_risk`; the UI now ignores it.
+
+---
+
+## Stage 6 — User-facing bugs
+
+**Commit message:** `fix: reload changed models, detect missing runs by status, handle ragged CSVs, assure and record streams`
+
+### Changes
+
+| Id | Problem | Change |
+|---|---|---|
+| M5 | ML predictors cached models per process forever: a retrained Performance model wasn't used until restart, and a failed load (file missing or half-written) was cached permanently. | New `model_files.files_signature(*paths)` (mtime + size). The Performance, Resource and Cost predictors store the signature they loaded (`_loaded_sig`) and reload when it changes. Unchanged files keep the cached object: one `stat` per file per prediction. |
+| M6 | `ManagerTab` / `ExecutorTab` detected a missing run with `msg.startsWith("404")`, but `api.js` `req()` throws the backend `detail` ("Run not found"), so a missing run polled forever. | `req()` sets `err.status = res.status`; both pages check `e?.status === 404` (and 410). |
+| M7 | `/api/schema/detect` returned 500 on a CSV row with fewer fields than the header (`DictReader` fills `None`; `_infer_type` called `.strip()` on it). | `_infer_type` skips `None`. Headers come from `reader.fieldnames` (the real header row), excluding the `None` key `DictReader` uses for extra fields. |
+| M8 (rest) | Streams skipped assurance entirely, and stream ticks were never recorded in the monitor or anomaly detector. | `StreamManager.start` runs the deterministic structural assurance (no LLM) and rejects failures; the column check is waived only when the client sent no schema. New `_record_tick` gives each tick's result to `_notify_monitor` (a `Databricks_Streaming_Pipeline` record plus AI analysis) and to `detect_and_store` (per-pipeline metrics and anomalies). Failures there are logged, never fatal. |
+| Low | Two drops of the same file in the same second overwrote each other (seconds-only blob name). | Blob name includes an 8-hex uuid. |
+| Low | `validate_plan`'s "Planner used fallback" warning and the feedback log's `used_fallback` never fired: the flag was returned *next to* the config, and the plan travels alone. | The planner router also sets `config["used_fallback"]`. |
+| Low | The Ollama planner ignored `container_names` sent without `num_containers` (Groq applied them). | The count is taken from the names when not given. |
+
+### Verification
+
+- **M5:**
+
+  | Step | Result |
+  |---|---|
+  | Cost bundle file missing | unavailable |
+  | File appears | available (was cached as failed forever before) |
+  | File rewritten | new object loaded |
+  | File unchanged | cached object reused |
+  | Performance model file touched | reloaded |
+
+- **M6:** the real `req()` from `api.js`, run under Node with a mocked 404 response, gives `message "Run not found"` and `status 404`. The new check matches; the old `startsWith("404")` check did not.
+- **M7:** `/api/schema/detect` returns **200** for a short row (`id/name/amount`, 3 rows) and for a row with an extra field (columns `id/name`, the extra value ignored). Before: **500**.
+- **Streams** (temp DB):
+  - an unknown column in the filter → rejected ("Column references: …");
+  - no schema but a bad `execution_order` → rejected ("Stage ordering: …");
+  - no schema and otherwise valid → starts;
+  - a mocked tick creates a monitor row (`Databricks_Streaming_Pipeline`, `Succeeded`) and 1 `run_metrics` row;
+  - 3 same-second drops of `same.csv` → 3 distinct blob names.
+- **Planner:**
+  - the Ollama backend, with its HTTP call mocked, applies `["landing","clean","gold"]` given without a count;
+  - `/api/planner/plan` returns `config.used_fallback` matching the top-level flag, both `True` and `False`.
+- **Regressions:**
+  - the integration test passes, and so do the teammate's 13 cost tests;
+  - `ruff` is clean, and the frontend builds;
+  - the backend has no tracebacks, and all 25 GET endpoints return 200.
+
+### Mistakes during this stage
+
+- **Wrong attribute name.** My first version of `_structural_failures` read `c.name`, but `assurance_agent.result.CheckResult` calls the field `check`. The stream test raised `AttributeError`. The "unknown column" case had passed only because it failed before reaching that attribute. Fixed and re-tested.
+- **Model timestamp touched.** The M5 test updated the timestamp of the real `performance_prediction_agent/models/duration_regressor.pkl` (via `os.utime`) to prove the reload. The contents are unchanged, and `.pkl` files are gitignored.

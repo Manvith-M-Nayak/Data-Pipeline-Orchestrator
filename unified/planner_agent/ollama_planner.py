@@ -80,6 +80,11 @@ def decide_pipeline_config(
 
     # K numbered stages in the prompt are transformation stages — the copy
     # stage must not consume one of them, so K+2 containers are required.
+    # Explicit container names imply the count (the Groq backend already
+    # applies them unconditionally; this one only did when a count was sent).
+    if container_names and not num_containers:
+        num_containers = len(container_names)
+
     needed = required_containers_for_prompt(user_prompt)
     if needed and (num_containers or 0) < needed:
         if num_containers:

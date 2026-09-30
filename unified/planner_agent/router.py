@@ -64,4 +64,7 @@ async def plan_pipeline(body: dict):
     if mode == "streaming":
         config = to_streaming_plan(config, container_names)
 
+    # Also inside the config: the plan travels alone to the Manager, whose
+    # validate_plan warning and feedback log read plan["used_fallback"].
+    config["used_fallback"] = bool(used_fallback)
     return {"config": config, "used_fallback": used_fallback}

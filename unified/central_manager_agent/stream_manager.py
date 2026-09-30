@@ -54,6 +54,12 @@ class StreamManager:
         unsafe = _ex.plan_safety_issues(config)
         if unsafe:
             raise ValueError("Unsafe plan rejected: " + "; ".join(unsafe[:5]))
+        # Deterministic structural assurance (no LLM), as managed runs get.
+        # Without a schema there is nothing to check column references
+        # against, so only that one check is waived.
+        failing = self._structural_failures(config, schema)
+        if failing:
+            raise ValueError("Plan failed assurance: " + "; ".join(failing))
         stream_stages = [s for s in config.get("stages", []) if s.get("type") == "stream"]
         if not stream_stages:
             raise ValueError("plan has no stream stage")
@@ -100,7 +106,8 @@ class StreamManager:
 
     async def add_data(self, sid: str, data: bytes, filename: str) -> dict:
         st = self._require(sid)
-        blob = f"stream-{int(time.time())}-{os.path.basename(filename or 'data')}"
+        # uuid: two drops of the same file in the same second must not overwrite.
+        blob = f"stream-{int(time.time())}-{uuid.uuid4().hex[:8]}-{os.path.basename(filename or 'data')}"
         await asyncio.to_thread(self._upload_bytes, st["source_container"], blob, data)
         return await self.tick(sid, reason="drop")
 
@@ -113,6 +120,7 @@ class StreamManager:
             return {"ok": False, "reason": "a tick is already running"}
         async with lock:
             st["running"] = True
+            t0 = time.time()
             try:
                 result = await asyncio.to_thread(
                     _ex.execute_pipeline,
@@ -122,6 +130,7 @@ class StreamManager:
                 result = {"status": "failed", "message": str(exc)}
             finally:
                 st["running"] = False
+            await self._record_tick(st, result, time.time() - t0)
             st["tick_count"] += 1
             if result.get("status") == "failed":
                 st["last_error"] = result.get("message", "")
@@ -134,6 +143,39 @@ class StreamManager:
             }
             st["ticks"] = (st["ticks"] + [entry])[-25:]
             return {"ok": result.get("status") == "ok", "tick": entry}
+
+    @staticmethod
+    def _structural_failures(config: dict, schema: dict) -> list:
+        from assurance_agent import AssuranceAgent
+
+        result = AssuranceAgent().assure("", config, schema or {}, run_semantic=False)
+        has_columns = bool((schema or {}).get("columns"))
+        return [
+            f"{c.label}: {c.message}"
+            for c in result.structural_results
+            if not c.passed and (has_columns or c.check != "column_references")
+        ]
+
+    @staticmethod
+    async def _record_tick(st: dict, result: dict, elapsed_s: float) -> None:
+        """Ticks run the executor directly (not through the Manager), so feed
+        the monitor and the anomaly detector the same completion record a
+        managed run produces. Never lets bookkeeping break a stream."""
+        if not isinstance(result, dict):
+            return
+        try:
+            from executor_agent.router import _notify_monitor
+
+            if result.get("dbx_run_id"):
+                await _notify_monitor(result, int(elapsed_s * 1000))
+            from monitor_agent.services.anomaly_detector import detect_and_store
+
+            await detect_and_store(
+                {"run_id": st["stream_id"], "plan": st["config"], "retries": 0},
+                result, int(elapsed_s * 1000), st["schema"],
+            )
+        except Exception as exc:
+            print(f"[StreamManager] tick bookkeeping non-fatal: {exc}")
 
     async def stop(self, sid: str) -> dict:
         st = self._require(sid)

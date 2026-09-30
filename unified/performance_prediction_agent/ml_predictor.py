@@ -53,15 +53,21 @@ class MLPredictor:
     _encoder        = None
     _load_attempted = False
     _load_error     = None
+    _loaded_sig     = None   # files_signature() of what is loaded (or failed to load)
 
     @classmethod
     def _ensure_loaded(cls):
-        if cls._load_attempted:
+        from model_files import files_signature
+
+        sig = files_signature(_DURATION_MODEL_PATH, _OUTCOME_MODEL_PATH, _ENCODER_PATH)
+        if cls._load_attempted and sig == cls._loaded_sig:
             if cls._duration_model is None:
                 raise MLNotAvailable(cls._load_error or "Models not loaded")
             return
 
+        # First load, or the files changed (retrain / repaired files): reload.
         cls._load_attempted = True
+        cls._loaded_sig = sig
         try:
             cls._duration_model = joblib.load(_DURATION_MODEL_PATH)
             cls._outcome_model  = joblib.load(_OUTCOME_MODEL_PATH)
