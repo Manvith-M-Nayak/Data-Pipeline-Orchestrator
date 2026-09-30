@@ -187,6 +187,12 @@ states, `alert()` calls, 19 lint findings). One backend change:
 `record_feedback` keeps a failed run's phase and step. Details and verification in
 `LOGIC_FIXES_LOG.md` → Stage 12.
 
+## 10. Redesign part 1 — design system + light/dark theme (stage 13)
+
+New tokens, shared components and a sidebar shell. Every page's colours are moved onto
+the tokens, so the light theme and the dark theme work everywhere. Details in
+`LOGIC_FIXES_LOG.md` → Stage 13.
+
 ## Mistakes and dead ends (honest list)
 
 | What happened | Impact | Resolution |

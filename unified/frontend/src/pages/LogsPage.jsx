@@ -2,28 +2,28 @@ import React, { useEffect, useState, useCallback } from "react";
 import { monitor, connectWS } from "../api.js";
 import { ChevronDown, ChevronRight, FileText } from "lucide-react";
 
-const SEV = { low: "#22c55e", medium: "#f59e0b", high: "#ef4444" };
+const SEV = { low: "var(--ok)", medium: "var(--warn)", high: "var(--bad)" };
 
 const S = {
-  title:  { fontSize: 22, fontWeight: 700, marginBottom: 24, color: "#f1f5f9" },
+  title:  { fontSize: 22, fontWeight: 700, marginBottom: 24, color: "var(--text)" },
   filters:{ display: "flex", gap: 10, marginBottom: 20, flexWrap: "wrap" },
-  ctrl:   { background: "#1e293b", border: "1px solid #334155", color: "#e2e8f0", borderRadius: 8, padding: "8px 12px", fontSize: 13 },
+  ctrl:   { background: "var(--surface)", border: "1px solid var(--border)", color: "var(--text)", borderRadius: 8, padding: "8px 12px", fontSize: 13 },
   table:  { width: "100%", borderCollapse: "collapse" },
-  th:     { textAlign: "left", padding: "10px 12px", fontSize: 11, color: "#64748b", borderBottom: "1px solid #334155", textTransform: "uppercase", letterSpacing: 0.5 },
-  td:     { padding: "11px 12px", fontSize: 13, borderBottom: "1px solid #1e293b", verticalAlign: "top" },
-  expand: { background: "#0f172a", padding: 16, borderRadius: 8, marginTop: 6, fontSize: 13, lineHeight: 1.7 },
-  lbl:    { color: "#64748b", fontWeight: 600, fontSize: 11, textTransform: "uppercase", marginBottom: 4, letterSpacing: 0.5 },
+  th:     { textAlign: "left", padding: "10px 12px", fontSize: 11, color: "var(--text-3)", borderBottom: "1px solid var(--border)", textTransform: "uppercase", letterSpacing: 0.5 },
+  td:     { padding: "11px 12px", fontSize: 13, borderBottom: "1px solid var(--divider)", verticalAlign: "top" },
+  expand: { background: "var(--surface-2)", padding: 16, borderRadius: 8, marginTop: 6, fontSize: 13, lineHeight: 1.7 },
+  lbl:    { color: "var(--text-3)", fontWeight: 600, fontSize: 11, textTransform: "uppercase", marginBottom: 4, letterSpacing: 0.5 },
 };
 
 const badge = (s) => ({
   display: "inline-block", padding: "2px 8px", borderRadius: 12, fontSize: 11, fontWeight: 700,
-  background: s === "Succeeded" ? "#14532d" : s === "Failed" ? "#7f1d1d" : "#1e293b",
-  color:      s === "Succeeded" ? "#4ade80" : s === "Failed" ? "#f87171" : "#94a3b8",
+  background: s === "Succeeded" ? "var(--ok-soft)" : s === "Failed" ? "var(--bad-soft)" : "var(--surface)",
+  color:      s === "Succeeded" ? "var(--ok)" : s === "Failed" ? "var(--bad)" : "var(--text-2)",
 });
 
 const sevBadge = (s) => ({
   display: "inline-block", padding: "2px 8px", borderRadius: 12, fontSize: 11, fontWeight: 700,
-  color: SEV[s] || "#94a3b8", background: "#0f172a", border: `1px solid ${SEV[s] || "#334155"}`,
+  color: SEV[s] || "var(--text-2)", background: "var(--surface-2)", border: `1px solid ${SEV[s] || "var(--border-strong)"}`,
 });
 
 function parseJ(v) { try { return v ? JSON.parse(v) : []; } catch { return [v]; } }
@@ -43,11 +43,11 @@ function Row({ run }) {
         <td style={S.td}><span style={badge(run.status)}>{run.status}</span></td>
         <td style={S.td}>{fmtMs(run.duration_ms)}</td>
         <td style={S.td}>{run.severity ? <span style={sevBadge(run.severity)}>{run.severity}</span> : "—"}</td>
-        <td style={{ ...S.td, color: "#334155", fontSize: 11 }}>{run.run_id?.slice(0, 8)}…</td>
+        <td style={{ ...S.td, color: "var(--text-4)", fontSize: 11 }}>{run.run_id?.slice(0, 8)}…</td>
       </tr>
       {open && (
         <tr>
-          <td colSpan={6} style={{ padding: "0 12px 12px", background: "#1e293b" }}>
+          <td colSpan={6} style={{ padding: "0 12px 12px", background: "var(--surface)" }}>
             <div style={S.expand}>
               {run.status_summary && <><div style={S.lbl}>Summary</div><p style={{ marginBottom: 12 }}>{run.status_summary}</p></>}
               {run.explanation    && <><div style={S.lbl}>Why it took this long</div><p style={{ marginBottom: 12 }}>{run.explanation}</p></>}
@@ -55,7 +55,7 @@ function Row({ run }) {
               {anomalies.length > 0 && <><div style={S.lbl}>Anomalies</div><ul style={{ paddingLeft: 18, marginBottom: 12 }}>{anomalies.map((a, i) => <li key={i}>{a}</li>)}</ul></>}
               {insights.length   > 0 && <><div style={S.lbl}>Insights</div><ul style={{ paddingLeft: 18, marginBottom: 12 }}>{insights.map((a, i) => <li key={i}>{a}</li>)}</ul></>}
               {suggestions.length> 0 && <><div style={S.lbl}>Suggestions</div><ul style={{ paddingLeft: 18 }}>{suggestions.map((a, i) => <li key={i}>{a}</li>)}</ul></>}
-              {!run.status_summary && <span style={{ color: "#475569" }}>No AI analysis yet.</span>}
+              {!run.status_summary && <span style={{ color: "var(--text-4)" }}>No AI analysis yet.</span>}
             </div>
           </td>
         </tr>
@@ -98,12 +98,12 @@ export default function LogsPage() {
   return (
     <div>
       <h1 style={S.title}>Run Logs</h1>
-      {error && <div style={{ color: "#f87171", fontSize: 13, marginBottom: 12 }}>{error}</div>}
+      {error && <div style={{ color: "var(--bad)", fontSize: 13, marginBottom: 12 }}>{error}</div>}
 
       {newRuns > 0 && (
-        <div style={{ background: "#0c1a2e", border: "1px solid #1e3a5f", borderRadius: 8, padding: "9px 14px", marginBottom: 14, fontSize: 13, color: "#38bdf8", display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ background: "var(--accent-soft)", border: "1px solid var(--accent-line)", borderRadius: 8, padding: "9px 14px", marginBottom: 14, fontSize: 13, color: "var(--accent)", display: "flex", alignItems: "center", gap: 10 }}>
           {newRuns} new run{newRuns > 1 ? "s" : ""} completed.
-          <button onClick={() => load()} style={{ background: "none", border: "none", color: "#38bdf8", cursor: "pointer", fontWeight: 700, fontSize: 13, textDecoration: "underline" }}>
+          <button onClick={() => load()} style={{ background: "none", border: "none", color: "var(--accent)", cursor: "pointer", fontWeight: 700, fontSize: 13, textDecoration: "underline" }}>
             Refresh now
           </button>
         </div>
@@ -119,15 +119,15 @@ export default function LogsPage() {
           <option value="Failed">Failed</option>
           <option value="InProgress">InProgress</option>
         </select>
-        <button style={{ ...S.ctrl, background: "#0ea5e9", border: "none", cursor: "pointer" }} onClick={() => load(f)}>Search</button>
+        <button style={{ ...S.ctrl, background: "var(--accent)", border: "none", cursor: "pointer" }} onClick={() => load(f)}>Search</button>
       </div>
       {loading ? (
-        <div style={{ color: "#475569", textAlign: "center", marginTop: 60 }}>Loading logs…</div>
+        <div style={{ color: "var(--text-4)", textAlign: "center", marginTop: 60 }}>Loading logs…</div>
       ) : logs.length === 0 ? (
-        <div style={{ color: "#475569", textAlign: "center", marginTop: 60 }}>
-          <FileText size={40} style={{ marginBottom: 12, color: "#334155" }} />
+        <div style={{ color: "var(--text-4)", textAlign: "center", marginTop: 60 }}>
+          <FileText size={40} style={{ marginBottom: 12, color: "var(--text-4)" }} />
           <p>No runs found.</p>
-          <p style={{ fontSize: 12, color: "#334155", marginTop: 8 }}>
+          <p style={{ fontSize: 12, color: "var(--text-4)", marginTop: 8 }}>
             Run a pipeline first, or click "Sync (48h)" in the header to pull recent ADF runs.
           </p>
         </div>

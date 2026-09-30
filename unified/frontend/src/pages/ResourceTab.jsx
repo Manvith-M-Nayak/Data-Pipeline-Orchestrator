@@ -9,66 +9,66 @@ import { useAppContext } from "../AppContext.jsx";
 // ── Styles ────────────────────────────────────────────────────────────────────
 const S = {
   page:    { maxWidth: 960, margin: "0 auto" },
-  heading: { fontSize: 22, fontWeight: 700, color: "#f1f5f9", marginBottom: 4 },
-  sub:     { fontSize: 13, color: "#64748b", marginBottom: 28 },
+  heading: { fontSize: 22, fontWeight: 700, color: "var(--text)", marginBottom: 4 },
+  sub:     { fontSize: 13, color: "var(--text-3)", marginBottom: 28 },
   grid2:   { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 },
   grid3:   { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, marginBottom: 16 },
   card:    {
-    background: "#1e293b", border: "1px solid #334155", borderRadius: 12,
+    background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12,
     padding: "16px 20px", marginBottom: 16,
   },
   cardHdr: {
     display: "flex", alignItems: "center", gap: 8,
-    fontSize: 13, fontWeight: 700, color: "#f1f5f9", marginBottom: 14,
+    fontSize: 13, fontWeight: 700, color: "var(--text)", marginBottom: 14,
   },
   kv:      { display: "flex", flexDirection: "column", gap: 6 },
   kvRow:   {
     display: "flex", justifyContent: "space-between", alignItems: "center",
-    fontSize: 12, color: "#94a3b8", paddingBottom: 6,
-    borderBottom: "1px solid #1e293b",
+    fontSize: 12, color: "var(--text-2)", paddingBottom: 6,
+    borderBottom: "1px solid var(--divider)",
   },
-  kvVal:   { color: "#f1f5f9", fontWeight: 600 },
+  kvVal:   { color: "var(--text)", fontWeight: 600 },
   badge:   (color) => ({
     display: "inline-block", padding: "2px 8px", borderRadius: 99,
     fontSize: 11, fontWeight: 700,
-    background: color + "22", color: color,
+    background: `color-mix(in srgb, ${color} 13%, transparent)`, color: color,
   }),
   btn:     {
-    padding: "8px 16px", background: "#0ea5e9", color: "#fff",
+    padding: "8px 16px", background: "var(--accent)", color: "var(--accent-fg)",
     border: "none", borderRadius: 8, cursor: "pointer",
     fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6,
   },
   tag:     (color) => ({
     padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 700,
-    background: color + "22", color: color, marginRight: 4,
+    background: `color-mix(in srgb, ${color} 13%, transparent)`, color: color, marginRight: 4,
   }),
   bar:     (pct, color) => ({
     height: 6, width: `${Math.min(pct, 100)}%`, background: color,
     borderRadius: 3, transition: "width 0.4s ease",
   }),
-  barBg:   { height: 6, background: "#1e293b", borderRadius: 3, marginTop: 4, overflow: "hidden" },
+  barBg:   { height: 6, background: "var(--surface)", borderRadius: 3, marginTop: 4, overflow: "hidden" },
   stageRow: {
-    padding: "10px 0", borderBottom: "1px solid #1e293b",
+    padding: "10px 0", borderBottom: "1px solid var(--divider)",
     display: "flex", flexDirection: "column", gap: 4,
   },
-  warn:    { display: "flex", gap: 6, fontSize: 11, color: "#f59e0b", marginTop: 6 },
-  error:   { display: "flex", gap: 6, fontSize: 11, color: "#f87171", marginTop: 6 },
+  warn:    { display: "flex", gap: 6, fontSize: 11, color: "var(--warn)", marginTop: 6 },
+  error:   { display: "flex", gap: 6, fontSize: 11, color: "var(--bad)", marginTop: 6 },
 };
 
 // ── Mini helpers ──────────────────────────────────────────────────────────────
-function Badge({ text, color = "#38bdf8" }) {
+function Badge({ text, color = "var(--accent)" }) {
   return <span style={S.badge(color)}>{text}</span>;
 }
 
-function StatCard({ label, value, sub, color = "#38bdf8", Icon }) {
+function StatCard({ label, value, sub, color = "var(--accent)", Icon }) {
   return (
     <div style={S.card}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
         {Icon && <Icon size={14} color={color} />}
-        <span style={{ fontSize: 12, color: "#64748b" }}>{label}</span>
+        <span style={{ fontSize: 12, color: "var(--text-3)" }}>{label}</span>
       </div>
       <div style={{ fontSize: 22, fontWeight: 700, color }}>{value}</div>
-      {sub && <div style={{ fontSize: 11, color: "#475569", marginTop: 4 }}>{sub}</div>}
+      {sub && <div style={{ fontSize: 11, color: "var(--text-4)", marginTop: 4 }}>{sub}</div>}
     </div>
   );
 }
@@ -77,7 +77,7 @@ function StatCard({ label, value, sub, color = "#38bdf8", Icon }) {
 function AccuracySection({ report }) {
   if (!report || report.total_records === 0) {
     return (
-      <div style={{ ...S.card, textAlign: "center", color: "#475569", fontSize: 13, padding: "32px 20px" }}>
+      <div style={{ ...S.card, textAlign: "center", color: "var(--text-4)", fontSize: 13, padding: "32px 20px" }}>
         No prediction history yet — run a pipeline through Central Manager to start collecting data.
       </div>
     );
@@ -88,18 +88,18 @@ function AccuracySection({ report }) {
     <div style={S.grid2}>
       {types.map(([stype, stats]) => {
         const accuracyPct = stats.accuracy_pct || 0;
-        const ratioColor  = Math.abs(stats.mean_ratio - 1) < 0.2 ? "#4ade80"
-                          : Math.abs(stats.mean_ratio - 1) < 0.5 ? "#f59e0b"
-                          : "#f87171";
+        const ratioColor  = Math.abs(stats.mean_ratio - 1) < 0.2 ? "var(--ok)"
+                          : Math.abs(stats.mean_ratio - 1) < 0.5 ? "var(--warn)"
+                          : "var(--bad)";
         return (
           <div key={stype} style={S.card}>
             <div style={S.cardHdr}>
-              <BarChart3 size={14} color="#c084fc" />
+              <BarChart3 size={14} color="var(--violet)" />
               {stype.charAt(0).toUpperCase() + stype.slice(1)} stage accuracy
               <span style={{ marginLeft: "auto" }}>
                 <Badge
                   text={`${accuracyPct}%`}
-                  color={accuracyPct > 80 ? "#4ade80" : accuracyPct > 60 ? "#f59e0b" : "#f87171"}
+                  color={accuracyPct > 80 ? "var(--ok)" : accuracyPct > 60 ? "var(--warn)" : "var(--bad)"}
                 />
               </span>
             </div>
@@ -115,23 +115,23 @@ function AccuracySection({ report }) {
               </div>
             </div>
             <div style={{ marginTop: 10 }}>
-              <div style={{ fontSize: 11, color: "#475569", marginBottom: 4 }}>
+              <div style={{ fontSize: 11, color: "var(--text-4)", marginBottom: 4 }}>
                 Recent ratios (actual/predicted)
               </div>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                 {(stats.recent_ratios || []).map((r, i) => (
-                  <span key={i} style={S.tag(Math.abs(r - 1) < 0.2 ? "#4ade80" : "#f59e0b")}>
+                  <span key={i} style={S.tag(Math.abs(r - 1) < 0.2 ? "var(--ok)" : "var(--warn)")}>
                     {r}×
                   </span>
                 ))}
               </div>
             </div>
             <div style={{ marginTop: 8 }}>
-              <div style={{ fontSize: 11, color: "#475569", marginBottom: 4 }}>
+              <div style={{ fontSize: 11, color: "var(--text-4)", marginBottom: 4 }}>
                 Accuracy {accuracyPct}%
               </div>
               <div style={S.barBg}>
-                <div style={S.bar(accuracyPct, accuracyPct > 80 ? "#4ade80" : "#f59e0b")} />
+                <div style={S.bar(accuracyPct, accuracyPct > 80 ? "var(--ok)" : "var(--warn)")} />
               </div>
             </div>
           </div>
@@ -148,10 +148,10 @@ function LiveAnalysis({ allocations, feasible, violations, warnings, execGroups 
   return (
     <div style={S.card}>
       <div style={S.cardHdr}>
-        <Cpu size={14} color="#38bdf8" />
+        <Cpu size={14} color="var(--accent)" />
         Stage Allocations
         <span style={{ marginLeft: "auto" }}>
-          <Badge text={feasible ? "Feasible" : "Infeasible"} color={feasible ? "#4ade80" : "#f87171"} />
+          <Badge text={feasible ? "Feasible" : "Infeasible"} color={feasible ? "var(--ok)" : "var(--bad)"} />
         </span>
       </div>
 
@@ -164,21 +164,21 @@ function LiveAnalysis({ allocations, feasible, violations, warnings, execGroups 
 
       {allocations.map((a) => {
         const isNotebook = a.stage_type === "notebook";
-        const workerColor = a.workers === 0 ? "#64748b" : "#38bdf8";
+        const workerColor = a.workers === 0 ? "var(--text-3)" : "var(--accent)";
         return (
           <div key={a.stage_name} style={S.stageRow}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontSize: 13, fontWeight: 600, color: "#f1f5f9" }}>{a.stage_name}</span>
+              <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>{a.stage_name}</span>
               <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                {a.right_sized && <span style={S.tag("#4ade80")}>right-sized</span>}
-                {a.contention_adjusted && <span style={S.tag("#f59e0b")}>contention-adjusted</span>}
+                {a.right_sized && <span style={S.tag("var(--ok)")}>right-sized</span>}
+                {a.contention_adjusted && <span style={S.tag("var(--warn)")}>contention-adjusted</span>}
                 <Badge
                   text={a.stage_type}
-                  color={isNotebook ? "#c084fc" : "#f59e0b"}
+                  color={isNotebook ? "var(--violet)" : "var(--warn)"}
                 />
               </div>
             </div>
-            <div style={{ display: "flex", gap: 16, fontSize: 11, color: "#94a3b8", marginTop: 2, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: 16, fontSize: 11, color: "var(--text-2)", marginTop: 2, flexWrap: "wrap" }}>
               {isNotebook ? (
                 <>
                   <span style={{ color: workerColor }}>{a.workers} worker{a.workers !== 1 ? "s" : ""}</span>
@@ -189,11 +189,11 @@ function LiveAnalysis({ allocations, feasible, violations, warnings, execGroups 
                 </>
               ) : (
                 <>
-                  <span style={{ color: "#f59e0b" }}>{a.diu} DIU</span>
+                  <span style={{ color: "var(--warn)" }}>{a.diu} DIU</span>
                   <span>{a.memory_gb} GB scratch</span>
                 </>
               )}
-              {a.ml_sized && <span style={S.tag("#c084fc")}>ML-sized</span>}
+              {a.ml_sized && <span style={S.tag("var(--violet)")}>ML-sized</span>}
               <span><Clock size={10} style={{ marginRight: 3, verticalAlign: "middle" }} />~{a.duration_s}s</span>
             </div>
           </div>
@@ -202,17 +202,17 @@ function LiveAnalysis({ allocations, feasible, violations, warnings, execGroups 
 
       {execGroups && execGroups.length > 0 && (
         <div style={{ marginTop: 14 }}>
-          <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6, display: "flex", gap: 6, alignItems: "center" }}>
+          <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 6, display: "flex", gap: 6, alignItems: "center" }}>
             <GitBranch size={12} /> Execution groups after contention resolution
           </div>
           {execGroups.map((group, gi) => (
             <div key={gi} style={{ display: "flex", gap: 6, marginBottom: 4, alignItems: "center" }}>
-              <span style={{ fontSize: 11, color: "#475569", minWidth: 60 }}>Group {gi + 1}</span>
+              <span style={{ fontSize: 11, color: "var(--text-4)", minWidth: 60 }}>Group {gi + 1}</span>
               {group.map((name) => (
-                <span key={name} style={S.tag(group.length > 1 ? "#38bdf8" : "#64748b")}>{name}</span>
+                <span key={name} style={S.tag(group.length > 1 ? "var(--accent)" : "var(--text-3)")}>{name}</span>
               ))}
               {group.length > 1 && (
-                <span style={{ fontSize: 10, color: "#38bdf8" }}>parallel</span>
+                <span style={{ fontSize: 10, color: "var(--accent)" }}>parallel</span>
               )}
             </div>
           ))}
@@ -225,15 +225,15 @@ function LiveAnalysis({ allocations, feasible, violations, warnings, execGroups 
 // ── Dynamic re-allocation panel ───────────────────────────────────────────────
 function ReallocationPanel({ recs }) {
   if (!recs || recs.length === 0) return null;
-  const colors = { ok: "#4ade80", scale_up: "#f59e0b", reclaim: "#38bdf8", investigate: "#f87171" };
+  const colors = { ok: "var(--ok)", scale_up: "var(--warn)", reclaim: "var(--accent)", investigate: "var(--bad)" };
   return (
     <div style={S.card}>
-      <div style={S.cardHdr}><Zap size={14} color="#f59e0b" />Dynamic Re-allocation Recommendations</div>
+      <div style={S.cardHdr}><Zap size={14} color="var(--warn)" />Dynamic Re-allocation Recommendations</div>
       {recs.map((r, i) => (
         <div key={i} style={{ ...S.stageRow, flexDirection: "row", alignItems: "center", gap: 10 }}>
-          <span style={S.tag(colors[r.action] || "#64748b")}>{r.action}</span>
-          <span style={{ fontSize: 12, color: "#f1f5f9", flex: 1 }}>{r.stage}</span>
-          <span style={{ fontSize: 11, color: "#64748b" }}>{r.reason}</span>
+          <span style={S.tag(colors[r.action] || "var(--text-3)")}>{r.action}</span>
+          <span style={{ fontSize: 12, color: "var(--text)", flex: 1 }}>{r.stage}</span>
+          <span style={{ fontSize: 11, color: "var(--text-3)" }}>{r.reason}</span>
         </div>
       ))}
     </div>
@@ -320,23 +320,23 @@ export default function ResourceTab() {
       {/* Sizing engine banner */}
       {modelInfo && (
         <div style={{ ...S.card, display: "flex", alignItems: "center", gap: 10, padding: "12px 20px" }}>
-          <Cpu size={15} color={modelInfo.ml_available ? "#c084fc" : "#64748b"} />
-          <span style={{ fontSize: 13, color: "#f1f5f9", fontWeight: 600 }}>
+          <Cpu size={15} color={modelInfo.ml_available ? "var(--violet)" : "var(--text-3)"} />
+          <span style={{ fontSize: 13, color: "var(--text)", fontWeight: 600 }}>
             Sizing engine:
           </span>
           <Badge
             text={modelInfo.ml_available ? "ML model" : "Heuristic fallback"}
-            color={modelInfo.ml_available ? "#c084fc" : "#f59e0b"}
+            color={modelInfo.ml_available ? "var(--violet)" : "var(--warn)"}
           />
           {modelInfo.metrics?.rows && (
-            <span style={{ fontSize: 11, color: "#64748b" }}>
+            <span style={{ fontSize: 11, color: "var(--text-3)" }}>
               trained on {Number(modelInfo.metrics.rows).toLocaleString()} stages
               {modelInfo.metrics?.targets?.rec_workers?.within1_acc != null &&
                 ` · workers ±1 acc ${(modelInfo.metrics.targets.rec_workers.within1_acc * 100).toFixed(1)}%`}
             </span>
           )}
           {!modelInfo.ml_available && (
-            <span style={{ fontSize: 11, color: "#64748b" }}>
+            <span style={{ fontSize: 11, color: "var(--text-3)" }}>
               train &amp; drop resource_models.pkl into resource_agent/models/
             </span>
           )}
@@ -350,21 +350,21 @@ export default function ResourceTab() {
           value={totalRecords}
           sub="runs used for self-correction"
           Icon={BarChart3}
-          color="#38bdf8"
+          color="var(--accent)"
         />
         <StatCard
           label="Avg prediction accuracy"
           value={avgAccuracy != null ? `${avgAccuracy.toFixed(1)}%` : "—"}
           sub="actual vs predicted duration"
           Icon={TrendingUp}
-          color={avgAccuracy == null ? "#475569" : avgAccuracy > 80 ? "#4ade80" : "#f59e0b"}
+          color={avgAccuracy == null ? "var(--text-4)" : avgAccuracy > 80 ? "var(--ok)" : "var(--warn)"}
         />
         <StatCard
           label="Correction factors"
           value={factors ? `${factors.copy}× / ${factors.notebook}×` : "—"}
           sub="copy / notebook (damped)"
           Icon={Zap}
-          color="#c084fc"
+          color="var(--violet)"
         />
       </div>
 
@@ -375,7 +375,7 @@ export default function ResourceTab() {
           {loading ? "Loading…" : "Refresh accuracy"}
         </button>
         <button
-          style={{ ...S.btn, background: "#7c3aed" }}
+          style={{ ...S.btn, background: "var(--violet)" }}
           onClick={checkReallocate}
           disabled={reallocationLoading}
         >
@@ -385,7 +385,7 @@ export default function ResourceTab() {
       </div>
 
       {err && (
-        <div style={{ ...S.card, border: "1px solid #f87171", color: "#f87171", fontSize: 12 }}>
+        <div style={{ ...S.card, border: "1px solid var(--bad)", color: "var(--bad)", fontSize: 12 }}>
           {err}
         </div>
       )}
@@ -395,7 +395,7 @@ export default function ResourceTab() {
 
       {/* Live resource plan from manager context (if any) */}
       {liveRp && (
-        <div style={{ fontSize: 11, color: "#475569", marginBottom: 8 }}>
+        <div style={{ fontSize: 11, color: "var(--text-4)", marginBottom: 8 }}>
           Resource plan of Central Manager run{" "}
           <span style={{ fontFamily: "monospace" }}>{managerState?.run_id?.slice(0, 8) || "—"}</span>
         </div>
@@ -413,10 +413,10 @@ export default function ResourceTab() {
       {/* Accuracy history */}
       <div style={S.card}>
         <div style={S.cardHdr}>
-          <TrendingUp size={14} color="#4ade80" />
+          <TrendingUp size={14} color="var(--ok)" />
           Prediction Accuracy History
           {totalRecords === 0 && (
-            <span style={{ marginLeft: 8, fontSize: 11, color: "#475569", fontWeight: 400 }}>
+            <span style={{ marginLeft: 8, fontSize: 11, color: "var(--text-4)", fontWeight: 400 }}>
               — no data yet
             </span>
           )}
@@ -426,7 +426,7 @@ export default function ResourceTab() {
 
       {/* Student tier limits reference */}
       <div style={S.card}>
-        <div style={S.cardHdr}><CheckCircle size={14} color="#64748b" />Student-Tier Hard Limits</div>
+        <div style={S.cardHdr}><CheckCircle size={14} color="var(--text-3)" />Student-Tier Hard Limits</div>
         <div style={S.kv}>
           {/* From GET /resource/limits — the constants the agent enforces */}
           {limits ? (() => {
@@ -445,7 +445,7 @@ export default function ResourceTab() {
               </div>
             ));
           })() : (
-            <div style={{ fontSize: 12, color: "#475569" }}>Limits unavailable — backend not reachable.</div>
+            <div style={{ fontSize: 12, color: "var(--text-4)" }}>Limits unavailable — backend not reachable.</div>
           )}
         </div>
       </div>

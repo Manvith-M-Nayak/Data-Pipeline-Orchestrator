@@ -8,69 +8,69 @@ import { perfPrediction, manager } from "../api.js";
 // ── Styles (mirrors ResourceTab exactly) ─────────────────────────────────────
 const S = {
   page:    { maxWidth: 960, margin: "0 auto" },
-  heading: { fontSize: 22, fontWeight: 700, color: "#f1f5f9", marginBottom: 4 },
-  sub:     { fontSize: 13, color: "#64748b", marginBottom: 28 },
+  heading: { fontSize: 22, fontWeight: 700, color: "var(--text)", marginBottom: 4 },
+  sub:     { fontSize: 13, color: "var(--text-3)", marginBottom: 28 },
   grid2:   { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 },
   grid3:   { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, marginBottom: 16 },
   grid4:   { display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 16, marginBottom: 16 },
   card:    {
-    background: "#1e293b", border: "1px solid #334155", borderRadius: 12,
+    background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12,
     padding: "16px 20px", marginBottom: 16,
   },
   cardHdr: {
     display: "flex", alignItems: "center", gap: 8,
-    fontSize: 13, fontWeight: 700, color: "#f1f5f9", marginBottom: 14,
+    fontSize: 13, fontWeight: 700, color: "var(--text)", marginBottom: 14,
   },
   kv:      { display: "flex", flexDirection: "column", gap: 6 },
   kvRow:   {
     display: "flex", justifyContent: "space-between", alignItems: "center",
-    fontSize: 12, color: "#94a3b8", paddingBottom: 6,
-    borderBottom: "1px solid #0f172a",
+    fontSize: 12, color: "var(--text-2)", paddingBottom: 6,
+    borderBottom: "1px solid var(--divider)",
   },
-  kvVal:   { color: "#f1f5f9", fontWeight: 600 },
+  kvVal:   { color: "var(--text)", fontWeight: 600 },
   badge:   (color) => ({
     display: "inline-block", padding: "2px 8px", borderRadius: 99,
     fontSize: 11, fontWeight: 700,
-    background: color + "22", color: color,
+    background: `color-mix(in srgb, ${color} 13%, transparent)`, color: color,
   }),
   btn:     {
-    padding: "8px 16px", background: "#0ea5e9", color: "#fff",
+    padding: "8px 16px", background: "var(--accent)", color: "var(--accent-fg)",
     border: "none", borderRadius: 8, cursor: "pointer",
     fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6,
   },
   tag:     (color) => ({
     padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 700,
-    background: color + "22", color: color, marginRight: 4,
+    background: `color-mix(in srgb, ${color} 13%, transparent)`, color: color, marginRight: 4,
   }),
   bar:     (pct, color) => ({
     height: 6, width: `${Math.min(pct, 100)}%`, background: color,
     borderRadius: 3, transition: "width 0.4s ease",
   }),
-  barBg:   { height: 6, background: "#0f172a", borderRadius: 3, marginTop: 4, overflow: "hidden" },
+  barBg:   { height: 6, background: "var(--surface-2)", borderRadius: 3, marginTop: 4, overflow: "hidden" },
   stageRow: {
-    padding: "10px 0", borderBottom: "1px solid #0f172a",
+    padding: "10px 0", borderBottom: "1px solid var(--divider)",
     display: "flex", flexDirection: "column", gap: 4,
   },
-  warn:    { display: "flex", gap: 6, fontSize: 11, color: "#f59e0b", marginTop: 6 },
-  error:   { display: "flex", gap: 6, fontSize: 11, color: "#f87171", marginTop: 6 },
+  warn:    { display: "flex", gap: 6, fontSize: 11, color: "var(--warn)", marginTop: 6 },
+  error:   { display: "flex", gap: 6, fontSize: 11, color: "var(--bad)", marginTop: 6 },
   empty:   {
-    textAlign: "center", color: "#475569", fontSize: 13,
+    textAlign: "center", color: "var(--text-4)", fontSize: 13,
     padding: "32px 20px",
   },
 };
 
 // ── Colour helpers ────────────────────────────────────────────────────────────
 const OUTCOME_COLOR = {
-  success: "#4ade80",
-  slowdown: "#f59e0b",
-  failure: "#f87171",
-  unknown: "#64748b",
+  success: "var(--ok)",
+  slowdown: "var(--warn)",
+  failure: "var(--bad)",
+  unknown: "var(--text-3)",
 };
 
 const RISK_COLOR = {
-  ok: "#4ade80",
-  warning: "#f59e0b",
-  high: "#f87171",
+  ok: "var(--ok)",
+  warning: "var(--warn)",
+  high: "var(--bad)",
 };
 
 function fmtSeconds(v) {
@@ -83,19 +83,19 @@ function fmtSeconds(v) {
 }
 
 // ── Shared mini-components ────────────────────────────────────────────────────
-function Badge({ text, color = "#38bdf8" }) {
+function Badge({ text, color = "var(--accent)" }) {
   return <span style={S.badge(color)}>{text}</span>;
 }
 
-function StatCard({ label, value, sub, color = "#38bdf8", Icon }) {
+function StatCard({ label, value, sub, color = "var(--accent)", Icon }) {
   return (
     <div style={S.card}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
         {Icon && <Icon size={14} color={color} />}
-        <span style={{ fontSize: 12, color: "#64748b" }}>{label}</span>
+        <span style={{ fontSize: 12, color: "var(--text-3)" }}>{label}</span>
       </div>
       <div style={{ fontSize: 22, fontWeight: 700, color }}>{value}</div>
-      {sub && <div style={{ fontSize: 11, color: "#475569", marginTop: 4 }}>{sub}</div>}
+      {sub && <div style={{ fontSize: 11, color: "var(--text-4)", marginTop: 4 }}>{sub}</div>}
     </div>
   );
 }
@@ -104,7 +104,7 @@ function StatCard({ label, value, sub, color = "#38bdf8", Icon }) {
 function OutcomeBanner({ pred }) {
   if (!pred) return null;
   const outcome = pred.outcome || "unknown";
-  const color   = OUTCOME_COLOR[outcome] || "#64748b";
+  const color   = OUTCOME_COLOR[outcome] || "var(--text-3)";
   const icons   = { success: CheckCircle, slowdown: AlertTriangle, failure: AlertTriangle, unknown: Activity };
   const Icon    = icons[outcome] || Activity;
   const labels  = {
@@ -117,15 +117,15 @@ function OutcomeBanner({ pred }) {
   return (
     <div style={{
       ...S.card,
-      border: `1px solid ${color}44`,
-      background: color + "11",
+      border: `1px solid color-mix(in srgb, ${color} 27%, transparent)`,
+      background: `color-mix(in srgb, ${color} 7%, transparent)`,
       display: "flex", alignItems: "center", gap: 12, marginBottom: 16,
     }}>
       <Icon size={20} color={color} />
       <div style={{ flex: 1 }}>
         <div style={{ fontSize: 14, fontWeight: 700, color }}>{labels[outcome]}</div>
         {pred.rationale && (
-          <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 4, lineHeight: 1.5 }}>
+          <div style={{ fontSize: 11, color: "var(--text-2)", marginTop: 4, lineHeight: 1.5 }}>
             {pred.rationale}
           </div>
         )}
@@ -138,10 +138,10 @@ function OutcomeBanner({ pred }) {
 // ── Summary stat cards ────────────────────────────────────────────────────────
 function PredictionStats({ pred }) {
   if (!pred) return null;
-  const outcomeColor = OUTCOME_COLOR[pred.outcome] || "#64748b";
+  const outcomeColor = OUTCOME_COLOR[pred.outcome] || "var(--text-3)";
   const confPct      = Math.round((pred.confidence || 0) * 100);
   const learned      = pred.expected_duration_basis === "history";
-  const usualColor   = !learned ? "#94a3b8" : pred.slower_than_usual ? "#f87171" : "#4ade80";
+  const usualColor   = !learned ? "var(--text-2)" : pred.slower_than_usual ? "var(--bad)" : "var(--ok)";
 
   const throughputVal = pred.throughput_mb_per_s != null
     ? `${pred.throughput_mb_per_s} MB/s`
@@ -163,7 +163,7 @@ function PredictionStats({ pred }) {
           value={fmtSeconds(pred.predicted_total_s)}
           sub={learned ? `Usually ≤ ${fmtSeconds(pred.expected_duration_s)}` : "Usual duration: still learning"}
           Icon={Clock}
-          color="#38bdf8"
+          color="var(--accent)"
         />
         <StatCard
           label="Outcome"
@@ -188,7 +188,7 @@ function PredictionStats({ pred }) {
           value={pred.adjustment_factor != null ? `${pred.adjustment_factor}×` : "1.0×"}
           sub={`From ${pred.history_runs_used || 0} historical run(s)`}
           Icon={TrendingUp}
-          color="#c084fc"
+          color="var(--violet)"
         />
       </div>
       {/* Throughput row */}
@@ -198,7 +198,7 @@ function PredictionStats({ pred }) {
           value={throughputVal}
           sub={throughputSub}
           Icon={Zap}
-          color="#f59e0b"
+          color="var(--warn)"
         />
         <StatCard
           label="Data processed"
@@ -207,7 +207,7 @@ function PredictionStats({ pred }) {
             : "—"}
           sub="estimated total volume through pipeline"
           Icon={BarChart3}
-          color="#38bdf8"
+          color="var(--accent)"
         />
       </div>
     </>
@@ -221,11 +221,11 @@ function StageForecasts({ forecasts }) {
   return (
     <div style={S.card}>
       <div style={S.cardHdr}>
-        <BarChart3 size={14} color="#38bdf8" />
+        <BarChart3 size={14} color="var(--accent)" />
         Stage Forecasts
       </div>
       {forecasts.map((f, i) => {
-        const riskColor = RISK_COLOR[f.risk_level] || "#64748b";
+        const riskColor = RISK_COLOR[f.risk_level] || "var(--text-3)";
         const pct       = Math.min((f.predicted_s / 600) * 100, 100); // 600s = 100%
         return (
           <div key={f.name} style={{
@@ -234,14 +234,14 @@ function StageForecasts({ forecasts }) {
           }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: 13, fontWeight: 600, color: "#f1f5f9" }}>{f.name}</span>
+                <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>{f.name}</span>
                 {f.is_bottleneck && (
-                  <span style={S.tag("#f59e0b")}>bottleneck</span>
+                  <span style={S.tag("var(--warn)")}>bottleneck</span>
                 )}
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <Badge text={f.risk_level} color={riskColor} />
-                <span style={{ fontSize: 12, color: "#94a3b8" }}>
+                <span style={{ fontSize: 12, color: "var(--text-2)" }}>
                   <Clock size={10} style={{ marginRight: 3, verticalAlign: "middle" }} />
                   {fmtSeconds(f.predicted_s)}
                 </span>
@@ -270,9 +270,9 @@ function HistorySection({ history }) {
   return (
     <div style={S.card}>
       <div style={S.cardHdr}>
-        <TrendingUp size={14} color="#4ade80" />
+        <TrendingUp size={14} color="var(--ok)" />
         Recent Runs — Actual vs Predicted
-        <span style={{ marginLeft: "auto", fontSize: 11, color: "#475569", fontWeight: 400 }}>
+        <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--text-4)", fontWeight: 400 }}>
           last {history.length} run(s)
         </span>
       </div>
@@ -282,7 +282,7 @@ function HistorySection({ history }) {
             ? (r.actual_duration_s / r.predicted_duration_s).toFixed(2)
             : "—";
           const ratioNum   = parseFloat(ratio);
-          const ratioColor = ratioNum <= 1.2 ? "#4ade80" : ratioNum <= 2.0 ? "#f59e0b" : "#f87171";
+          const ratioColor = ratioNum <= 1.2 ? "var(--ok)" : ratioNum <= 2.0 ? "var(--warn)" : "var(--bad)";
           const passed     = r.assurance_passed;
 
           return (
@@ -291,23 +291,23 @@ function HistorySection({ history }) {
               ...(i === history.length - 1 ? { borderBottom: "none" } : {}),
             }}>
               <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                <span style={{ fontSize: 12, color: "#f1f5f9", fontWeight: 600 }}>
+                <span style={{ fontSize: 12, color: "var(--text)", fontWeight: 600 }}>
                   {r.run_id ? r.run_id.slice(0, 8) : `Run ${i + 1}`}
                 </span>
-                <span style={{ fontSize: 10, color: "#475569" }}>
+                <span style={{ fontSize: 10, color: "var(--text-4)" }}>
                   {r.complexity || "—"} · {r.stage_count || "?"} stage(s)
                   {r.ts ? ` · ${r.ts.slice(0, 16).replace("T", " ")}` : ""}
                 </span>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <span style={{ fontSize: 11, color: "#64748b" }}>
+                <span style={{ fontSize: 11, color: "var(--text-3)" }}>
                   actual {fmtSeconds(Math.round(r.actual_duration_s))} /
                   predicted {fmtSeconds(r.predicted_duration_s)}
                 </span>
                 <span style={{ ...S.kvVal, color: ratioColor }}>{ratio}×</span>
                 <Badge
                   text={passed ? "passed" : passed === false ? "failed" : "?"}
-                  color={passed ? "#4ade80" : passed === false ? "#f87171" : "#64748b"}
+                  color={passed ? "var(--ok)" : passed === false ? "var(--bad)" : "var(--text-3)"}
                 />
               </div>
             </div>
@@ -322,9 +322,9 @@ function HistorySection({ history }) {
 function EmptyState() {
   return (
     <div style={{ ...S.card, ...S.empty, padding: "48px 20px" }}>
-      <Activity size={32} color="#334155" style={{ marginBottom: 12 }} />
-      <div style={{ color: "#64748b", marginBottom: 6 }}>No prediction data yet</div>
-      <div style={{ fontSize: 12, color: "#475569" }}>
+      <Activity size={32} color="var(--text-4)" style={{ marginBottom: 12 }} />
+      <div style={{ color: "var(--text-3)", marginBottom: 6 }}>No prediction data yet</div>
+      <div style={{ fontSize: 12, color: "var(--text-4)" }}>
         Run a pipeline through the Central Manager tab — the Performance Prediction Agent
         runs automatically during pre-checks and its output will appear here.
       </div>
@@ -384,7 +384,7 @@ export default function PerformancePredictionTab() {
       </div>
 
       {err && (
-        <div style={{ ...S.card, border: "1px solid #f87171", color: "#f87171", fontSize: 12 }}>
+        <div style={{ ...S.card, border: "1px solid var(--bad)", color: "var(--bad)", fontSize: 12 }}>
           {err}
         </div>
       )}
@@ -392,7 +392,7 @@ export default function PerformancePredictionTab() {
       {/* Latest run prediction */}
       {hasPred ? (
         <>
-          <div style={{ fontSize: 11, color: "#475569", marginBottom: 10 }}>
+          <div style={{ fontSize: 11, color: "var(--text-4)", marginBottom: 10 }}>
             LATEST RUN PREDICTION
           </div>
 
@@ -409,13 +409,13 @@ export default function PerformancePredictionTab() {
           {latestPred.bottleneck_stage && (
             <div style={S.card}>
               <div style={S.cardHdr}>
-                <GitBranch size={14} color="#f59e0b" />
+                <GitBranch size={14} color="var(--warn)" />
                 Key Findings
               </div>
               <div style={S.kv}>
                 <div style={S.kvRow}>
                   <span>Bottleneck stage</span>
-                  <span style={{ ...S.kvVal, color: "#f59e0b" }}>{latestPred.bottleneck_stage}</span>
+                  <span style={{ ...S.kvVal, color: "var(--warn)" }}>{latestPred.bottleneck_stage}</span>
                 </div>
                 <div style={S.kvRow}>
                   <span>Confidence</span>
@@ -440,10 +440,10 @@ export default function PerformancePredictionTab() {
       {/* History section — always shown once we have data */}
       <div style={S.card}>
         <div style={S.cardHdr}>
-          <TrendingUp size={14} color="#4ade80" />
+          <TrendingUp size={14} color="var(--ok)" />
           Prediction History
           {history.length === 0 && (
-            <span style={{ marginLeft: 8, fontSize: 11, color: "#475569", fontWeight: 400 }}>
+            <span style={{ marginLeft: 8, fontSize: 11, color: "var(--text-4)", fontWeight: 400 }}>
               — no data yet
             </span>
           )}
@@ -454,7 +454,7 @@ export default function PerformancePredictionTab() {
       {/* How it works reference card */}
       <div style={S.card}>
         <div style={S.cardHdr}>
-          <CheckCircle size={14} color="#64748b" />
+          <CheckCircle size={14} color="var(--text-3)" />
           How Predictions Are Made
         </div>
         <div style={S.kv}>

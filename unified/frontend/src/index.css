@@ -1,18 +1,189 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   Design tokens. Every colour in the app comes from these variables, so the
+   light and dark themes are one attribute switch on <html>:
+     data-theme="light" | "dark"   — explicit user choice (header toggle)
+     no attribute                  — follow the OS (prefers-color-scheme)
+   Palette: warm neutrals + one ink-blue accent; status colours are muted so
+   dense operational screens stay calm.
+   ───────────────────────────────────────────────────────────────────────── */
+
+:root {
+  --font-sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --radius-sm: 6px;
+  --radius:    10px;
+  --radius-lg: 14px;
+
+  /* light (default) */
+  --bg:            #f6f5f1;
+  --surface:       #ffffff;
+  --surface-2:     #f2f0eb;
+  --surface-hover: #ebe8e1;
+  --divider:       #efece6;
+  --border:        #e3dfd6;
+  --border-strong: #cfcac0;
+
+  --text:   #1d1c1a;
+  --text-2: #46433e;
+  --text-3: #716d66;
+  --text-4: #9b968d;
+
+  --accent:       #2451b7;
+  --accent-hover: #1c4199;
+  --accent-fg:    #ffffff;
+  --accent-soft:  #eaeffa;
+  --accent-line:  #c7d4f1;
+
+  --ok:        #1b7a4a;
+  --ok-soft:   #e7f3ec;
+  --ok-line:   #bfe0cc;
+  --warn:      #9a5d08;
+  --warn-soft: #fbf1df;
+  --warn-line: #eed6a4;
+  --bad:       #bf3a2b;
+  --bad-soft:  #fbeae7;
+  --bad-line:  #f0c7c0;
+  --violet:      #6a4fbf;
+  --violet-soft: #f0ecfa;
+  --violet-line: #d9d0f2;
+  --orange: #bd5a14;
+
+  --shadow-sm: 0 1px 2px rgba(29, 28, 26, 0.05);
+  --shadow:    0 1px 2px rgba(29, 28, 26, 0.04), 0 4px 16px -8px rgba(29, 28, 26, 0.10);
+  --ring:      0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+
+  color-scheme: light;
+}
+
+/* dark — warm charcoal, not slate */
+:root[data-theme="dark"] {
+  --bg:            #131312;
+  --surface:       #1b1b19;
+  --surface-2:     #171715;
+  --surface-hover: #242421;
+  --divider:       #232320;
+  --border:        #2e2d2a;
+  --border-strong: #3d3c38;
+
+  --text:   #edebe6;
+  --text-2: #c6c3bc;
+  --text-3: #8f8b84;
+  --text-4: #66635d;
+
+  --accent:       #86a6ff;
+  --accent-hover: #a3bcff;
+  --accent-fg:    #0e1322;
+  --accent-soft:  #1a2137;
+  --accent-line:  #2d3a62;
+
+  --ok:        #62c690;
+  --ok-soft:   #15251c;
+  --ok-line:   #25452f;
+  --warn:      #e2a64a;
+  --warn-soft: #2a2114;
+  --warn-line: #4b3b1e;
+  --bad:       #ee8174;
+  --bad-soft:  #2c1816;
+  --bad-line:  #542820;
+  --violet:      #ab98f0;
+  --violet-soft: #211c33;
+  --violet-line: #3a3160;
+  --orange: #ec8c4c;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow:    0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px -12px rgba(0, 0, 0, 0.6);
+
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --bg:            #131312;
+    --surface:       #1b1b19;
+    --surface-2:     #171715;
+    --surface-hover: #242421;
+    --divider:       #232320;
+    --border:        #2e2d2a;
+    --border-strong: #3d3c38;
+    --text:   #edebe6;
+    --text-2: #c6c3bc;
+    --text-3: #8f8b84;
+    --text-4: #66635d;
+    --accent:       #86a6ff;
+    --accent-hover: #a3bcff;
+    --accent-fg:    #0e1322;
+    --accent-soft:  #1a2137;
+    --accent-line:  #2d3a62;
+    --ok:        #62c690;
+    --ok-soft:   #15251c;
+    --ok-line:   #25452f;
+    --warn:      #e2a64a;
+    --warn-soft: #2a2114;
+    --warn-line: #4b3b1e;
+    --bad:       #ee8174;
+    --bad-soft:  #2c1816;
+    --bad-line:  #542820;
+    --violet:      #ab98f0;
+    --violet-soft: #211c33;
+    --violet-line: #3a3160;
+    --orange: #ec8c4c;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow:    0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px -12px rgba(0, 0, 0, 0.6);
+    color-scheme: dark;
+  }
+}
+
+/* ── base ─────────────────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+html { -webkit-text-size-adjust: 100%; }
+
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  background: #0f172a;
-  color: #e2e8f0;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  background: var(--bg);
+  color: var(--text-2);
   min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: "ss01", "tnum" 0;
 }
+
+h1, h2, h3, h4 { color: var(--text); letter-spacing: -0.01em; }
 
 a { color: inherit; text-decoration: none; }
 
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: #1e293b; }
-::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+code, pre, kbd, .mono { font-family: var(--font-mono); font-size: 0.92em; }
 
-textarea, input, select {
-  font-family: inherit;
+::selection { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+
+button { font: inherit; color: inherit; }
+button:disabled { cursor: not-allowed !important; opacity: 0.55; }
+textarea, input, select { font-family: inherit; font-size: inherit; color: var(--text); }
+
+:focus-visible { outline: none; box-shadow: var(--ring); border-radius: var(--radius-sm); }
+input:focus, textarea:focus, select:focus {
+  outline: none;
+  border-color: var(--accent) !important;
+  box-shadow: var(--ring);
+}
+
+table { font-variant-numeric: tabular-nums; }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 10px;
+  border: 3px solid var(--bg);
+}
+
+@keyframes spin  { to { transform: rotate(360deg); } }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+@keyframes rise  { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }

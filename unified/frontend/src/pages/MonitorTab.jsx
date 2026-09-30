@@ -18,21 +18,21 @@ const S = {
   header: { marginBottom: 0 },
   agent:  { display: "flex", alignItems: "center", gap: 10, marginBottom: 6 },
   agentBadge: {
-    padding: "4px 12px", background: "#0c1a2e", border: "1px solid #1e3a5f",
-    borderRadius: 20, fontSize: 12, fontWeight: 700, color: "#38bdf8",
+    padding: "4px 12px", background: "var(--accent-soft)", border: "1px solid var(--accent-line)",
+    borderRadius: 20, fontSize: 12, fontWeight: 700, color: "var(--accent)",
     display: "flex", alignItems: "center", gap: 6,
   },
-  title:  { fontSize: 22, fontWeight: 700, color: "#f1f5f9", marginBottom: 4 },
-  sub:    { fontSize: 13, color: "#64748b", marginBottom: 20 },
+  title:  { fontSize: 22, fontWeight: 700, color: "var(--text)", marginBottom: 4 },
+  sub:    { fontSize: 13, color: "var(--text-3)", marginBottom: 20 },
   tabBar: {
-    display: "flex", gap: 2, borderBottom: "1px solid #334155",
+    display: "flex", gap: 2, borderBottom: "1px solid var(--border)",
     marginBottom: 28,
   },
   tab:    (active) => ({
     padding: "10px 18px", fontSize: 13, fontWeight: active ? 700 : 400,
-    color: active ? "#38bdf8" : "#64748b", cursor: "pointer",
+    color: active ? "var(--accent)" : "var(--text-3)", cursor: "pointer",
     background: "transparent", border: "none",
-    borderBottom: active ? "2px solid #38bdf8" : "2px solid transparent",
+    borderBottom: active ? "2px solid var(--accent)" : "2px solid transparent",
     marginBottom: -1, transition: "color 0.15s, border-color 0.15s",
   }),
 };

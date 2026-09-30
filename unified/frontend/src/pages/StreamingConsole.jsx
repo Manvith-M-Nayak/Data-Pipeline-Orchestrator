@@ -92,7 +92,7 @@ export default function StreamingConsole({ config, schema, fileFormat = "csv" })
   return (
     <div style={S.card}>
       <div style={S.hdr}>
-        <Radio size={16} color="#38bdf8" />
+        <Radio size={16} color="var(--accent)" />
         Streaming Console
         <span style={S.sub}>availableNow · drop data → processed incrementally</span>
       </div>
@@ -106,7 +106,7 @@ export default function StreamingConsole({ config, schema, fileFormat = "csv" })
           <div style={S.metaRow}>
             <Pill label="stream" value={streamId} />
             <Pill label="state" value={status?.active ? (running ? "processing…" : "live") : "stopped"}
-                  color={status?.active ? (running ? "#f59e0b" : "#34d399") : "#64748b"} />
+                  color={status?.active ? (running ? "var(--warn)" : "var(--ok)") : "var(--text-3)"} />
             <Pill label="triggers" value={status?.tick_count ?? 0} />
             <Pill label="sink" value={status?.sink_container} />
           </div>
@@ -117,11 +117,11 @@ export default function StreamingConsole({ config, schema, fileFormat = "csv" })
             onDrop={(e) => { e.preventDefault(); onDrop(e.dataTransfer.files[0]); }}
             style={S.drop(busy)}
           >
-            <Upload size={20} color="#475569" />
-            <div style={{ marginTop: 6, fontSize: 13, color: "#cbd5e1" }}>
+            <Upload size={20} color="var(--text-4)" />
+            <div style={{ marginTop: 6, fontSize: 13, color: "var(--text-2)" }}>
               {busy ? "Processing new data…" : "Drop or click to add data to the stream"}
             </div>
-            <div style={{ fontSize: 11, color: "#64748b" }}>
+            <div style={{ fontSize: 11, color: "var(--text-3)" }}>
               each drop runs one incremental trigger (~1–2 min on Databricks)
             </div>
             <input
@@ -147,7 +147,7 @@ export default function StreamingConsole({ config, schema, fileFormat = "csv" })
             <div style={S.err}>Last tick error: {status.last_error}</div>
           )}
 
-          <div style={{ marginTop: 12, fontSize: 12, color: "#94a3b8" }}>
+          <div style={{ marginTop: 12, fontSize: 12, color: "var(--text-2)" }}>
             Output — {rows.length} row(s) in sink
           </div>
           {rows.length > 0 ? (
@@ -164,7 +164,7 @@ export default function StreamingConsole({ config, schema, fileFormat = "csv" })
               </table>
             </div>
           ) : (
-            <div style={{ fontSize: 12, color: "#64748b", marginTop: 6 }}>
+            <div style={{ fontSize: 12, color: "var(--text-3)", marginTop: 6 }}>
               No output yet — drop a file to generate results.
             </div>
           )}
@@ -176,26 +176,26 @@ export default function StreamingConsole({ config, schema, fileFormat = "csv" })
   );
 }
 
-function Pill({ label, value, color = "#94a3b8" }) {
+function Pill({ label, value, color = "var(--text-2)" }) {
   return (
-    <div style={{ fontSize: 11, color: "#64748b" }}>
+    <div style={{ fontSize: 11, color: "var(--text-3)" }}>
       {label}: <span style={{ color, fontWeight: 600 }}>{String(value)}</span>
     </div>
   );
 }
 
 const S = {
-  card: { background: "#1e293b", border: "1px solid #334155", borderRadius: 12, padding: 20, marginTop: 16 },
-  hdr:  { display: "flex", alignItems: "center", gap: 8, fontSize: 15, fontWeight: 700, color: "#f1f5f9", marginBottom: 12 },
-  sub:  { fontSize: 11, color: "#475569", fontWeight: 400 },
+  card: { background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: 20, marginTop: 16 },
+  hdr:  { display: "flex", alignItems: "center", gap: 8, fontSize: 15, fontWeight: 700, color: "var(--text)", marginBottom: 12 },
+  sub:  { fontSize: 11, color: "var(--text-4)", fontWeight: 400 },
   metaRow: { display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 12 },
   primary: (d) => ({ display: "flex", alignItems: "center", gap: 7, padding: "10px 16px", fontSize: 13, fontWeight: 700,
-    background: d ? "#1e3a5f" : "#0ea5e9", color: "#fff", border: "none", borderRadius: 8, cursor: d ? "default" : "pointer" }),
-  drop: (d) => ({ border: "1px dashed #334155", borderRadius: 10, padding: 24, textAlign: "center",
-    cursor: d ? "default" : "pointer", background: "#0f172a", opacity: d ? 0.6 : 1 }),
+    background: d ? "var(--accent-soft)" : "var(--accent)", color: "var(--accent-fg)", border: "none", borderRadius: 8, cursor: d ? "default" : "pointer" }),
+  drop: (d) => ({ border: "1px dashed var(--border-strong)", borderRadius: 10, padding: 24, textAlign: "center",
+    cursor: d ? "default" : "pointer", background: "var(--surface-2)", opacity: d ? 0.6 : 1 }),
   ghost: { display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", fontSize: 12, background: "transparent",
-    color: "#94a3b8", border: "1px solid #334155", borderRadius: 8, cursor: "pointer" },
-  th: { textAlign: "left", padding: "6px 10px", borderBottom: "1px solid #334155", color: "#64748b", whiteSpace: "nowrap" },
-  td: { padding: "5px 10px", borderBottom: "1px solid #1e293b", color: "#cbd5e1", whiteSpace: "nowrap" },
-  err: { marginTop: 10, fontSize: 12, color: "#fca5a5", background: "#3f1d1d", padding: "8px 10px", borderRadius: 8 },
+    color: "var(--text-2)", border: "1px solid var(--border)", borderRadius: 8, cursor: "pointer" },
+  th: { textAlign: "left", padding: "6px 10px", borderBottom: "1px solid var(--border)", color: "var(--text-3)", whiteSpace: "nowrap" },
+  td: { padding: "5px 10px", borderBottom: "1px solid var(--divider)", color: "var(--text-2)", whiteSpace: "nowrap" },
+  err: { marginTop: 10, fontSize: 12, color: "var(--bad)", background: "var(--bad-soft)", padding: "8px 10px", borderRadius: 8 },
 };

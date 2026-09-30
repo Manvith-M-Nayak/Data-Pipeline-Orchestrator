@@ -1,12 +1,16 @@
-import React, { useState, Suspense, lazy } from "react";
+import React, { useEffect, useState, Suspense, lazy } from "react";
 import { BrowserRouter, Routes, Route, NavLink, useLocation } from "react-router-dom";
-import { Home, Brain, Zap, Activity, GitBranch, Cpu, RefreshCw, TrendingUp, DollarSign, AlertTriangle, BarChart3 } from "lucide-react";
-import { monitor } from "./api.js";
+import {
+  LayoutGrid, Brain, Zap, Activity, GitBranch, Cpu, RefreshCw, Gauge,
+  CircleDollarSign, AlertTriangle, BarChart3, Moon, Sun, Workflow,
+} from "lucide-react";
+import { monitor, health } from "./api.js";
 import { AppProvider, useAppContext } from "./AppContext.jsx";
 import ErrorBoundary from "./ErrorBoundary.jsx";
+import { useTheme } from "./ui/theme.js";
+import { Button, Dot, Spinner } from "./ui/components.jsx";
 
-// Route-level code splitting — each tab ships in its own chunk instead of one
-// monolithic bundle, so the initial load only pulls the landing page.
+// Route-level code splitting — each page ships in its own chunk.
 const HomePage    = lazy(() => import("./pages/HomePage.jsx"));
 const PlannerTab  = lazy(() => import("./pages/PlannerTab.jsx"));
 const ExecutorTab = lazy(() => import("./pages/ExecutorTab.jsx"));
@@ -17,86 +21,102 @@ const PerformancePredictionTab = lazy(() => import("./pages/PerformancePredictio
 const CostOptimizationTab = lazy(() => import("./pages/CostOptimizationTab.jsx"));
 const RunInsights = lazy(() => import("./pages/RunInsights.jsx"));
 
-const TABS = [
-  { to: "/",          label: "Home",              icon: Home,       exact: true  },
-  { to: "/planner",   label: "Planner Agent",     icon: Brain,      exact: false },
-  { to: "/manager",   label: "Central Manager",   icon: GitBranch,  exact: false },
-  { to: "/resource",     label: "Resource Agent",        icon: Cpu,         exact: false },
-  { to: "/performance",  label: "Performance Agent",     icon: TrendingUp,  exact: false },
-  { to: "/cost",      label: "Cost Optimization", icon: DollarSign,  exact: false },
-  { to: "/executor",  label: "Executor Agent",    icon: Zap,        exact: false },
-  { to: "/monitor",   label: "Monitor Agent",     icon: Activity,   exact: false },
-  { to: "/insights",  label: "Run Insights",      icon: BarChart3,  exact: false },
+// Navigation follows the work: build a plan → run it → watch it → tune agents.
+const NAV = [
+  { group: "Workspace", items: [
+    { to: "/",          label: "Overview",        icon: LayoutGrid, element: <HomePage /> },
+  ]},
+  { group: "Build", items: [
+    { to: "/planner",   label: "Planner",         icon: Brain,      element: <PlannerTab /> },
+  ]},
+  { group: "Run", items: [
+    { to: "/manager",   label: "Central Manager", icon: GitBranch,  element: <ManagerTab /> },
+    { to: "/executor",  label: "Executor",        icon: Zap,        element: <ExecutorTab /> },
+  ]},
+  { group: "Observe", items: [
+    { to: "/monitor",   label: "Monitor",         icon: Activity,   element: <MonitorTab /> },
+    { to: "/insights",  label: "Run Insights",    icon: BarChart3,  element: <RunInsights /> },
+  ]},
+  { group: "Agents", items: [
+    { to: "/resource",    label: "Resource",      icon: Cpu,              element: <ResourceTab /> },
+    { to: "/performance", label: "Performance",   icon: Gauge,            element: <PerformancePredictionTab /> },
+    { to: "/cost",        label: "Cost",          icon: CircleDollarSign, element: <CostOptimizationTab /> },
+  ]},
 ];
-
-const S = {
-  shell:   { display: "flex", flexDirection: "column", minHeight: "100vh", background: "#0f172a" },
-  header:  {
-    display: "flex", alignItems: "center", gap: 0,
-    background: "#1e293b", borderBottom: "1px solid #334155",
-    padding: "0 24px", height: 52, flexShrink: 0,
-  },
-  logo: {
-    fontSize: 14, fontWeight: 700, color: "#f1f5f9",
-    marginRight: 32, whiteSpace: "nowrap", letterSpacing: 0.3,
-  },
-  logoSub: { fontSize: 11, color: "#475569", fontWeight: 400 },
-  tabs:    { display: "flex", alignItems: "stretch", gap: 2, flex: 1 },
-  tab:     (active) => ({
-    display: "flex", alignItems: "center", gap: 7, padding: "0 16px",
-    fontSize: 13, fontWeight: active ? 700 : 400,
-    color: active ? "#38bdf8" : "#64748b",
-    background: "transparent", border: "none", cursor: "pointer",
-    borderBottom: active ? "2px solid #38bdf8" : "2px solid transparent",
-    textDecoration: "none", transition: "color 0.15s, border-color 0.15s",
-    height: "100%",
-  }),
-  syncBtn: {
-    marginLeft: "auto", padding: "6px 12px", background: "transparent",
-    color: "#475569", border: "1px solid #334155", borderRadius: 8,
-    cursor: "pointer", fontSize: 12, display: "flex", alignItems: "center", gap: 5,
-    flexShrink: 0,
-  },
-  main: { flex: 1, padding: 32, overflowY: "auto" },
-  banner: {
-    display: "flex", alignItems: "center", gap: 8,
-    background: "#422006", borderBottom: "1px solid #78350f", color: "#fcd34d",
-    padding: "8px 24px", fontSize: 12.5, flexShrink: 0,
-  },
-  loading: { color: "#64748b", fontSize: 13, padding: 8 },
-};
-
-function TabLink({ to, label, Icon, exact }) {
-  return (
-    <NavLink
-      to={to}
-      end={exact}
-      style={({ isActive }) => S.tab(isActive)}
-    >
-      <Icon size={14} />
-      {label}
-    </NavLink>
-  );
-}
+const ROUTES = NAV.flatMap((g) => g.items.map((i) => ({ ...i, group: g.group })));
 
 // Reload drops the in-memory File object but keeps derived state (schema/plan)
-// in localStorage — warn the user their restored plan has no CSV to run against.
+// in localStorage — warn the user their restored plan has no file to run against.
 function CsvBanner() {
   const { csvFile, detectedSchema, csvName } = useAppContext();
   if (csvFile || !detectedSchema) return null;
   return (
-    <div style={S.banner}>
-      <AlertTriangle size={14} />
-      Restored a saved plan{csvName ? ` for "${csvName}"` : ""}, but the data file
-      was cleared by the page reload. Re-select it in the Planner tab before running.
+    <div className="banner">
+      <AlertTriangle size={14} strokeWidth={2} />
+      Restored a saved plan{csvName ? ` for “${csvName}”` : ""}, but the data file was cleared by the page
+      reload. Re-select it in the Planner before running.
     </div>
   );
 }
 
-function Shell() {
+// Backend reachability, polled — shown in the sidebar footer.
+function useBackendStatus() {
+  const [ok, setOk] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    const check = () => health().then(() => alive && setOk(true)).catch(() => alive && setOk(false));
+    check();
+    const t = setInterval(check, 30000);
+    return () => { alive = false; clearInterval(t); };
+  }, []);
+  return ok;
+}
+
+function Sidebar({ theme, toggleTheme }) {
+  const backendOk = useBackendStatus();
+  return (
+    <aside className="sidebar">
+      <div className="brand">
+        <div className="brand-mark"><Workflow size={15} strokeWidth={2.2} /></div>
+        <div>
+          <div className="brand-name">Pipeline Orchestrator</div>
+          <div className="brand-sub">ADF · Databricks</div>
+        </div>
+      </div>
+
+      <nav aria-label="Main">
+        {NAV.map((g) => (
+          <div key={g.group} className="nav-group">
+            <div className="nav-label">{g.group}</div>
+            {g.items.map(({ to, label, icon: Icon }) => (
+              <NavLink key={to} to={to} end={to === "/"} className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}>
+                <Icon size={15} strokeWidth={1.8} />
+                {label}
+              </NavLink>
+            ))}
+          </div>
+        ))}
+      </nav>
+
+      <div className="sidebar-foot">
+        <div className="row" style={{ gap: 8, padding: "4px 10px", fontSize: 12, color: "var(--text-3)" }}>
+          <Dot tone={backendOk === null ? "neutral" : backendOk ? "ok" : "bad"} live={backendOk === true} />
+          {backendOk === null ? "Checking backend…" : backendOk ? "Backend connected" : "Backend unreachable"}
+        </div>
+        <button className="nav-link" onClick={toggleTheme} style={{ border: 0, background: "none", cursor: "pointer", width: "100%" }}>
+          {theme === "dark" ? <Sun size={15} strokeWidth={1.8} /> : <Moon size={15} strokeWidth={1.8} />}
+          {theme === "dark" ? "Light theme" : "Dark theme"}
+        </button>
+      </div>
+    </aside>
+  );
+}
+
+function Topbar() {
+  const location = useLocation();
+  const route = ROUTES.find((r) => r.to === location.pathname);
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState("");
-  const location = useLocation();
 
   async function handleSync() {
     setSyncing(true);
@@ -107,41 +127,43 @@ function Shell() {
   }
 
   return (
-    <div style={S.shell}>
-      <header style={S.header}>
-        <div style={S.logo}>
-          Pipeline Orchestrator
-          <div style={S.logoSub}>AI-powered · Azure ADF + Databricks</div>
-        </div>
-        <nav style={S.tabs}>
-          {TABS.map(({ to, label, icon: Icon, exact }) => (
-            <TabLink key={to} to={to} label={label} Icon={Icon} exact={exact} />
-          ))}
-        </nav>
-        <button style={S.syncBtn} onClick={handleSync} disabled={syncing} title={syncError || undefined}>
-          <RefreshCw size={12} />
-          {syncing ? "Syncing…" : syncError ? "Sync failed — retry" : "Sync (48h)"}
-        </button>
-      </header>
-      <CsvBanner />
-      <main style={S.main}>
-        {/* Keyed by route so a crash in one tab clears when you navigate away. */}
-        <ErrorBoundary key={location.pathname}>
-          <Suspense fallback={<div style={S.loading}>Loading…</div>}>
-            <Routes>
-              <Route path="/"          element={<HomePage />} />
-              <Route path="/planner"   element={<PlannerTab />} />
-              <Route path="/manager"   element={<ManagerTab />} />
-              <Route path="/resource"      element={<ResourceTab />} />
-              <Route path="/performance"   element={<PerformancePredictionTab />} />
-              <Route path="/cost"      element={<CostOptimizationTab />} />
-              <Route path="/executor"  element={<ExecutorTab />} />
-              <Route path="/monitor"   element={<MonitorTab />} />
-              <Route path="/insights"  element={<RunInsights />} />
-            </Routes>
-          </Suspense>
-        </ErrorBoundary>
-      </main>
+    <header className="topbar">
+      <div className="crumbs">
+        {route && <span>{route.group}</span>}
+        {route && <span style={{ color: "var(--text-4)" }}>/</span>}
+        <b>{route?.label || "Not found"}</b>
+      </div>
+      <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+        {syncError && <span style={{ fontSize: 12, color: "var(--bad)" }} title={syncError}>Sync failed</span>}
+        <Button size="sm" icon={RefreshCw} loading={syncing} onClick={handleSync}
+          title="Pull the last 48 hours of ADF pipeline runs into the monitor">
+          {syncing ? "Syncing" : "Sync ADF runs"}
+        </Button>
+      </div>
+    </header>
+  );
+}
+
+function Shell() {
+  const location = useLocation();
+  const { theme, toggle } = useTheme();
+  return (
+    <div className="shell">
+      <Sidebar theme={theme} toggleTheme={toggle} />
+      <div className="main">
+        <Topbar />
+        <CsvBanner />
+        <main className="content" key={location.pathname}>
+          {/* Keyed by route so a crash in one page clears when you navigate away. */}
+          <ErrorBoundary key={location.pathname}>
+            <Suspense fallback={<div className="row" style={{ gap: 8, color: "var(--text-3)" }}><Spinner /> Loading…</div>}>
+              <Routes>
+                {ROUTES.map((r) => <Route key={r.to} path={r.to} element={r.element} />)}
+              </Routes>
+            </Suspense>
+          </ErrorBoundary>
+        </main>
+      </div>
     </div>
   );
 }

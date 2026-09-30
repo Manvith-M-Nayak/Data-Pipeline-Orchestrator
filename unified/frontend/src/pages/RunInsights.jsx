@@ -8,41 +8,41 @@ import {
 
 const S = {
   page:   { maxWidth: 1100, margin: "0 auto" },
-  title:  { fontSize: 22, fontWeight: 700, marginBottom: 4, color: "#f1f5f9" },
-  sub:    { fontSize: 13, color: "#64748b", marginBottom: 24 },
+  title:  { fontSize: 22, fontWeight: 700, marginBottom: 4, color: "var(--text)" },
+  sub:    { fontSize: 13, color: "var(--text-3)", marginBottom: 24 },
   grid4:  { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 20 },
   grid3:  { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 20 },
   grid2:  { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 20 },
-  card:   { background: "#1e293b", borderRadius: 14, padding: 20, border: "1px solid #334155", marginBottom: 14 },
-  cardHdr:{ fontSize: 13, fontWeight: 700, color: "#f1f5f9", marginBottom: 14, display: "flex", alignItems: "center", gap: 8 },
-  statVal:{ fontSize: 30, fontWeight: 800, color: "#f1f5f9", lineHeight: 1, marginBottom: 3 },
-  statSub:{ fontSize: 11, color: "#64748b" },
+  card:   { background: "var(--surface)", borderRadius: 14, padding: 20, border: "1px solid var(--border)", marginBottom: 14 },
+  cardHdr:{ fontSize: 13, fontWeight: 700, color: "var(--text)", marginBottom: 14, display: "flex", alignItems: "center", gap: 8 },
+  statVal:{ fontSize: 30, fontWeight: 800, color: "var(--text)", lineHeight: 1, marginBottom: 3 },
+  statSub:{ fontSize: 11, color: "var(--text-3)" },
   kv:     { display: "flex", flexDirection: "column", gap: 6 },
-  kvRow:  { display: "flex", justifyContent: "space-between", fontSize: 12, color: "#94a3b8", borderBottom: "1px solid #1e293b", paddingBottom: 5 },
-  kvVal:  { color: "#f1f5f9", fontWeight: 600 },
-  th:     { textAlign: "left", padding: "8px 10px", fontSize: 10, color: "#64748b", borderBottom: "1px solid #334155", textTransform: "uppercase", letterSpacing: 0.5 },
-  td:     { padding: "8px 10px", fontSize: 12, borderBottom: "1px solid #1e293b", verticalAlign: "top" },
+  kvRow:  { display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--text-2)", borderBottom: "1px solid var(--divider)", paddingBottom: 5 },
+  kvVal:  { color: "var(--text)", fontWeight: 600 },
+  th:     { textAlign: "left", padding: "8px 10px", fontSize: 10, color: "var(--text-3)", borderBottom: "1px solid var(--border)", textTransform: "uppercase", letterSpacing: 0.5 },
+  td:     { padding: "8px 10px", fontSize: 12, borderBottom: "1px solid var(--divider)", verticalAlign: "top" },
   decisionRow: (sev) => ({
-    display: "flex", gap: 8, padding: "6px 8px", borderBottom: "1px solid #1e293b", alignItems: "flex-start",
-    background: sev === "error" ? "rgba(127,29,29,0.12)" : sev === "warn" ? "rgba(120,53,15,0.08)" : "transparent",
+    display: "flex", gap: 8, padding: "6px 8px", borderBottom: "1px solid var(--divider)", alignItems: "flex-start",
+    background: sev === "error" ? "var(--bad-soft)" : sev === "warn" ? "var(--warn-soft)" : "transparent",
   }),
   tag: (sev) => ({
     fontSize: 9, fontWeight: 700, borderRadius: 4, padding: "2px 5px", flexShrink: 0,
-    background: sev === "ok" ? "#14532d" : sev === "error" ? "#7f1d1d" : sev === "warn" ? "#78350f" : "#1e293b",
-    color: sev === "ok" ? "#4ade80" : sev === "error" ? "#f87171" : sev === "warn" ? "#fbbf24" : "#64748b",
+    background: sev === "ok" ? "var(--ok-soft)" : sev === "error" ? "var(--bad-soft)" : sev === "warn" ? "var(--warn-soft)" : "var(--surface)",
+    color: sev === "ok" ? "var(--ok)" : sev === "error" ? "var(--bad)" : sev === "warn" ? "var(--warn)" : "var(--text-3)",
   }),
   chip: (ok) => ({
     display: "inline-flex", alignItems: "center", gap: 4,
     padding: "2px 8px", borderRadius: 20, fontSize: 11, fontWeight: 600,
-    background: ok ? "#14532d" : ok === false ? "#7f1d1d" : "#1e293b",
-    color: ok ? "#4ade80" : ok === false ? "#f87171" : "#94a3b8",
+    background: ok ? "var(--ok-soft)" : ok === false ? "var(--bad-soft)" : "var(--surface)",
+    color: ok ? "var(--ok)" : ok === false ? "var(--bad)" : "var(--text-2)",
   }),
   phaseRow: { display: "flex", alignItems: "center", gap: 6, marginBottom: 4, fontSize: 12 },
   phaseDot: (color) => ({ width: 6, height: 6, borderRadius: "50%", background: color, flexShrink: 0 }),
-  sectionHdr: { fontSize: 11, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8, marginTop: 16 },
-  detailCard: { background: "#0f172a", borderRadius: 10, padding: 14, border: "1px solid #1e293b", marginBottom: 10 },
+  sectionHdr: { fontSize: 11, fontWeight: 700, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8, marginTop: 16 },
+  detailCard: { background: "var(--surface-2)", borderRadius: 10, padding: 14, border: "1px solid var(--divider)", marginBottom: 10 },
   btnPrimary: {
-    padding: "8px 16px", background: "#818cf8", color: "#0f172a", border: "none",
+    padding: "8px 16px", background: "var(--accent)", color: "var(--accent-fg)", border: "none",
     borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 700,
     display: "inline-flex", alignItems: "center", gap: 6,
   },
@@ -65,9 +65,9 @@ function StatCard({ icon: Icon, color, label, value, sub }) {
     <div style={S.card}>
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
         <Icon size={14} color={color} />
-        <span style={{ fontSize: 11, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.5 }}>{label}</span>
+        <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: 0.5 }}>{label}</span>
       </div>
-      <div style={{ ...S.statVal, color: color || "#f1f5f9" }}>{value}</div>
+      <div style={{ ...S.statVal, color: color || "var(--text)" }}>{value}</div>
       {sub && <div style={S.statSub}>{sub}</div>}
     </div>
   );
@@ -80,7 +80,7 @@ function AgentHealthCard({ title, icon: Icon, color, metrics }) {
     <div style={S.detailCard}>
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
         <Icon size={13} color={color} />
-        <span style={{ fontSize: 12, fontWeight: 700, color: "#f1f5f9" }}>{title}</span>
+        <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text)" }}>{title}</span>
       </div>
       <div style={S.kv}>
         {entries.map(([k, v]) => (
@@ -104,22 +104,22 @@ function DecisionLog({ decisions }) {
   const shown = expanded ? decisions : decisions.slice(0, 15);
 
   if (!decisions.length) {
-    return <div style={{ fontSize: 12, color: "#475569", padding: "8px 0" }}>No decisions recorded.</div>;
+    return <div style={{ fontSize: 12, color: "var(--text-4)", padding: "8px 0" }}>No decisions recorded.</div>;
   }
 
   return (
     <div>
-      <div style={{ borderRadius: 8, border: "1px solid #1e293b", overflow: "hidden" }}>
+      <div style={{ borderRadius: 8, border: "1px solid var(--divider)", overflow: "hidden" }}>
         {shown.map((d, i) => (
           <div key={i} style={S.decisionRow(d.severity)}>
-            <span style={{ fontSize: 9, color: "#334155", flexShrink: 0, paddingTop: 2, minWidth: 64 }}>
+            <span style={{ fontSize: 9, color: "var(--text-4)", flexShrink: 0, paddingTop: 2, minWidth: 64 }}>
               {d.ts?.slice(11, 19)}
             </span>
             <span style={S.tag(d.severity)}>{d.severity?.toUpperCase()}</span>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 11, color: "#f1f5f9", fontWeight: 600 }}>{d.action}</div>
-              <div style={{ fontSize: 10, color: "#64748b", marginTop: 1 }}>
-                {d.reason}{d.outcome ? <span style={{ color: "#94a3b8" }}> → {d.outcome}</span> : null}
+              <div style={{ fontSize: 11, color: "var(--text)", fontWeight: 600 }}>{d.action}</div>
+              <div style={{ fontSize: 10, color: "var(--text-3)", marginTop: 1 }}>
+                {d.reason}{d.outcome ? <span style={{ color: "var(--text-2)" }}> → {d.outcome}</span> : null}
               </div>
             </div>
           </div>
@@ -128,7 +128,7 @@ function DecisionLog({ decisions }) {
       {decisions.length > 15 && (
         <button
           onClick={() => setExpanded(!expanded)}
-          style={{ background: "none", border: "none", color: "#818cf8", cursor: "pointer", fontSize: 11, padding: "6px 0", fontWeight: 600 }}
+          style={{ background: "none", border: "none", color: "var(--accent)", cursor: "pointer", fontSize: 11, padding: "6px 0", fontWeight: 600 }}
         >
           {expanded ? "Show less" : `Show all ${decisions.length} entries`}
         </button>
@@ -152,8 +152,8 @@ function RunDetail({ runId, onBack }) {
       .finally(() => setLoading(false));
   }, [runId]);
 
-  if (loading) return <div style={{ color: "#64748b", textAlign: "center", padding: 40 }}>Loading run details…</div>;
-  if (error) return <div style={{ color: "#f87171", textAlign: "center", padding: 40 }}>Error: {error}</div>;
+  if (loading) return <div style={{ color: "var(--text-3)", textAlign: "center", padding: 40 }}>Loading run details…</div>;
+  if (error) return <div style={{ color: "var(--bad)", textAlign: "center", padding: 40 }}>Error: {error}</div>;
   if (!data) return null;
 
   const fb = data.feedback || {};
@@ -168,22 +168,22 @@ function RunDetail({ runId, onBack }) {
     <div>
       {/* Back button + header */}
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
-        <button onClick={onBack} style={{ ...S.btnPrimary, background: "transparent", color: "#64748b", border: "1px solid #334155" }}>
+        <button onClick={onBack} style={{ ...S.btnPrimary, background: "transparent", color: "var(--text-3)", border: "1px solid var(--border)" }}>
           ← Back to overview
         </button>
         <div>
-          <div style={{ fontSize: 14, fontWeight: 700, color: "#f1f5f9" }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text)" }}>
             Run <span style={{ fontFamily: "monospace" }}>{runId.slice(0, 8)}</span>
             <span style={{ ...S.chip(data.status === "completed"), marginLeft: 10 }}>{data.status}</span>
           </div>
-          <div style={{ fontSize: 11, color: "#64748b" }}>
+          <div style={{ fontSize: 11, color: "var(--text-3)" }}>
             {data.started_at} {data.completed_at ? `→ ${data.completed_at}` : ""}
           </div>
         </div>
       </div>
 
       {data.error && (
-        <div style={{ background: "#450a0a", borderRadius: 8, padding: "10px 14px", marginBottom: 14, color: "#f87171", fontSize: 12, whiteSpace: "pre-wrap" }}>
+        <div style={{ background: "var(--bad-soft)", borderRadius: 8, padding: "10px 14px", marginBottom: 14, color: "var(--bad)", fontSize: 12, whiteSpace: "pre-wrap" }}>
           {data.error}
         </div>
       )}
@@ -191,7 +191,7 @@ function RunDetail({ runId, onBack }) {
       {/* Phase timeline */}
       {phases.length > 0 && (
         <div style={S.card}>
-          <div style={S.cardHdr}><Activity size={13} color="#818cf8" />Phase Timeline</div>
+          <div style={S.cardHdr}><Activity size={13} color="var(--accent)" />Phase Timeline</div>
           <div style={{ display: "flex", gap: 0, flexWrap: "wrap" }}>
             {phases.map((p, i) => {
               const label = p.action.replace("PHASE:", "").toLowerCase();
@@ -202,9 +202,9 @@ function RunDetail({ runId, onBack }) {
               const ok = !(data.status === "failed" && i === failedIdx);
               return (
                 <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 10px" }}>
-                  <div style={S.phaseDot(ok ? "#22c55e" : "#f87171")} />
-                  <span style={{ fontSize: 11, color: ok ? "#94a3b8" : "#f87171", fontWeight: i === phases.length - 1 ? 700 : 400 }}>{label}</span>
-                  {i < phases.length - 1 && <span style={{ color: "#334155", margin: "0 2px" }}>→</span>}
+                  <div style={S.phaseDot(ok ? "var(--ok)" : "var(--bad)")} />
+                  <span style={{ fontSize: 11, color: ok ? "var(--text-2)" : "var(--bad)", fontWeight: i === phases.length - 1 ? 700 : 400 }}>{label}</span>
+                  {i < phases.length - 1 && <span style={{ color: "var(--text-4)", margin: "0 2px" }}>→</span>}
                 </div>
               );
             })}
@@ -223,7 +223,7 @@ function RunDetail({ runId, onBack }) {
               {data.validation.issues?.length > 0 && (
                 <div style={{ marginTop: 8 }}>
                   {data.validation.issues.map((issue, i) => (
-                    <div key={i} style={{ display: "flex", gap: 6, fontSize: 11, color: "#f87171", marginBottom: 3 }}>
+                    <div key={i} style={{ display: "flex", gap: 6, fontSize: 11, color: "var(--bad)", marginBottom: 3 }}>
                       <XCircle size={10} style={{ flexShrink: 0, marginTop: 2 }} />{issue}
                     </div>
                   ))}
@@ -232,7 +232,7 @@ function RunDetail({ runId, onBack }) {
               {data.validation.warnings?.length > 0 && (
                 <div style={{ marginTop: 6 }}>
                   {data.validation.warnings.map((w, i) => (
-                    <div key={i} style={{ display: "flex", gap: 6, fontSize: 11, color: "#fbbf24", marginBottom: 3 }}>
+                    <div key={i} style={{ display: "flex", gap: 6, fontSize: 11, color: "var(--warn)", marginBottom: 3 }}>
                       <AlertTriangle size={10} style={{ flexShrink: 0, marginTop: 2 }} />{w}
                     </div>
                   ))}
@@ -248,15 +248,15 @@ function RunDetail({ runId, onBack }) {
               <span style={S.chip(data.plan_assurance.overall_status === "pass")}>
                 {data.plan_assurance.overall_status === "pass" ? "PASSED" : "REJECTED"}
               </span>
-              <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 6 }}>{data.plan_assurance.summary}</div>
+              <div style={{ fontSize: 11, color: "var(--text-2)", marginTop: 6 }}>{data.plan_assurance.summary}</div>
               {(data.plan_assurance.structural_results || []).map((c, i) => (
-                <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#94a3b8", marginTop: 4 }}>
+                <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--text-2)", marginTop: 4 }}>
                   <span>{c.label}</span>
                   <span style={S.chip(c.passed)}>{c.passed ? "✔" : "✖"}</span>
                 </div>
               ))}
               {data.plan_assurance.semantic_result && (
-                <div style={{ marginTop: 8, padding: "6px 10px", background: "#0f172a", borderRadius: 6, fontSize: 11, color: "#94a3b8" }}>
+                <div style={{ marginTop: 8, padding: "6px 10px", background: "var(--surface-2)", borderRadius: 6, fontSize: 11, color: "var(--text-2)" }}>
                   Semantic: {data.plan_assurance.semantic_result.flagged ? "⚠ flagged" : "✔ matches"} — {data.plan_assurance.semantic_result.reasoning}
                 </div>
               )}
@@ -277,10 +277,10 @@ function RunDetail({ runId, onBack }) {
               </div>
               {/* Per-stage allocations */}
               {(data.resource_plan?.allocations || []).length > 0 && (
-                <div style={{ marginTop: 8, borderTop: "1px solid #1e293b", paddingTop: 8 }}>
+                <div style={{ marginTop: 8, borderTop: "1px solid var(--divider)", paddingTop: 8 }}>
                   {data.resource_plan.allocations.map((a) => (
-                    <div key={a.stage_name} style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#94a3b8", padding: "3px 0" }}>
-                      <span style={{ color: "#f1f5f9", fontWeight: 600 }}>{a.stage_name}</span>
+                    <div key={a.stage_name} style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "var(--text-2)", padding: "3px 0" }}>
+                      <span style={{ color: "var(--text)", fontWeight: 600 }}>{a.stage_name}</span>
                       <span>{a.stage_type === "notebook" ? `${a.workers}w · ${a.memory_gb}GB` : `${a.diu} DIU`} · ~{a.duration_s}s</span>
                     </div>
                   ))}
@@ -320,8 +320,8 @@ function RunDetail({ runId, onBack }) {
                 <div style={S.kvRow}><span>Databricks</span><span style={S.kvVal}>${data.cost_estimate.databricks_usd}</span></div>
                 <div style={S.kvRow}><span>Storage</span><span style={S.kvVal}>${data.cost_estimate.storage_usd}</span></div>
                 <div style={{ ...S.kvRow, borderBottom: "none" }}>
-                  <span style={{ fontWeight: 700, color: "#f1f5f9" }}>Total</span>
-                  <span style={{ ...S.kvVal, color: data.cost_estimate.budget_ok ? "#4ade80" : "#f59e0b" }}>${data.cost_estimate.total_usd}</span>
+                  <span style={{ fontWeight: 700, color: "var(--text)" }}>Total</span>
+                  <span style={{ ...S.kvVal, color: data.cost_estimate.budget_ok ? "var(--ok)" : "var(--warn)" }}>${data.cost_estimate.total_usd}</span>
                 </div>
               </div>
             </div>
@@ -346,7 +346,7 @@ function RunDetail({ runId, onBack }) {
               {(data.cost_optimization.recommendations || []).length > 0 && (
                 <div style={{ marginTop: 8 }}>
                   {data.cost_optimization.recommendations.map((r, i) => (
-                    <div key={i} style={{ display: "flex", gap: 6, fontSize: 11, color: "#94a3b8", marginBottom: 3 }}>
+                    <div key={i} style={{ display: "flex", gap: 6, fontSize: 11, color: "var(--text-2)", marginBottom: 3 }}>
                       <DollarSign size={10} style={{ flexShrink: 0, marginTop: 2 }} />
                       <span><b>{r.change}</b> — {r.estimated_saving}</span>
                     </div>
@@ -415,13 +415,13 @@ function RunDetail({ runId, onBack }) {
           {ma.status_summary && (
             <div style={S.detailCard}>
               <div style={S.sectionHdr}>Monitor Analysis</div>
-              <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 6 }}>{ma.status_summary}</div>
-              {ma.explanation && <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6 }}>{ma.explanation}</div>}
+              <div style={{ fontSize: 12, color: "var(--text-2)", marginBottom: 6 }}>{ma.status_summary}</div>
+              {ma.explanation && <div style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 6 }}>{ma.explanation}</div>}
               {ma.root_cause && (
-                <div style={{ fontSize: 11, color: "#fbbf24", marginBottom: 4 }}>Root cause: {ma.root_cause}</div>
+                <div style={{ fontSize: 11, color: "var(--warn)", marginBottom: 4 }}>Root cause: {ma.root_cause}</div>
               )}
               {ma.severity && (
-                <span style={{ fontSize: 11, color: ma.severity === "high" ? "#f97316" : ma.severity === "medium" ? "#f59e0b" : "#22c55e", fontWeight: 600 }}>
+                <span style={{ fontSize: 11, color: ma.severity === "high" ? "var(--orange)" : ma.severity === "medium" ? "var(--warn)" : "var(--ok)", fontWeight: 600 }}>
                   Severity: {ma.severity}
                 </span>
               )}
@@ -432,19 +432,19 @@ function RunDetail({ runId, onBack }) {
           {data.parallelism?.execution_groups && (
             <div style={S.detailCard}>
               <div style={S.sectionHdr}>Parallelism</div>
-              <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 6 }}>
+              <div style={{ fontSize: 11, color: "var(--text-2)", marginBottom: 6 }}>
                 {data.parallelism.can_parallelize
                   ? `${data.parallelism.parallel_groups} parallel group(s)`
                   : "All sequential"}
               </div>
               {data.parallelism.execution_groups.map((group, i) => (
                 <div key={i} style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 4 }}>
-                  <span style={{ fontSize: 9, color: "#475569", minWidth: 40 }}>G{i + 1}</span>
+                  <span style={{ fontSize: 9, color: "var(--text-4)", minWidth: 40 }}>G{i + 1}</span>
                   {group.map((name) => (
                     <span key={name} style={{
                       padding: "1px 6px", borderRadius: 4, fontSize: 10,
-                      background: group.length > 1 ? "#2d1b69" : "#1e293b",
-                      color: group.length > 1 ? "#c084fc" : "#64748b",
+                      background: group.length > 1 ? "var(--violet-soft)" : "var(--surface)",
+                      color: group.length > 1 ? "var(--violet)" : "var(--text-3)",
                     }}>{name}</span>
                   ))}
                 </div>
@@ -456,7 +456,7 @@ function RunDetail({ runId, onBack }) {
           {data.user_request && (
             <div style={S.detailCard}>
               <div style={S.sectionHdr}>User Request</div>
-              <div style={{ fontSize: 12, color: "#94a3b8", fontStyle: "italic" }}>"{data.user_request}"</div>
+              <div style={{ fontSize: 12, color: "var(--text-2)", fontStyle: "italic" }}>"{data.user_request}"</div>
             </div>
           )}
         </div>
@@ -464,16 +464,16 @@ function RunDetail({ runId, onBack }) {
 
       {/* Full Decision Log */}
       <div style={S.card}>
-        <div style={S.cardHdr}><Shield size={13} color="#818cf8" />Decision Audit Log ({data.decisions?.length || 0} entries)</div>
+        <div style={S.cardHdr}><Shield size={13} color="var(--accent)" />Decision Audit Log ({data.decisions?.length || 0} entries)</div>
         <DecisionLog decisions={data.decisions || []} />
       </div>
 
       {/* Executor Result */}
       {data.executor_result && (
         <div style={S.card}>
-          <div style={S.cardHdr}><Zap size={13} color="#f59e0b" />Executor Result</div>
-          <div style={{ fontSize: 12, color: "#94a3b8" }}>
-            Status: <span style={{ color: data.executor_result.status === "ok" ? "#4ade80" : "#f87171" }}>{data.executor_result.status}</span>
+          <div style={S.cardHdr}><Zap size={13} color="var(--warn)" />Executor Result</div>
+          <div style={{ fontSize: 12, color: "var(--text-2)" }}>
+            Status: <span style={{ color: data.executor_result.status === "ok" ? "var(--ok)" : "var(--bad)" }}>{data.executor_result.status}</span>
             {data.executor_result.stages?.length > 0 && (
               <> · Stages: {data.executor_result.stages.join(" → ")}</>
             )}
@@ -490,12 +490,12 @@ function RunDetail({ runId, onBack }) {
                 // via fetch so the x-api-key header is sent when auth is on
                 executor.download(data.executor_result.sink_container).catch((err) => setDownloadError(err.message));
               }}
-              style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 12px", background: "#0ea5e9", color: "#fff", borderRadius: 8, fontSize: 12, fontWeight: 600, textDecoration: "none", marginTop: 8 }}
+              style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 12px", background: "var(--accent)", color: "var(--accent-fg)", borderRadius: 8, fontSize: 12, fontWeight: 600, textDecoration: "none", marginTop: 8 }}
             >
               <Download size={12} /> Download output
             </a>
           )}
-          {downloadError && <div style={{ fontSize: 11, color: "#f87171", marginTop: 6 }}>{downloadError}</div>}
+          {downloadError && <div style={{ fontSize: 11, color: "var(--bad)", marginTop: 6 }}>{downloadError}</div>}
         </div>
       )}
     </div>
@@ -521,7 +521,7 @@ export default function RunInsights() {
   useEffect(() => { load(); }, [load]);
 
   if (loading && !analytics) {
-    return <div style={{ color: "#64748b", textAlign: "center", padding: 60 }}>Loading analytics…</div>;
+    return <div style={{ color: "var(--text-3)", textAlign: "center", padding: 60 }}>Loading analytics…</div>;
   }
 
   if (selectedRun) {
@@ -541,41 +541,41 @@ export default function RunInsights() {
           <h1 style={S.title}>Run Insights</h1>
           <p style={S.sub}>Combined results and logs from all agents across every pipeline run.</p>
         </div>
-        <button onClick={load} style={{ padding: "6px 12px", background: "transparent", color: "#475569", border: "1px solid #334155", borderRadius: 8, cursor: "pointer", fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>
+        <button onClick={load} style={{ padding: "6px 12px", background: "transparent", color: "var(--text-4)", border: "1px solid var(--border)", borderRadius: 8, cursor: "pointer", fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>
           <RefreshCw size={12} /> Refresh
         </button>
       </div>
 
       {error && (
-        <div style={{ background: "#450a0a", borderRadius: 8, padding: "10px 14px", marginBottom: 14, color: "#f87171", fontSize: 12 }}>
+        <div style={{ background: "var(--bad-soft)", borderRadius: 8, padding: "10px 14px", marginBottom: 14, color: "var(--bad)", fontSize: 12 }}>
           {error}
         </div>
       )}
 
       {/* Summary stats */}
       <div style={S.grid4}>
-        <StatCard icon={Activity} color="#38bdf8" label="Total Runs" value={s.total_runs ?? 0} sub={`${s.completed ?? 0} completed · ${s.failed ?? 0} failed`} />
-        <StatCard icon={CheckCircle} color="#22c55e" label="Success Rate" value={`${s.success_rate_pct ?? 0}%`} sub={`${s.in_progress ?? 0} in progress`} />
-        <StatCard icon={TrendingUp} color="#c084fc" label="Duration Accuracy" value={da.avg_predicted_vs_actual_ratio ? `${da.avg_predicted_vs_actual_ratio}×` : "—"} sub={`${da.samples || 0} samples`} />
-        <StatCard icon={DollarSign} color="#fbbf24" label="Cost Accuracy" value={ca.avg_error_pct != null ? `${ca.avg_error_pct}%` : "—"} sub={`$${ca.total_estimated_usd?.toFixed(4) || 0} est. · $${ca.total_actual_usd?.toFixed(4) || 0} actual`} />
+        <StatCard icon={Activity} color="var(--accent)" label="Total Runs" value={s.total_runs ?? 0} sub={`${s.completed ?? 0} completed · ${s.failed ?? 0} failed`} />
+        <StatCard icon={CheckCircle} color="var(--ok)" label="Success Rate" value={`${s.success_rate_pct ?? 0}%`} sub={`${s.in_progress ?? 0} in progress`} />
+        <StatCard icon={TrendingUp} color="var(--violet)" label="Duration Accuracy" value={da.avg_predicted_vs_actual_ratio ? `${da.avg_predicted_vs_actual_ratio}×` : "—"} sub={`${da.samples || 0} samples`} />
+        <StatCard icon={DollarSign} color="var(--warn)" label="Cost Accuracy" value={ca.avg_error_pct != null ? `${ca.avg_error_pct}%` : "—"} sub={`$${ca.total_estimated_usd?.toFixed(4) || 0} est. · $${ca.total_actual_usd?.toFixed(4) || 0} actual`} />
       </div>
 
       {/* Agent health */}
       <div style={S.sectionHdr}>Agent Health</div>
       <div style={S.grid3}>
-        <AgentHealthCard title="Planner Agent" icon={Brain} color="#a78bfa" metrics={ah.planner || {}} />
-        <AgentHealthCard title="Assurance Agent" icon={ShieldCheck} color="#34d399" metrics={ah.assurance || {}} />
-        <AgentHealthCard title="Resource Agent" icon={Cpu} color="#38bdf8" metrics={ah.resource || {}} />
-        <AgentHealthCard title="Performance Prediction" icon={TrendingUp} color="#c084fc" metrics={ah.performance_prediction || {}} />
-        <AgentHealthCard title="Cost Optimization" icon={DollarSign} color="#fbbf24" metrics={ah.cost_optimization || {}} />
-        <AgentHealthCard title="Executor Agent" icon={Zap} color="#f59e0b" metrics={ah.executor || {}} />
+        <AgentHealthCard title="Planner Agent" icon={Brain} color="var(--violet)" metrics={ah.planner || {}} />
+        <AgentHealthCard title="Assurance Agent" icon={ShieldCheck} color="var(--ok)" metrics={ah.assurance || {}} />
+        <AgentHealthCard title="Resource Agent" icon={Cpu} color="var(--accent)" metrics={ah.resource || {}} />
+        <AgentHealthCard title="Performance Prediction" icon={TrendingUp} color="var(--violet)" metrics={ah.performance_prediction || {}} />
+        <AgentHealthCard title="Cost Optimization" icon={DollarSign} color="var(--warn)" metrics={ah.cost_optimization || {}} />
+        <AgentHealthCard title="Executor Agent" icon={Zap} color="var(--warn)" metrics={ah.executor || {}} />
       </div>
 
       {/* Run list */}
       <div style={S.card}>
-        <div style={S.cardHdr}><Clock size={13} color="#94a3b8" />All Runs ({runs.length})</div>
+        <div style={S.cardHdr}><Clock size={13} color="var(--text-2)" />All Runs ({runs.length})</div>
         {runs.length === 0 ? (
-          <div style={{ color: "#475569", textAlign: "center", padding: 20, fontSize: 12 }}>No runs recorded yet.</div>
+          <div style={{ color: "var(--text-4)", textAlign: "center", padding: 20, fontSize: 12 }}>No runs recorded yet.</div>
         ) : (
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -599,22 +599,22 @@ export default function RunInsights() {
                     key={r.run_id}
                     onClick={() => setSelectedRun(r.run_id)}
                     style={{ cursor: "pointer", background: "transparent" }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = "#0f172a"}
+                    onMouseEnter={(e) => e.currentTarget.style.background = "var(--surface-2)"}
                     onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
                   >
-                    <td style={S.td}><ChevronRight size={12} color="#334155" /></td>
+                    <td style={S.td}><ChevronRight size={12} color="var(--text-4)" /></td>
                     <td style={{ ...S.td, fontFamily: "monospace", fontSize: 11 }}>{r.run_id?.slice(0, 8)}…</td>
                     <td style={S.td}>
                       <span style={{
                         padding: "2px 6px", borderRadius: 8, fontSize: 10, fontWeight: 700,
-                        background: r.status === "completed" ? "#14532d" : r.status === "failed" ? "#7f1d1d" : "#1e293b",
-                        color: r.status === "completed" ? "#4ade80" : r.status === "failed" ? "#f87171" : "#94a3b8",
+                        background: r.status === "completed" ? "var(--ok-soft)" : r.status === "failed" ? "var(--bad-soft)" : "var(--surface)",
+                        color: r.status === "completed" ? "var(--ok)" : r.status === "failed" ? "var(--bad)" : "var(--text-2)",
                       }}>{r.status}</span>
                     </td>
                     <td style={S.td}>{r.stage_count}</td>
                     <td style={S.td}>
                       {r.actual_duration_s ? `${r.actual_duration_s}s` : "—"}
-                      {r.predicted_duration_s != null && <span style={{ color: "#64748b", fontSize: 10 }}> (pred: {r.predicted_duration_s}s)</span>}
+                      {r.predicted_duration_s != null && <span style={{ color: "var(--text-3)", fontSize: 10 }}> (pred: {r.predicted_duration_s}s)</span>}
                     </td>
                     <td style={S.td}>{r.cost_estimate_usd != null ? `$${r.cost_estimate_usd}` : "—"}</td>
                     <td style={S.td}>{r.actual_cost_usd != null ? `$${r.actual_cost_usd}` : "—"}</td>
@@ -624,7 +624,7 @@ export default function RunInsights() {
                       ) : "—"}
                     </td>
                     <td style={S.td}>{r.prediction_source || "—"}</td>
-                    <td style={{ ...S.td, fontSize: 10, color: "#475569" }}>{(r.started_at || "").slice(0, 16)}</td>
+                    <td style={{ ...S.td, fontSize: 10, color: "var(--text-4)" }}>{(r.started_at || "").slice(0, 16)}</td>
                   </tr>
                 ))}
               </tbody>

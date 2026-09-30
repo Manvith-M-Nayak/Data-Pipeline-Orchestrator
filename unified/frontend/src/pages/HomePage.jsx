@@ -10,62 +10,62 @@ import {
 const S = {
   page:    { maxWidth: 960, margin: "0 auto" },
   hero:    { marginBottom: 28, display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 12 },
-  title:   { fontSize: 26, fontWeight: 700, color: "#f1f5f9", marginBottom: 4 },
-  sub:     { fontSize: 14, color: "#64748b" },
+  title:   { fontSize: 26, fontWeight: 700, color: "var(--text)", marginBottom: 4 },
+  sub:     { fontSize: 14, color: "var(--text-3)" },
   grid2:   { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 },
   grid3:   { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 16 },
   grid4:   { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 16 },
-  card:    { background: "#1e293b", borderRadius: 14, padding: 20, border: "1px solid #334155" },
-  cardSm:  { background: "#1e293b", borderRadius: 14, padding: 16, border: "1px solid #334155" },
+  card:    { background: "var(--surface)", borderRadius: 14, padding: 20, border: "1px solid var(--border)" },
+  cardSm:  { background: "var(--surface)", borderRadius: 14, padding: 16, border: "1px solid var(--border)" },
   hdr:     { display: "flex", alignItems: "center", gap: 8, marginBottom: 12 },
-  hdrTxt:  { fontSize: 12, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.5 },
-  statVal: { fontSize: 34, fontWeight: 800, color: "#f1f5f9", lineHeight: 1, marginBottom: 3 },
-  statSub: { fontSize: 12, color: "#64748b" },
-  row:     { display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: "1px solid #1e293b" },
+  hdrTxt:  { fontSize: 12, fontWeight: 700, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: 0.5 },
+  statVal: { fontSize: 34, fontWeight: 800, color: "var(--text)", lineHeight: 1, marginBottom: 3 },
+  statSub: { fontSize: 12, color: "var(--text-3)" },
+  row:     { display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: "1px solid var(--divider)" },
   rowLast: { display: "flex", alignItems: "center", gap: 10, padding: "9px 0" },
-  lbl:     { fontSize: 13, color: "#cbd5e1", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
-  meta:    { fontSize: 11, color: "#475569", flexShrink: 0 },
+  lbl:     { fontSize: 13, color: "var(--text-2)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  meta:    { fontSize: 11, color: "var(--text-4)", flexShrink: 0 },
   badge:   (status) => {
     const map = {
-      Succeeded: { bg: "#14532d", color: "#4ade80" },
-      Failed:    { bg: "#7f1d1d", color: "#f87171" },
-      InProgress:{ bg: "#1e3a5f", color: "#38bdf8" },
+      Succeeded: { bg: "var(--ok-soft)", color: "var(--ok)" },
+      Failed:    { bg: "var(--bad-soft)", color: "var(--bad)" },
+      InProgress:{ bg: "var(--accent-soft)", color: "var(--accent)" },
     };
-    const c = map[status] || { bg: "#1e293b", color: "#94a3b8" };
+    const c = map[status] || { bg: "var(--surface)", color: "var(--text-2)" };
     return { padding: "2px 8px", borderRadius: 10, fontSize: 11, fontWeight: 600, background: c.bg, color: c.color, flexShrink: 0 };
   },
   severityBadge: (s) => {
-    const map = { high: "#f97316", medium: "#f59e0b", low: "#22c55e" };
-    return { fontSize: 11, color: map[s] || "#64748b", fontWeight: 600, flexShrink: 0 };
+    const map = { high: "var(--orange)", medium: "var(--warn)", low: "var(--ok)" };
+    return { fontSize: 11, color: map[s] || "var(--text-3)", fontWeight: 600, flexShrink: 0 };
   },
-  dot:     (on) => ({ width: 8, height: 8, borderRadius: "50%", flexShrink: 0, background: on ? "#22c55e" : "#334155" }),
-  empty:   { fontSize: 13, color: "#475569", textAlign: "center", padding: "14px 0" },
+  dot:     (on) => ({ width: 8, height: 8, borderRadius: "50%", flexShrink: 0, background: on ? "var(--ok)" : "var(--border-strong)" }),
+  empty:   { fontSize: 13, color: "var(--text-4)", textAlign: "center", padding: "14px 0" },
   ctaBtn:  (primary) => ({
     padding: "8px 16px", borderRadius: 8, fontSize: 12, fontWeight: 600,
     cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6,
-    background: primary ? "#3b82f6" : "transparent",
-    color:      primary ? "#fff"    : "#64748b",
-    border:     primary ? "none"    : "1px solid #334155",
+    background: primary ? "var(--accent)" : "transparent",
+    color:      primary ? "var(--accent-fg)"    : "var(--text-3)",
+    border:     primary ? "none"    : "1px solid var(--border)",
   }),
-  planBox: { background: "#0f172a", borderRadius: 10, padding: 12, border: "1px solid #334155", marginTop: 8 },
+  planBox: { background: "var(--surface-2)", borderRadius: 10, padding: 12, border: "1px solid var(--border)", marginTop: 8 },
   planStage: {
     display: "inline-block", padding: "2px 8px", borderRadius: 6,
-    fontSize: 11, fontWeight: 600, background: "#1e293b", color: "#38bdf8",
+    fontSize: 11, fontWeight: 600, background: "var(--surface)", color: "var(--accent)",
     margin: "2px 2px 0 0",
   },
   noData: {
-    background: "#0f172a", border: "1px dashed #334155", borderRadius: 10,
-    padding: "12px 14px", fontSize: 12, color: "#475569", marginBottom: 8,
+    background: "var(--surface-2)", border: "1px dashed var(--border-strong)", borderRadius: 10,
+    padding: "12px 14px", fontSize: 12, color: "var(--text-4)", marginBottom: 8,
     display: "flex", alignItems: "center", gap: 8,
   },
   refreshBtn: {
-    padding: "6px 12px", background: "transparent", color: "#475569",
-    border: "1px solid #334155", borderRadius: 8, cursor: "pointer",
+    padding: "6px 12px", background: "transparent", color: "var(--text-4)",
+    border: "1px solid var(--border)", borderRadius: 8, cursor: "pointer",
     fontSize: 12, display: "flex", alignItems: "center", gap: 5,
   },
   anomalyRow: {
     display: "flex", gap: 8, padding: "8px 0",
-    borderBottom: "1px solid #1e293b", alignItems: "flex-start",
+    borderBottom: "1px solid var(--divider)", alignItems: "flex-start",
   },
 };
 
@@ -142,7 +142,7 @@ export default function HomePage() {
           <p style={S.sub}>Live insights across all agents.</p>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 6 }}>
-          <span style={{ fontSize: 11, color: wsOk ? "#22c55e" : "#475569", display: "flex", alignItems: "center", gap: 5 }}>
+          <span style={{ fontSize: 11, color: wsOk ? "var(--ok)" : "var(--text-4)", display: "flex", alignItems: "center", gap: 5 }}>
             <div style={S.dot(wsOk)} /> {wsOk ? "Live" : "Connecting…"}
           </span>
           <button style={S.refreshBtn} onClick={loadSummary}>
@@ -152,16 +152,16 @@ export default function HomePage() {
       </div>
 
       {loadError && (
-        <div style={{ ...S.noData, color: "#f87171", borderColor: "#7f1d1d" }}>
+        <div style={{ ...S.noData, color: "var(--bad)", borderColor: "var(--bad-soft)" }}>
           <XCircle size={14} /> {loadError}
         </div>
       )}
 
       {noData && (
         <div style={S.noData}>
-          <AlertTriangle size={14} color="#f59e0b" />
+          <AlertTriangle size={14} color="var(--warn)" />
           No pipeline data yet.{" "}
-          <button onClick={syncNow} disabled={syncing} style={{ color: "#38bdf8", background: "none", border: "none", cursor: "pointer", fontWeight: 700, fontSize: 12, padding: 0 }}>
+          <button onClick={syncNow} disabled={syncing} style={{ color: "var(--accent)", background: "none", border: "none", cursor: "pointer", fontWeight: 700, fontSize: 12, padding: 0 }}>
             {syncing ? "Syncing…" : "Sync the last 48h"}
           </button>{" "}
           to pull recent ADF runs, or run your first pipeline.
@@ -171,25 +171,25 @@ export default function HomePage() {
       {/* Stat cards */}
       <div style={S.grid4}>
         <div style={S.cardSm}>
-          <div style={S.hdr}><Activity size={14} color="#38bdf8" /><span style={S.hdrTxt}>Active Now</span></div>
+          <div style={S.hdr}><Activity size={14} color="var(--accent)" /><span style={S.hdrTxt}>Active Now</span></div>
           <div style={S.statVal}>{liveRuns.length}</div>
           <div style={S.statSub}>pipelines running in ADF</div>
         </div>
         <div style={S.cardSm}>
-          <div style={S.hdr}><CheckCircle size={14} color="#22c55e" /><span style={S.hdrTxt}>Succeeded</span></div>
+          <div style={S.hdr}><CheckCircle size={14} color="var(--ok)" /><span style={S.hdrTxt}>Succeeded</span></div>
           <div style={S.statVal}>{summary?.succeeded ?? "—"}</div>
           <div style={S.statSub}>of {summary?.total_runs ?? 0} total runs</div>
         </div>
         <div style={S.cardSm}>
-          <div style={S.hdr}><XCircle size={14} color="#f87171" /><span style={S.hdrTxt}>Failed</span></div>
-          <div style={{ ...S.statVal, color: (summary?.failed ?? 0) > 0 ? "#f87171" : "#f1f5f9" }}>
+          <div style={S.hdr}><XCircle size={14} color="var(--bad)" /><span style={S.hdrTxt}>Failed</span></div>
+          <div style={{ ...S.statVal, color: (summary?.failed ?? 0) > 0 ? "var(--bad)" : "var(--text)" }}>
             {summary?.failed ?? "—"}
           </div>
           <div style={S.statSub}>pipeline failures</div>
         </div>
         <div style={S.cardSm}>
-          <div style={S.hdr}><AlertTriangle size={14} color="#f97316" /><span style={S.hdrTxt}>Anomalies</span></div>
-          <div style={{ ...S.statVal, color: (summary?.anomaly_count ?? 0) > 0 ? "#f97316" : "#f1f5f9" }}>
+          <div style={S.hdr}><AlertTriangle size={14} color="var(--orange)" /><span style={S.hdrTxt}>Anomalies</span></div>
+          <div style={{ ...S.statVal, color: (summary?.anomaly_count ?? 0) > 0 ? "var(--orange)" : "var(--text)" }}>
             {summary?.anomaly_count ?? "—"}
           </div>
           <div style={S.statSub}>failures + stuck pipelines</div>
@@ -200,12 +200,12 @@ export default function HomePage() {
         {/* Monitor Agent — live + recent anomalies */}
         <div style={S.card}>
           <div style={S.hdr}>
-            <Activity size={14} color="#38bdf8" />
+            <Activity size={14} color="var(--accent)" />
             <span style={S.hdrTxt}>Monitor Agent</span>
           </div>
 
           {/* Live runs */}
-          <div style={{ fontSize: 11, color: "#475569", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>Live</div>
+          <div style={{ fontSize: 11, color: "var(--text-4)", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>Live</div>
           {liveRuns.length === 0 ? (
             <div style={S.empty}>No pipelines running right now.</div>
           ) : liveRuns.map((r, i) => (
@@ -213,22 +213,22 @@ export default function HomePage() {
               <div style={S.dot(true)} />
               <span style={S.lbl}>{r.pipelineName}</span>
               <span style={S.meta}><Clock size={10} style={{ verticalAlign: "middle", marginRight: 2 }} />{fmtSec(r.elapsedSec)}</span>
-              {r.anomaly && <AlertTriangle size={12} color="#f97316" />}
+              {r.anomaly && <AlertTriangle size={12} color="var(--orange)" />}
             </div>
           ))}
 
           {/* Recent anomalies from anomaly_log */}
           {(summary?.recent_anomalies?.length ?? 0) > 0 && (
             <>
-              <div style={{ fontSize: 11, color: "#f97316", marginTop: 14, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 700 }}>
+              <div style={{ fontSize: 11, color: "var(--orange)", marginTop: 14, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 700 }}>
                 Anomaly Log
               </div>
               {summary.recent_anomalies.map((a, i) => (
-                <div key={a.id} style={{ ...S.anomalyRow, borderBottom: i < summary.recent_anomalies.length - 1 ? "1px solid #1e293b" : "none" }}>
-                  <AlertTriangle size={12} color="#f97316" style={{ flexShrink: 0, marginTop: 1 }} />
+                <div key={a.id} style={{ ...S.anomalyRow, borderBottom: i < summary.recent_anomalies.length - 1 ? "1px solid var(--divider)" : "none" }}>
+                  <AlertTriangle size={12} color="var(--orange)" style={{ flexShrink: 0, marginTop: 1 }} />
                   <div>
-                    <div style={{ fontSize: 12, color: "#cbd5e1", fontWeight: 600 }}>{a.pipeline_name}</div>
-                    <div style={{ fontSize: 11, color: "#64748b" }}>{(a.groq_verdict || "").slice(0, 90)}{(a.groq_verdict || "").length > 90 ? "…" : ""}</div>
+                    <div style={{ fontSize: 12, color: "var(--text-2)", fontWeight: 600 }}>{a.pipeline_name}</div>
+                    <div style={{ fontSize: 11, color: "var(--text-3)" }}>{(a.groq_verdict || "").slice(0, 90)}{(a.groq_verdict || "").length > 90 ? "…" : ""}</div>
                   </div>
                 </div>
               ))}
@@ -238,12 +238,12 @@ export default function HomePage() {
           {/* Recent failed runs */}
           {(summary?.recent_failed?.length ?? 0) > 0 && (
             <>
-              <div style={{ fontSize: 11, color: "#f87171", marginTop: 14, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 700 }}>
+              <div style={{ fontSize: 11, color: "var(--bad)", marginTop: 14, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 700 }}>
                 Recent Failures
               </div>
               {summary.recent_failed.map((r, i) => (
-                <div key={r.run_id} style={{ ...S.row, borderBottom: i < summary.recent_failed.length - 1 ? "1px solid #1e293b" : "none" }}>
-                  <XCircle size={12} color="#f87171" style={{ flexShrink: 0 }} />
+                <div key={r.run_id} style={{ ...S.row, borderBottom: i < summary.recent_failed.length - 1 ? "1px solid var(--divider)" : "none" }}>
+                  <XCircle size={12} color="var(--bad)" style={{ flexShrink: 0 }} />
                   <span style={S.lbl}>{r.pipeline_name}</span>
                   <span style={S.meta}>{fmtMs(r.duration_ms)}</span>
                   {r.severity && <span style={S.severityBadge(r.severity)}>{r.severity}</span>}
@@ -259,7 +259,7 @@ export default function HomePage() {
 
         {/* Recent runs */}
         <div style={S.card}>
-          <div style={S.hdr}><Clock size={14} color="#94a3b8" /><span style={S.hdrTxt}>Recent Runs</span></div>
+          <div style={S.hdr}><Clock size={14} color="var(--text-2)" /><span style={S.hdrTxt}>Recent Runs</span></div>
 
           {(summary?.recent_runs?.length ?? 0) === 0 ? (
             <div style={S.empty}>No run history. Sync or run a pipeline.</div>
@@ -272,7 +272,7 @@ export default function HomePage() {
           ))}
 
           {(summary?.recent_runs?.length ?? 0) > 0 && (
-            <div style={{ fontSize: 12, color: "#334155", marginTop: 10 }}>
+            <div style={{ fontSize: 12, color: "var(--text-4)", marginTop: 10 }}>
               AI analysis available for completed runs — open Run Logs in Monitor Agent.
             </div>
           )}
@@ -286,18 +286,18 @@ export default function HomePage() {
       {/* Planner + Executor */}
       <div style={S.grid2}>
         <div style={S.card}>
-          <div style={S.hdr}><Brain size={14} color="#a78bfa" /><span style={S.hdrTxt}>Planner Agent</span></div>
+          <div style={S.hdr}><Brain size={14} color="var(--violet)" /><span style={S.hdrTxt}>Planner Agent</span></div>
           {savedPlan ? (
             <>
-              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>Last generated plan</div>
+              <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 6 }}>Last generated plan</div>
               <div style={S.planBox}>
-                <div style={{ fontSize: 13, color: "#f1f5f9", fontWeight: 600, marginBottom: 6 }}>
+                <div style={{ fontSize: 13, color: "var(--text)", fontWeight: 600, marginBottom: 6 }}>
                   {savedPlan.config?.stages?.length || 0} stage(s)
-                  {savedPlan.used_fallback && <span style={{ marginLeft: 8, fontSize: 11, color: "#f59e0b" }}>(fallback)</span>}
+                  {savedPlan.used_fallback && <span style={{ marginLeft: 8, fontSize: 11, color: "var(--warn)" }}>(fallback)</span>}
                 </div>
                 <div>{(savedPlan.config?.stages || []).map((s, i) => <span key={i} style={S.planStage}>{s.name}</span>)}</div>
                 {savedPlan.config?.reasoning && (
-                  <div style={{ fontSize: 12, color: "#64748b", marginTop: 8 }}>
+                  <div style={{ fontSize: 12, color: "var(--text-3)", marginTop: 8 }}>
                     {savedPlan.config.reasoning.slice(0, 110)}{savedPlan.config.reasoning.length > 110 ? "…" : ""}
                   </div>
                 )}
@@ -316,18 +316,18 @@ export default function HomePage() {
         </div>
 
         <div style={S.card}>
-          <div style={S.hdr}><Zap size={14} color="#f59e0b" /><span style={S.hdrTxt}>Executor Agent</span></div>
+          <div style={S.hdr}><Zap size={14} color="var(--warn)" /><span style={S.hdrTxt}>Executor Agent</span></div>
           {savedPlan ? (
             <>
-              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>Plan ready to execute</div>
+              <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 6 }}>Plan ready to execute</div>
               <div style={S.planBox}>
-                <div style={{ fontSize: 13, color: "#4ade80", display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                <div style={{ fontSize: 13, color: "var(--ok)", display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
                   <CheckCircle size={13} /> Plan loaded from Planner Agent
                 </div>
-                <div style={{ fontSize: 12, color: "#64748b" }}>
+                <div style={{ fontSize: 12, color: "var(--text-3)" }}>
                   {savedPlan.config?.stages?.length || 0} stages
                   {savedPlan.config?.execution_groups?.some((g) => g.length > 1) && (
-                    <span style={{ color: "#a78bfa" }}> (parallel ⚡)</span>
+                    <span style={{ color: "var(--violet)" }}> (parallel ⚡)</span>
                   )} ·
                   cluster: {savedPlan.config?.recommended_settings?.node_type || "auto"} ·
                   workers: {savedPlan.config?.recommended_settings?.num_workers ?? "auto"} ·

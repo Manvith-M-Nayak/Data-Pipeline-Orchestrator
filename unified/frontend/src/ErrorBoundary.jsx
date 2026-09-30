@@ -1,8 +1,9 @@
 import React from "react";
+import { Alert, Button } from "./ui/components.jsx";
 
-// Catches render/lifecycle errors in the subtree so a single tab crash shows a
+// Catches render/lifecycle errors in the subtree so a single page crash shows a
 // recoverable panel instead of white-screening the whole app. Keyed by route in
-// App.jsx so navigating to another tab clears the error automatically.
+// App.jsx so navigating to another page clears the error automatically.
 export default class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
@@ -21,50 +22,20 @@ export default class ErrorBoundary extends React.Component {
   render() {
     if (!this.state.error) return this.props.children;
     return (
-      <div
-        style={{
-          margin: "40px auto",
-          maxWidth: 640,
-          padding: 24,
-          background: "#1e293b",
-          border: "1px solid #7f1d1d",
-          borderRadius: 12,
-          color: "#f1f5f9",
-        }}
-      >
-        <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 8 }}>
-          This tab hit an error
-        </div>
-        <div style={{ fontSize: 13, color: "#94a3b8", marginBottom: 16 }}>
-          The rest of the app is still running — switch tabs, or retry.
-        </div>
-        <pre
-          style={{
-            fontSize: 12,
-            color: "#fca5a5",
-            background: "#0f172a",
-            padding: 12,
-            borderRadius: 8,
-            overflowX: "auto",
-            marginBottom: 16,
-          }}
+      <div style={{ maxWidth: 640, margin: "40px auto" }}>
+        <Alert
+          tone="bad"
+          title="This page hit an error"
+          action={<Button size="sm" onClick={() => this.setState({ error: null })}>Retry</Button>}
         >
-          {String(this.state.error?.message || this.state.error)}
-        </pre>
-        <button
-          onClick={() => this.setState({ error: null })}
-          style={{
-            padding: "8px 16px",
-            background: "#334155",
-            color: "#f1f5f9",
-            border: "none",
-            borderRadius: 8,
-            cursor: "pointer",
-            fontSize: 13,
-          }}
-        >
-          Retry
-        </button>
+          The rest of the app is still running — switch pages, or retry.
+          <pre style={{
+            marginTop: 10, padding: 10, borderRadius: 8, overflowX: "auto",
+            background: "var(--surface)", border: "1px solid var(--border)", color: "var(--bad)", fontSize: 12,
+          }}>
+            {String(this.state.error?.message || this.state.error)}
+          </pre>
+        </Alert>
       </div>
     );
   }

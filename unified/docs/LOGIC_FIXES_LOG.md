@@ -22,6 +22,7 @@ records:
 | 10 | Planner self-verifies (assurance as a library); intent check leaves the run path | design change (user request) | Done |
 | 11 | Streaming: single-stage merge fixed + multi-stage streaming, user-selectable; AND/OR filters | bug + feature (user request) | Done |
 | 12 | Frontend review: wrong fields, dead features, demo data, failure display, lint | 17 issues (user request) | Done |
+| 13 | Redesign 1/4: design system, light + dark themes, sidebar shell | feature (user request) | Done |
 
 ---
 
@@ -774,4 +775,53 @@ comment, one intentional mount-only effect marked).
 - **`npm audit`:** `react-router` has a moderate advisory with a non-breaking fix (`npm audit fix`). The `vite`/`esbuild` advisories are dev-server only and need a major Vite upgrade. Left for the user to decide, since it changes `package-lock.json`.
 - **Layout:** fixed-column grids are not responsive on narrow screens. That is cosmetic, and out of scope for a bug pass.
 - **Duplicated run flow:** Executor and Manager tabs both start runs. Both go through the Manager, so behaviour is consistent; merging them is a UX decision.
+
+
+## Stage 13 — Redesign, part 1: design system and light theme
+
+The user asked for a light theme and a much better frontend, one that doesn't look
+AI-generated, plus flows. Their decisions, via the question tool:
+- a **light/dark toggle** (the app follows the OS until the user picks one);
+- **all three flows** (pipeline graph, agent flow, guided user journey);
+- a **full redesign**;
+- **React Flow is the only new library**, and no UI kit.
+
+The redesign is split into stages:
+- **13:** foundation (this stage);
+- **14:** flow diagrams;
+- **15:** guided flow;
+- **16 onward:** rebuild each page on the shared components.
+
+### Design direction
+
+- **Warm neutrals.** Paper-white light theme and a warm charcoal dark theme, not the usual slate blue. Everything comes from one set of colour variables.
+- **One ink-blue accent.** Status colours (ok/warn/bad) are muted, so dense operational screens stay calm.
+- **Type:** IBM Plex Sans / Plex Mono, with tabular numbers in tables.
+- **Deliberately avoided:** purple gradients, glassmorphism, emoji, oversized hero text.
+
+### What changed
+
+| File | Change |
+|---|---|
+| `src/index.css` | All design tokens (colours, radii, shadows, focus ring) for light and dark. `[data-theme]` overrides the OS preference. Base typography, focus-visible rings, scrollbars, reduced-motion support. |
+| `index.html` | Plex fonts. A tiny inline script applies the saved theme before first paint (no flash). The title is now "Pipeline Orchestrator". |
+| `src/ui/theme.js` | `useTheme()` (stored choice, otherwise follows the OS live), `tint()` (translucent colour via `color-mix`, which works with CSS variables), `TONES`. |
+| `src/ui/ui.css`, `src/ui/components.jsx` | Shared components with real hover/focus/disabled states: `Button`, `Card`, `PageHeader`, `Badge`, `Dot`, `Alert`, `Stat`, `Empty`, `Segmented`, `Tabs`, `Field`, `KV`, `Spinner`, plus shell/table/grid classes. Responsive below 900 px. |
+| `src/App.jsx` | A new shell replaces the 9 crowded top tabs. The sidebar is grouped by the work (Workspace / Build / Run / Observe / Agents), with backend status and the theme toggle. The top bar shows the section, the page and "Sync ADF runs". |
+| `src/ErrorBoundary.jsx` | Uses `Alert` / `Button`. |
+| All 14 pages | Every hard-coded colour (51 distinct hex values) is mapped to a token by a script. Borders, text and background tints each have their own mapping, so the same hex can land in different roles. The `color + "22"` alpha trick (which breaks with variables) is converted to `color-mix`. Primary buttons now use the accent. |
+
+### Verification
+
+- **Lint and build:** ESLint (React rules) reports 0 problems, and `vite build` passes.
+- **Leftover colours:** `grep` finds no hard-coded hex colour left in `pages/`.
+- **Browser, light:** Overview, Central Manager, Run Insights and Planner.
+- **Browser, dark:** Run Insights and Planner, after the toggle; the choice persists across reloads.
+- **Layout:** there is no horizontal overflow (checked `scrollWidth` against the viewport).
+
+### Known and planned
+
+The pages still use their own inline layouts (headers with pill badges, varying
+widths). Stages 16 onward rebuild them on the shared components; this stage only
+guarantees that both themes are correct everywhere.
 
