@@ -136,6 +136,7 @@ export default function PlannerTab() {
 
   // ── pipeline settings (user overrides; null/"" = auto/recommended) ────────
   const [pipelineMode,   setPipelineMode]   = useState("batch"); // batch | streaming
+  const [streamLayout,   setStreamLayout]   = useState("single"); // single | multi (streaming only)
   const [numStages,      setNumStages]      = useState(null);   // null = model decides
   const [containerNames, setContainerNames] = useState("");
   const [overrides,      setOverrides]      = useState({
@@ -144,7 +145,10 @@ export default function PlannerTab() {
 
   function buildPlanOpts() {
     const opts = {};
-    if (pipelineMode === "streaming") opts.mode = "streaming";
+    if (pipelineMode === "streaming") {
+      opts.mode = "streaming";
+      opts.stream_layout = streamLayout;
+    }
     if (numStages !== null) opts.num_containers = numStages;
     const custom = {};
     Object.entries(overrides).forEach(([k, v]) => {
@@ -429,9 +433,36 @@ export default function PlannerTab() {
               ))}
             </div>
             {pipelineMode === "streaming" && (
-              <div style={{ fontSize: 11, color: "#f59e0b", marginTop: 6 }}>
-                Streaming builds a single incremental stage (source → sink) with a checkpoint;
-                re-run to process newly arrived data.
+              <div style={{ marginTop: 10 }}>
+                <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 6 }}>Streaming Stages</div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  {[
+                    { id: "single", label: "Single stage",
+                      hint: "All steps in one incremental stage — one Databricks job per run (fastest, cheapest)." },
+                    { id: "multi",  label: "Multiple stages",
+                      hint: "One incremental stage per step, chained with their own checkpoints — one job per stage per run." },
+                  ].map((l) => (
+                    <button
+                      key={l.id}
+                      onClick={() => setStreamLayout(l.id)}
+                      title={l.hint}
+                      style={{
+                        flex: 1, padding: "8px 12px", cursor: "pointer", textAlign: "left",
+                        borderRadius: 8, fontSize: 12, fontWeight: streamLayout === l.id ? 700 : 400,
+                        color: streamLayout === l.id ? "#38bdf8" : "#94a3b8",
+                        background: streamLayout === l.id ? "#0c2a3d" : "#0f172a",
+                        border: `1px solid ${streamLayout === l.id ? "#38bdf8" : "#334155"}`,
+                      }}
+                    >
+                      {l.label}
+                      <div style={{ fontSize: 11, fontWeight: 400, color: "#64748b", marginTop: 2 }}>{l.hint}</div>
+                    </button>
+                  ))}
+                </div>
+                <div style={{ fontSize: 11, color: "#f59e0b", marginTop: 6 }}>
+                  Each run processes only newly arrived data (checkpointed). Aggregations cover
+                  each run's new rows, not everything so far.
+                </div>
               </div>
             )}
           </div>
@@ -522,10 +553,23 @@ export default function PlannerTab() {
               <div style={{ fontWeight: 700, color: "#4ade80", marginBottom: 4 }}>
                 Plan generated · {plan.config?.stages?.length} stage(s)
                 {plan.used_fallback && <span style={{ marginLeft: 8, fontSize: 11, color: "#f59e0b" }}>fallback used</span>}
+                {plan.config?.streaming?.layout && (
+                  <span style={{ marginLeft: 8, fontSize: 11, color: "#38bdf8" }}>
+                    streaming · {plan.config.streaming.layout === "multi"
+                      ? `${plan.config.stages?.length || 0} stages` : "single stage"}
+                  </span>
+                )}
               </div>
               <div style={{ fontSize: 13, color: "#64748b" }}>{plan.config?.reasoning}</div>
             </div>
           </div>
+
+          {plan.config?.streaming?.layout_note && (
+            <div style={{ fontSize: 12, color: "#38bdf8", background: "#0c2a3d", border: "1px solid #1e3a5f",
+                          borderRadius: 8, padding: "8px 10px", marginBottom: 10 }}>
+              ℹ {plan.config.streaming.layout_note}
+            </div>
+          )}
 
           {passThroughStages.length > 0 && (
             <div style={{

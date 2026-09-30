@@ -201,14 +201,72 @@ def _pystr(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
+def _split_top(expr: str, word: str) -> list:
+    """Split on a boolean keyword that sits outside quotes and brackets."""
+    parts, depth, quote, start, i, n = [], 0, None, 0, 0, len(expr)
+    pat = re.compile(rf"\s+{word}\s+", re.IGNORECASE)
+    while i < n:
+        ch = expr[i]
+        if quote:
+            quote = None if ch == quote else quote
+        elif ch in "'\"":
+            quote = ch
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        elif depth == 0:
+            m = pat.match(expr, i)
+            if m and i > 0:
+                parts.append(expr[start:i])
+                start = i = m.end()
+                continue
+        i += 1
+    parts.append(expr[start:])
+    return [p.strip() for p in parts]
+
+
+def _strip_outer_parens(expr: str) -> str:
+    e = expr.strip()
+    while e.startswith("(") and e.endswith(")"):
+        depth = 0
+        for i, ch in enumerate(e):
+            depth += ch == "("
+            depth -= ch == ")"
+            if depth == 0 and i < len(e) - 1:
+                return e          # "(a) and (b)" — the parens don't wrap it all
+        e = e[1:-1].strip()
+    return e
+
+
+def _convert_boolean(expr: str) -> str:
+    """AND / OR combinations (SQL precedence: AND binds tighter than OR) of
+    conditions _convert_filter_raw understands. BETWEEN's own "and" is kept."""
+    e = _strip_outer_parens(expr)
+    ors = _split_top(e, "or")
+    if len(ors) > 1:
+        return " | ".join(f"({_convert_boolean(p)})" for p in ors)
+    ands = []
+    for part in _split_top(e, "and"):
+        if ands and re.search(r"\bbetween\s+\S+$", ands[-1], re.IGNORECASE):
+            ands[-1] = f"{ands[-1]} and {part}"      # "x between 1" + "5"
+        else:
+            ands.append(part)
+    if len(ands) > 1:
+        return " & ".join(f"({_convert_boolean(p)})" for p in ands)
+    return _convert_filter_raw(e)
+
+
 def _convert_filter(expr: str) -> str:
     """Convert a filter_condition and validate the result on EVERY path.
 
     The converted string is written verbatim into a notebook that runs on
     Databricks with storage credentials in scope, so each branch's output is
-    checked by _invalid_pyspark_reason before it is returned.
+    checked by _invalid_pyspark_reason before it is returned. Conditions may
+    be combined with AND / OR (and brackets); each atom goes through the same
+    escaping converter.
     """
-    result = _convert_filter_raw(expr)
+    result = _convert_boolean(expr)
     bad = _invalid_pyspark_reason(result)
     if bad is not None:
         raise UnsupportedTransformError(

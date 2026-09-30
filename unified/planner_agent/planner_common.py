@@ -142,71 +142,159 @@ def _build_stages(clist: list, rec: dict) -> list:
     return stages
 
 
-def to_streaming_plan(config: dict, container_names: list = None) -> dict:
-    """Convert a batch plan into a streaming plan (single incremental stage).
+STREAM_LAYOUTS = ("single", "multi")
+_IDENT_RE = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*\b")
 
-    Reuses the transforms/filter/aggregation the planner already extracted from
-    the prompt — streaming just changes the topology: instead of an ADF copy
-    ingest followed by Databricks transform stages, one 'stream' stage reads the
-    source container incrementally (checkpoint-based) and writes the sink. The
-    executor runs it with availableNow semantics (process new data, then stop).
+
+def _op_stages(config: dict) -> list:
+    """Notebook stages that actually do something, in plan order."""
+    return [s for s in (config.get("stages") or [])
+            if s.get("type") == "notebook" and _stage_op_load(s) > 0]
+
+
+def _transform_outputs(stage: dict) -> set:
+    out = set()
+    for t in stage.get("transformations") or []:
+        if isinstance(t, str) and "=" in t:
+            lhs = t.split("=", 1)[0].strip()
+            if lhs.isidentifier():
+                out.add(lhs)
+    return out
+
+
+def single_stage_blockers(op_stages: list) -> list:
+    """Why merging these stages into ONE stream stage would change results.
+
+    A single stage always runs transforms → filter → aggregation, so the merge
+    is exact only if: at most one aggregation and nothing after it, and no
+    filter reads a column that a LATER stage's transform (re)defines."""
+    reasons = []
+    agg_idx = [i for i, s in enumerate(op_stages) if (s.get("aggregation") or {}).get("aggregations")]
+    if len(agg_idx) > 1:
+        reasons.append(f"{len(agg_idx)} aggregations — one stage can aggregate only once")
+    elif agg_idx and agg_idx[0] < len(op_stages) - 1:
+        reasons.append(f"stage '{op_stages[agg_idx[0]].get('name')}' aggregates but later stages "
+                       "still operate on the result")
+    for i, s in enumerate(op_stages):
+        used = set(_IDENT_RE.findall(str(s.get("filter_condition") or "")))
+        later = set().union(*[_transform_outputs(t) for t in op_stages[i + 1:]]) if i + 1 < len(op_stages) else set()
+        clash = sorted(used & later)
+        if clash:
+            reasons.append(f"filter in '{s.get('name')}' uses {', '.join(clash)}, "
+                           "which a later stage changes")
+    return reasons
+
+
+def to_streaming_plan(config: dict, container_names: list = None, layout: str = "single") -> dict:
+    """Convert a batch plan into a streaming plan.
+
+    Streaming changes the topology: no ADF copy ingest; stream stages read new
+    files from their source container incrementally (a checkpoint remembers
+    what was processed) and append a part file to their sink on each trigger.
+
+    layout="single": ONE stream stage doing all the work — all transforms in
+      order and all filters combined with AND (the old version kept only the
+      first filter and silently dropped the rest). Cheapest: one Databricks job
+      per trigger. If a single stage cannot reproduce the plan's results
+      (single_stage_blockers), the multi-stage layout is used instead and the
+      reason is recorded in streaming.layout_note.
+    layout="multi": one stream stage per plan stage that does work, chained
+      source → stage 1 → … → sink, each with its own checkpoint, so every
+      trigger's new data flows through the whole chain. One Databricks job per
+      stage per trigger.
     """
-    stages = config.get("stages", []) or []
-    notebook_stages = [s for s in stages if s.get("type") == "notebook"]
+    layout = layout if layout in STREAM_LAYOUTS else "single"
+    ops = _op_stages(config)
+    note = None
+    if layout == "single" and len(ops) > 1:
+        blockers = single_stage_blockers(ops)
+        if blockers:
+            layout = "multi"
+            note = ("Single stage would change the results (" + "; ".join(blockers)
+                    + ") — built as multi-stage instead.")
+    if layout == "multi" and len(ops) <= 1:
+        layout = "single"   # nothing to chain
 
-    # Merge all transform steps (order preserved); take the first filter /
-    # aggregation encountered — a single stage does the combined work.
-    merged_transforms, filter_condition, aggregation = [], None, None
-    for s in notebook_stages:
-        for t in (s.get("transformations") or []):
-            if t and t not in merged_transforms:
-                merged_transforms.append(t)
-        if filter_condition is None and s.get("filter_condition"):
-            filter_condition = s.get("filter_condition")
-        if aggregation is None and s.get("aggregation"):
-            aggregation = s.get("aggregation")
+    rec = config.get("recommended_settings") or get_recommended_settings("medium")
+
+    if layout == "single":
+        merged_transforms, filters, aggregation = [], [], None
+        for s in ops:
+            merged_transforms += [t for t in (s.get("transformations") or []) if t and str(t).strip()]
+            if s.get("filter_condition"):
+                filters.append(str(s["filter_condition"]).strip())
+            if (s.get("aggregation") or {}).get("aggregations"):
+                aggregation = s["aggregation"]
+        steps = [{
+            "name": "Stream_Ingest_Transform",
+            "transformations": merged_transforms,
+            "filter_condition": (filters[0] if len(filters) == 1
+                                 else " AND ".join(f"({f})" for f in filters) if filters else None),
+            "aggregation": aggregation,
+        }]
+    else:
+        steps = [{
+            "name": f"Stream_{s.get('name')}"[:100],
+            "transformations": [t for t in (s.get("transformations") or []) if t and str(t).strip()],
+            "filter_condition": s.get("filter_condition"),
+            "aggregation": s.get("aggregation") if (s.get("aggregation") or {}).get("aggregations") else None,
+        } for s in ops]
 
     # Isolate each streaming pipeline in its own containers. Reusing fixed names
-    # (e.g. "ingest"/"transform") across different datasets pollutes the source
-    # and sink — the checkpoint would skip a new dataset's data as "already
-    # seen", and the sink would mix outputs. A unique suffix per generated plan
-    # keeps triggers of the SAME plan incremental while isolating DIFFERENT ones.
-    if container_names and len(container_names) >= 2:
-        source, sink = container_names[0], container_names[-1]
+    # across different datasets pollutes the source and sink — the checkpoint
+    # would skip a new dataset's data as "already seen", and the sink would mix
+    # outputs. A unique suffix per generated plan keeps triggers of the SAME
+    # plan incremental while isolating DIFFERENT ones.
+    n = len(steps)
+    if container_names and len(container_names) == n + 1:
+        clist = list(container_names)
+    elif container_names and len(container_names) >= 2 and n == 1:
+        clist = [container_names[0], container_names[-1]]
     else:
         import uuid
         sid = uuid.uuid4().hex[:8]
-        source, sink = f"stream-src-{sid}", f"stream-sink-{sid}"
-    checkpoint = f"{sink}-chk"
+        clist = ([f"stream-src-{sid}"] + [f"stream-s{i}-{sid}" for i in range(1, n)]
+                 + [f"stream-sink-{sid}"])
 
-    rec = config.get("recommended_settings") or get_recommended_settings("medium")
-    stage = {
-        "name":               "Stream_Ingest_Transform",
-        "type":               "stream",
-        "source_container":   source,
-        "sink_container":     sink,
-        "checkpoint_container": checkpoint,
-        "transformations":    merged_transforms,
-        "filter_condition":   filter_condition,
-        "shuffle_partitions": rec.get("shuffle_partitions", 8),
-    }
-    if aggregation:
-        stage["aggregation"] = aggregation
+    stages = []
+    for i, st in enumerate(steps):
+        stage = {
+            "name":                 st["name"],
+            "type":                 "stream",
+            "source_container":     clist[i],
+            "sink_container":       clist[i + 1],
+            "checkpoint_container": f"{clist[i + 1]}-chk",
+            "transformations":      st["transformations"],
+            "filter_condition":     st["filter_condition"],
+            "shuffle_partitions":   rec.get("shuffle_partitions", 8),
+        }
+        if st["aggregation"]:
+            stage["aggregation"] = st["aggregation"]
+        stages.append(stage)
 
+    names = [s["name"] for s in stages]
     return {
         "mode":                 "streaming",
-        "containers":           {"stage0": source, "stage1": sink},
-        "containers_to_create": [source, sink],
-        "datasets":             _build_datasets([source, sink]),
-        "stages":               [stage],
-        "execution_order":      [stage["name"]],
-        "execution_groups":     [[stage["name"]]],
-        "num_containers":       2,
+        "containers":           {f"stage{i}": c for i, c in enumerate(clist)},
+        "containers_to_create": clist,
+        "datasets":             _build_datasets(clist),
+        "stages":               stages,
+        "execution_order":      names,
+        "execution_groups":     [[n_] for n_ in names],
+        "num_containers":       len(clist),
         "recommended_settings": rec,
         "streaming": {
             "trigger":              "availableNow",
-            "source_container":     source,
-            "checkpoint_container": checkpoint,
+            "layout":               layout,
+            "layout_note":          note,
+            # Single layout: the requested steps that were merged (exactly —
+            # see single_stage_blockers) into the one stream stage. Lets the
+            # intent check judge the steps the user asked for, one by one.
+            "merged_steps": ([{k: s.get(k) for k in ("name", "transformations", "filter_condition", "aggregation")}
+                              for s in ops] if layout == "single" and len(ops) > 1 else None),
+            "source_container":     clist[0],
+            "sink_container":       clist[-1],
+            "checkpoint_container": stages[-1]["checkpoint_container"],
         },
     }
 

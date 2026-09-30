@@ -20,6 +20,7 @@ records:
 | 8 | Semantic (intent) check false flags — reported on `zv.csv` | user report | Done |
 | 9 | Remove the auto-added `processed_time` column everywhere | user request | Done |
 | 10 | Planner self-verifies (assurance as a library); intent check leaves the run path | design change (user request) | Done |
+| 11 | Streaming: single-stage merge fixed + multi-stage streaming, user-selectable; AND/OR filters | bug + feature (user request) | Done |
 
 ---
 
@@ -654,3 +655,71 @@ Both claims were wrong:
 - **Planning is slower when a re-plan happens:** one more model call (about 20–30 s with the local planner).
 - **A re-plan can't fix a persistent model mistake.** The best attempt is returned with `verified: false` and its open issues shown, and the user can still "Fix & Re-plan" or edit.
 - **The re-plan path wasn't triggered in the live runs.** The model produced a correct plan first time; the retry path is covered by the mocked tests.
+
+---
+
+## Stage 11 — Streaming layouts (single / multi-stage) and AND/OR filters
+
+**Commit message:** `feat(streaming): selectable single or multi-stage streams; fix merged filters; support AND/OR filters`
+
+### Problems
+
+- **Silent data loss (bug).** `to_streaming_plan` squeezed every stage into one stream stage but kept only the **first** filter, silently dropping the rest.
+  - Reproduced: a plan with `aquatic = 1` then `predator = 1` became a stream with only `aquatic = 1`.
+- **Filters with `AND`/`OR` never compiled (bug).** The filter converter rejected them outright, including the shipped `valid_plan.json` (`price > 0 AND quantity > 0`). Any plan using them failed with "Plan cannot be compiled to a notebook".
+- **Feature request:** a way to have multiple stages in a streaming pipeline, doing different tasks.
+
+### Changes
+
+| File | Change |
+|---|---|
+| `executor_agent/notebook_builder.py` | New `_convert_boolean` plus `_split_top` / `_strip_outer_parens`. Handles AND / OR with SQL precedence (AND binds tighter), brackets, BETWEEN's own `and`, and `and` inside quoted values. Each condition goes through the existing escaping converter, and the whole result through the stage 1 safety validator. |
+| `planner_agent/planner_common.py` | `to_streaming_plan(config, container_names, layout)` supports `"single"` and `"multi"`. **Single:** all transforms in order and **all** filters combined with AND. `single_stage_blockers()` detects when one stage would change the results (more than one aggregation, operations after an aggregation, a filter using a column a later stage changes); the plan is then built multi-stage, and `streaming.layout_note` explains why. It also records `streaming.merged_steps`. **Multi:** one stream stage per step that does work, chained `src → s1 → … → sink`, each with its own checkpoint container (`{sink}-chk`), run in order. Per-plan unique container names as before. `streaming.sink_container` is the last sink. |
+| `planner_agent/router.py` | Accepts `stream_layout` (`single` by default) and passes it through the self-checked build. |
+| `central_manager_agent/stream_manager.py` | A stream's output is the **last** stream stage's sink (it used the first stage's, which is wrong for chains). |
+| `assurance_agent/semantic.py` | **Filters:** a combined AND filter is described as separate filter steps. **Single-stage streams:** the `merged_steps` are judged one by one, as the user requested them. The 7B model otherwise flagged every correct merge ("both stages combined into one filter"), even with a prompt note or a line added to the request — both tried and removed. |
+| `frontend/src/pages/PlannerTab.jsx` | **"Streaming Stages"** selector when Streaming is chosen: *Single stage* ("one Databricks job per run, fastest/cheapest") or *Multiple stages* ("one incremental stage per step, own checkpoints"). A plan badge shows the layout, the layout note is displayed, and a caveat explains that aggregations cover each run's new rows only. |
+
+### How multi-stage streaming processes new data
+
+Each stream stage keeps a manifest of the files it has already processed, in its own checkpoint container, and writes a uniquely named part file per run. On each run:
+- stage 1 processes new source files;
+- stage 2 then sees exactly stage 1's new part files, and so on.
+
+New data flows through the whole chain on every run.
+
+### Verification
+
+- **Filter converter:**
+  - `price > 0 AND quantity > 0` → `(col("price") > 0) & (col("quantity") > 0)`;
+  - `(aquatic = 1 or fins = 1) and predator = 1` → correct precedence;
+  - `a = 1 or b = 2 and c = 3` → `a | (b & c)`;
+  - `price between 10 and 50 and region = 'EU'` keeps the BETWEEN;
+  - `name = 'Tom and Jerry'` is not split;
+  - the stage 1 injection string is still an inert literal.
+- **Conversion**, across 3 plans × 2 layouts:
+
+  | Plan | Single | Multi |
+  |---|---|---|
+  | 2 filters + count | 1 stage, filter `(aquatic = 1) AND (predator = 1)` | 3 chained stages, unique checkpoints |
+  | Aggregation in the middle | single requested → multi built, with a note | 2 chained stages |
+  | Filter uses a later column | multi with a note | 2 chained stages |
+
+  All pass the stage 1 safety checks, and every generated notebook compiles. Assurance passes the first two plans and correctly fails the third: that plan is genuinely broken (the filter uses `legs2` before it exists).
+- **Stream manager and executor** (mocked cloud): a 3-stage stream uses the chain's last sink; a tick runs `Stream_S1 → Stream_S2 → Stream_S3` in order; the monitor records the run.
+- **Live** (real planner + qwen, `/api/planner/plan`, zoo columns, "Stage 1: keep only aquatic animals. Stage 2: keep only predators."):
+  - **multi:** two chained stages, verified on attempt 1 (29 s);
+  - **single:** one stage with the combined filter, verified on attempt 1, "The plan matches the user request exactly." (53 s). Before the `merged_steps` fix it was flagged, and the pointless re-plan also produced a worse plan.
+- **Intent check, live, 3 runs each:** single-stage correct merge passes ×3, a wrong second step is flagged ×3, multi passes ×3.
+- **9-case regression suite:** 24/27 against my original expectations. The 3 "misses" are all `valid_plan.json`, which is now flagged for aggregations nobody asked for (average quantity, order count) and extra filters. On inspection that flag is **correct**: the request is only "total revenue per category and region", and the example is "valid" structurally, not intent-wise. With that expectation corrected: **27/27**.
+- **Regressions:**
+  - the integration test passes, and so do the teammate's 13 cost tests;
+  - `ruff` is clean, and the frontend builds;
+  - the assurance examples behave as designed;
+  - the backend has no tracebacks, and all 25 GET endpoints return 200.
+
+### Limits
+
+- **Multi-stage runs cost more.** Each run executes one Databricks job per stage in sequence (about 90 s cold start each).
+- **Streaming aggregations cover only each run's new rows**, in both layouts. Cumulative results would need a stateful design (not in scope).
+- **OR is supported in filters, but single-stage merging only ever combines filters with AND** (steps apply one after another).

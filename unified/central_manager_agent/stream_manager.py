@@ -65,7 +65,9 @@ class StreamManager:
             raise ValueError("plan has no stream stage")
         clist = config.get("containers_to_create") or []
         source = stream_stages[0].get("source_container") or (clist[0] if clist else None)
-        sink = stream_stages[0].get("sink_container") or (clist[-1] if clist else None)
+        # Multi-stage streams chain stage → stage; the final output is the
+        # LAST stream stage's sink, not the first one's.
+        sink = stream_stages[-1].get("sink_container") or (clist[-1] if clist else None)
 
         self._prune_stopped()
         sid = uuid.uuid4().hex[:8]

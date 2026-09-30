@@ -50,6 +50,8 @@ async def plan_pipeline(body: dict):
         container_names = None
 
     mode = (body.get("mode") or "batch").lower()
+    # Streaming layout: "single" (one stream stage) or "multi" (chained stages)
+    stream_layout = (body.get("stream_layout") or "single").lower()
 
     def _build(review_feedback=None):
         config, used_fallback = decide_pipeline_config(
@@ -63,7 +65,7 @@ async def plan_pipeline(body: dict):
         # Streaming mode: reshape the batch plan into a single incremental
         # stream stage, reusing the transforms/filter the model extracted.
         if mode == "streaming":
-            config = to_streaming_plan(config, container_names)
+            config = to_streaming_plan(config, container_names, stream_layout)
         return config, used_fallback
 
     # The planner verifies its own plan (structural rules + intent check from

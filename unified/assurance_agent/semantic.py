@@ -54,11 +54,54 @@ SYSTEM_PROMPT = (
 )
 
 
+def _and_parts(expr: str) -> list:
+    """Top-level AND parts of a filter (outside quotes/brackets; BETWEEN's own
+    "and" kept), each with one layer of wrapping brackets removed. "A AND B"
+    reads as two filters to the model, which matches how it was requested."""
+    import re
+
+    parts, depth, quote, start, i = [], 0, None, 0, 0
+    pat = re.compile(r"\s+and\s+", re.IGNORECASE)
+    while i < len(expr):
+        ch = expr[i]
+        if quote:
+            quote = None if ch == quote else quote
+        elif ch in "'\"":
+            quote = ch
+        elif ch in "()":
+            depth += 1 if ch == "(" else -1
+        elif depth == 0:
+            m = pat.match(expr, i)
+            if m and i > 0:
+                piece = expr[start:i].strip()
+                if re.search(r"\bbetween\s+\S+$", piece, re.I):
+                    i = m.end()
+                    continue
+                parts.append(piece)
+                start = i = m.end()
+                continue
+        i += 1
+    parts.append(expr[start:].strip())
+    out = []
+    for p in parts:
+        if p.startswith("(") and p.endswith(")") and p.count("(") == 1:
+            p = p[1:-1].strip()
+        out.append(p)
+    return out
+
+
 def plan_operations(plan: dict) -> list:
     """One plain line per stage describing what it does. Small models misread
     the full plan JSON (containers, datasets, settings — none of which bear on
     intent) and e.g. report a filter as "missing" when the stage has one."""
     lines = []
+    merged = ((plan or {}).get("streaming") or {}).get("merged_steps")
+    if merged:
+        # Single-stage streaming: the requested steps were merged exactly into
+        # one stream stage (user's layout choice). Judge them as requested.
+        stages = [dict(st, type="notebook", name=f"{st.get('name')} (runs inside the one streaming stage)")
+                  for st in merged]
+        plan = {"stages": stages}
     for s in (plan or {}).get("stages", []) or []:
         name, stype = s.get("name", "?"), s.get("type", "?")
         if stype == "copy":
@@ -69,7 +112,8 @@ def plan_operations(plan: dict) -> list:
         if transforms:
             ops.append("transforms: " + "; ".join(transforms))
         if s.get("filter_condition"):
-            ops.append(f"filter (keep rows where): {s['filter_condition']}")
+            for part in _and_parts(str(s["filter_condition"])):
+                ops.append(f"filter (keep rows where): {part}")
         agg = s.get("aggregation") or {}
         if agg.get("aggregations"):
             # Plain words: "count(*) as n" was read by the 7B model as
