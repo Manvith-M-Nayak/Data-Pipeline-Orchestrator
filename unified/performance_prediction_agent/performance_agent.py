@@ -135,7 +135,15 @@ class PerformancePredictionAgent:
         baseline_s = self._critical_path_duration(stage_dur, execution_groups)
 
         # ── 3. Load history and compute adjustment factor ─────────────────
-        history       = self._load_feedback()
+        # Only runs whose pipeline actually executed: aborted/failed runs log
+        # abort time or retry backoff, not a comparable duration. Prefer this
+        # pipeline's own runs; fall back to all executed runs.
+        history_all  = self._load_feedback()
+        executed     = [r for r in history_all
+                        if r.get("final_status") != "failed" and r.get("executed", True)]
+        key          = self._pipeline_key(plan)
+        same_pipe    = [r for r in executed if key and r.get("pipeline_key") == key]
+        history      = same_pipe if len(same_pipe) >= MIN_HISTORY_FOR_ML else executed
         adj_factor, history_used = self._compute_adjustment(
             history, predictions.get("complexity", "medium")
         )
@@ -151,8 +159,10 @@ class PerformancePredictionAgent:
         # ── 6. Outcome classification ─────────────────────────────────────
         #    Compare against the resource agent's own baseline estimate.
         resource_estimate_s = resource_plan.get("estimated_total_s", baseline_s) or baseline_s
+        # Failure history must be THIS pipeline's: one pipeline's failed
+        # post-run assurance must not abort a different pipeline.
         outcome, confidence = self._classify_outcome(
-            predicted_total_s, resource_estimate_s, history, predictions
+            predicted_total_s, resource_estimate_s, same_pipe, predictions
         )
 # ── 7a. Throughput ────────────────────────────────────────────────
         file_size_mb = predictions.get("file_size_mb", 0) or 0
@@ -195,6 +205,15 @@ class PerformancePredictionAgent:
         d = asdict(result)
         d["prediction_source"] = "formula"
         return d
+
+    @staticmethod
+    def _pipeline_key(plan: dict):
+        try:
+            from monitor_agent.services.anomaly_detector import pipeline_key
+
+            return pipeline_key(plan, {"mode": (plan or {}).get("mode")})
+        except Exception:
+            return None
 
     # ── Critical-path calculator ──────────────────────────────────────────────
     def _build_ml_response(
@@ -443,7 +462,9 @@ class PerformancePredictionAgent:
         # not "failed".
         recent_history = history[-10:] if history else []
         failure_rate = 0.0
-        if recent_history:
+        # A failure verdict aborts the run before it executes — require a
+        # real pattern (3+ of this pipeline's runs), not one or two records.
+        if len(recent_history) >= 3:
             failures = sum(
                 1 for r in recent_history
                 if r.get("assurance_passed") is False

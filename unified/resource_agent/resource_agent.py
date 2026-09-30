@@ -740,27 +740,55 @@ class ResourceAgent:
             if stage_type is None or r.get("stage_type") == stage_type
         ]
 
+    # Bounds on the learned multiplier — a handful of odd runs must never
+    # make the agent predict 10x too long or too short.
+    CORRECTION_BOUNDS = (0.33, 3.0)
+
+    @staticmethod
+    def _failed_run_ids() -> set:
+        """run_ids the Manager logged as failed. Their per-stage "actuals" are
+        abort time or retry backoff, not real stage runtime — legacy rows from
+        them are ignored (new ones are no longer written)."""
+        from jsonl_log import read_jsonl
+
+        try:
+            recs = read_jsonl(os.path.join(_DATA_DIR, "manager_feedback.jsonl"))
+        except Exception:
+            return set()
+        return {r.get("run_id") for r in recs if r.get("final_status") == "failed"}
+
     def get_correction_factor(self, stage_type: str) -> float:
         """
-        Load historical feedback and compute a damped correction multiplier.
+        Multiplier for the raw heuristic duration, learned from feedback.
         1.0  = predictions are accurate.
         >1.0 = predictions were consistently too short (actual > predicted).
         <1.0 = predictions were consistently too long.
+
+        The ratio is taken against the RAW (uncorrected) prediction: the
+        recorded predicted_duration_s already had the then-current factor
+        applied, and comparing against that makes the factor settle halfway
+        (true 0.5 → 0.81). The median of the last 10 raw ratios is used
+        directly — it is recomputed on every call, so a fixed damping factor
+        would never converge, only permanently under-correct.
         """
-        records = self._load_feedback(stage_type)
-        if len(records) < 3:
+        failed = self._failed_run_ids()
+        ratios = []
+        for r in self._load_feedback(stage_type):
+            if r.get("run_id") in failed or r.get("success") is False:
+                continue
+            pred = r.get("raw_predicted_duration_s") or (
+                (r.get("predicted_duration_s") or 0) / (r.get("correction_factor") or 1.0)
+            )
+            actual = r.get("actual_duration_s") or 0
+            if pred > 0 and actual > 0:
+                ratios.append(actual / pred)
+        if len(ratios) < 3:
             return 1.0
-        ratios = [
-            r["actual_duration_s"] / r["predicted_duration_s"]
-            for r in records
-            if r.get("predicted_duration_s", 0) > 0
-        ]
-        if not ratios:
-            return 1.0
-        recent = ratios[-10:]  # last 10 runs
-        avg    = sum(recent) / len(recent)
-        # Damped: move 50% toward observed ratio to avoid over-correction
-        return round(1.0 + (avg - 1.0) * 0.5, 3)
+        recent = sorted(ratios[-10:])
+        mid = len(recent) // 2
+        median = recent[mid] if len(recent) % 2 else (recent[mid - 1] + recent[mid]) / 2
+        lo, hi = self.CORRECTION_BOUNDS
+        return round(min(hi, max(lo, median)), 3)
 
     def record_actual(
         self,
@@ -771,16 +799,24 @@ class ResourceAgent:
         predicted_workers: int,
         actual_workers: int,
         run_id: str = "",
+        correction_factor: float = 1.0,
     ):
-        """Record actual vs predicted for this stage (function 9)."""
+        """Record actual vs predicted for this stage (function 9).
+
+        correction_factor: the multiplier already applied to
+        predicted_duration_s, so learning can recover the raw prediction.
+        Only call this for runs that actually executed successfully."""
         try:
             os.makedirs(_DATA_DIR, exist_ok=True)
+            cf = correction_factor or 1.0
             record = {
                 "ts":                   _ts(),
                 "run_id":               run_id,
                 "stage_name":           stage_name,
                 "stage_type":           stage_type,
                 "predicted_duration_s": round(predicted_duration_s, 1),
+                "raw_predicted_duration_s": round(predicted_duration_s / cf, 1),
+                "correction_factor":    cf,
                 "actual_duration_s":    round(actual_duration_s, 1),
                 "ratio":                round(actual_duration_s / max(predicted_duration_s, 1), 3),
                 "predicted_workers":    predicted_workers,
@@ -813,7 +849,8 @@ class ResourceAgent:
             summary[stype] = {
                 "count":            len(ratios),
                 "mean_ratio":       round(mean_ratio, 3),
-                "correction_factor": round(1.0 + (mean_ratio - 1.0) * 0.5, 3),
+                # the factor actually applied (failed runs excluded, raw ratios)
+                "correction_factor": self.get_correction_factor(stype),
                 "accuracy_pct":     round(max(0, 100 - abs(mean_ratio - 1.0) * 100), 1),
                 "recent_ratios":    [round(r, 3) for r in ratios[-5:]],
             }

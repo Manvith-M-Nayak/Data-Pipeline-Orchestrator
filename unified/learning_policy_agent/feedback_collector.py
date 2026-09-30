@@ -96,6 +96,11 @@ class FeedbackCollector:
         # have the baseline).
         perf_predicted_s = _to_float(raw.get("perf_predicted_total_s"))
         baseline_predicted_s = _to_float(raw.get("predicted_duration_s"))
+        # The prediction BEFORE the learned correction was applied. Correction
+        # factors are multiplied onto raw model output, so their target ratio
+        # must be actual / raw — measuring against the already-corrected value
+        # makes the factor converge to sqrt(true ratio) instead of the ratio.
+        raw_perf_s = _to_float(raw.get("perf_uncorrected_total_s")) or perf_predicted_s
 
         # estimated_cost_usd (Cost Optimization Agent's own pre-execution
         # estimate) MUST take priority — it's computed with the same
@@ -111,6 +116,7 @@ class FeedbackCollector:
             raw.get("estimated_cost_usd") or raw.get("cost_estimate_usd")
         )
         actual_cost = _to_float(raw.get("actual_cost_usd"))
+        raw_est_cost = _to_float(raw.get("cost_uncorrected_estimated_usd")) or est_cost
 
         status = str(
             raw.get("final_status") or raw.get("status") or raw.get("outcome") or ""
@@ -142,8 +148,10 @@ class FeedbackCollector:
             "perf_predicted_total_s": perf_predicted_s,
             "baseline_predicted_s": baseline_predicted_s,
             "predicted_duration_s": perf_predicted_s or baseline_predicted_s,
+            "raw_predicted_duration_s": raw_perf_s or baseline_predicted_s,
             "prediction_source": raw.get("prediction_source"),
             "estimated_cost_usd": est_cost,
+            "raw_estimated_cost_usd": raw_est_cost,
             "actual_cost_usd": actual_cost,
             "assurance_passed": raw.get("assurance_passed"),
             "plan_assurance_passed": raw.get("plan_assurance_passed"),

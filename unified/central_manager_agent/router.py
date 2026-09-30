@@ -76,7 +76,11 @@ async def start_managed_run(
             try:
                 state = _manager.get_state_dict(run_id) or {}
                 result = state.get("executor_result")
-                elapsed_ms = int((time.time() - start) * 1000)
+                # Execution time of the pipeline itself when it ran — the same
+                # measure predictions and anomaly baselines use; the whole
+                # managed run only for runs that never executed.
+                elapsed_s = state.get("execution_s") or (time.time() - start)
+                elapsed_ms = int(elapsed_s * 1000)
                 if result:
                     from executor_agent.router import _notify_monitor
                     await _notify_monitor(result, elapsed_ms)

@@ -63,6 +63,10 @@ class RunState:
     # the semantic LLM and the executor, neither of which needs them.
     schema: dict = field(default_factory=dict)
     csv_size_bytes: int = 0
+    # Wall time of the successful Executor attempt only. Predictions describe
+    # pipeline execution, so learning/assurance compare against this — not
+    # the whole managed run (validation, LLM assurance, retry backoff, ...).
+    execution_s: Optional[float] = None
     decisions: List[Dict[str, Any]] = field(default_factory=list)
     retries: int = 0
     started_at: str = ""
@@ -910,15 +914,18 @@ class CentralManager:
                     self._log(state, "DBX RUN", f"run_id={dbx_run_id}", msg, "info")
 
             try:
+                attempt_t0 = time.time()
                 result = await run_in_threadpool(
                     execute_pipeline, csv_path, config, schema, _progress
                 )
+                attempt_s = time.time() - attempt_t0
                 # Set immediately (success or failure dict) so feedback, the
                 # monitor and anomaly detection see the real result.
                 if isinstance(result, dict):
                     state.executor_result = result
 
                 if isinstance(result, dict) and result.get("status") == "ok":
+                    state.execution_s = round(attempt_s, 1)
                     self._log(
                         state,
                         f"EXECUTE attempt {attempt + 1} OK",
@@ -969,7 +976,9 @@ class CentralManager:
         checks: Dict[str, Any] = {}
         predicted_s = state.predictions.get("estimated_duration_s", 0)
 
-        # Check 1 — timing
+        # Check 1 — timing (execution time, like the prediction)
+        if state.execution_s:
+            actual_duration_s = state.execution_s
         if predicted_s > 0:
             ratio = actual_duration_s / predicted_s
             checks["timing_ratio"] = round(ratio, 2)
@@ -1044,9 +1053,15 @@ class CentralManager:
     # Phase 5 — Feedback / learning loop record
     # ────────────────────────────────────────────────────────────────────────
     async def record_feedback(
-        self, state: RunState, actual_duration_s: float, final_status: Optional[str] = None
+        self, state: RunState, total_elapsed_s: float, final_status: Optional[str] = None
     ):
+        """total_elapsed_s is the whole managed run. actual_duration_s in the
+        log is the Executor's execution time when the pipeline ran (what every
+        prediction describes); runs that never executed keep the elapsed time
+        and are excluded from learning by their failed status."""
         self._enter(state, "feedback", "Recording outcome to feedback log")
+        actual_duration_s = state.execution_s or total_elapsed_s
+        outcome = final_status or state.status
         try:
             os.makedirs(_DATA_DIR, exist_ok=True)
             log_path = os.path.join(_DATA_DIR, "manager_feedback.jsonl")
@@ -1081,7 +1096,12 @@ class CentralManager:
             record = {
                 "ts": _utcnow(),
                 "run_id": state.run_id,
-                "final_status": final_status or state.status,
+                "final_status": outcome,
+                "total_elapsed_s": round(total_elapsed_s, 1),
+                "executed": state.execution_s is not None,
+                # per-pipeline identity (same key the anomaly detector uses)
+                # so history-based checks compare like with like
+                "pipeline_key": self._pipeline_key(state),
                 "stage_count": len(state.plan.get("stages", [])),
                 "retries": state.retries,
                 "actual_duration_s": round(actual_duration_s, 1),
@@ -1138,8 +1158,11 @@ class CentralManager:
 
             append_jsonl(log_path, record)
 
-            # Resource Agent self-correction: record actual vs predicted per stage type
-            self._record_resource_feedback(state, actual_duration_s)
+            # Resource Agent self-correction — only for runs whose pipeline
+            # actually executed to completion; aborts and failures would teach
+            # it abort time / retry backoff instead of stage runtime.
+            if outcome == "completed" and state.execution_s:
+                self._record_resource_feedback(state, state.execution_s)
 
             self._log(
                 state, "FEEDBACK RECORDED", "→ data/manager_feedback.jsonl", "ok", "ok"
@@ -1169,6 +1192,7 @@ class CentralManager:
             rp = state.resource_plan
             if not rp:
                 return
+            factors = rp.get("correction_factors") or {}
             allocs = rp.get("allocations", [])
             total_predicted = sum(a.get("duration_s", 0) for a in allocs) or 1
             agent = ResourceAgent()
@@ -1186,9 +1210,22 @@ class CentralManager:
                     predicted_workers=int(alloc.get("workers", 0)),
                     actual_workers=int(alloc.get("workers", 0)),
                     run_id=state.run_id,
+                    # stream stages are sized with the notebook factor
+                    correction_factor=factors.get(
+                        "copy" if alloc.get("stage_type") == "copy" else "notebook", 1.0
+                    ),
                 )
         except Exception as exc:
             print(f"[Manager] resource feedback non-fatal: {exc}")
+
+    @staticmethod
+    def _pipeline_key(state: RunState) -> Optional[str]:
+        try:
+            from monitor_agent.services.anomaly_detector import pipeline_key
+
+            return pipeline_key(state.plan, {"mode": state.plan.get("mode")})
+        except Exception:
+            return None
 
     # ────────────────────────────────────────────────────────────────────────
     # Public API

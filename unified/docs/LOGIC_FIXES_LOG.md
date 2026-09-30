@@ -12,7 +12,7 @@ records:
 |---|---|---|---|
 | 1 | Plan safety — name validation at every entry point | H1, M8 (security part) | Done |
 | 2 | Schema plumbing — get the real schema to every agent | H2, H3, H4 | Done |
-| 3 | Learning loops — what feeds the correction factors | H5, H6, M1, M2, M3, M9 | Pending |
+| 3 | Learning loops — what feeds the correction factors | H5, H6, M1, M2, M3, M9 | Done |
 | 4 | Execution — concurrent-run isolation, executor issues | H7, H8, M4, run-id collisions, retries | Pending |
 | 5 | Frontend and the rest | M5, M6, M7, M8 (rest), remaining Low | Pending |
 
@@ -147,3 +147,59 @@ records:
 - **Old runs are unchanged.** Runs saved before this change have no `schema` on
   their state, so monitor predictions for them fall back to `row_count=0`, as
   before.
+
+---
+
+## Stage 3 — Learning loops
+
+**Commit message:** `fix(learning): train correction factors on raw predictions and executed runs only`
+
+### Problems
+
+| Id | Problem |
+|---|---|
+| H5 | Resource feedback was recorded for **every** run, including aborts and failures. `get_correction_factor` had no success filter. Real data: 11 of 49 rows came from failed runs, with ratios 0.005 and about 2.9. |
+| M1 | The Resource ratio was measured against the **already-corrected** prediction, but the new factor was applied to the raw one, so it settled halfway (true 0.5 → 0.81). The fixed 50% damping was recomputed on every call, so it permanently under-corrected. |
+| M2 | Same problem in the learning agent: the duration and cost factors targeted actual ÷ corrected prediction, so they converged to √(true ratio) (0.5 → 0.707). |
+| M3 | "Actual duration" was the whole managed run (validation, semantic LLM ≤120 s, pre-checks, retry backoff), compared against execution-only predictions. |
+| H6 | `estimate_actual_cost` ignored the actual duration: "actual" always equalled the estimate. |
+| M9 | The formula-path "failure" verdict (which aborts the run) used post-run assurance results from **any** pipeline, and the history adjustment included aborted and retried runs. |
+
+### Changes
+
+| File | Change | Why |
+|---|---|---|
+| `central_manager_agent/manager.py` | **Execution time and feedback records:** <ul><li>Each Executor attempt is timed; a successful attempt sets `RunState.execution_s`.</li><li>`record_feedback(state, total_elapsed_s, ...)` logs `actual_duration_s = execution_s` (or elapsed time if the run never executed), plus `total_elapsed_s`, `executed` and `pipeline_key`.</li><li>Post-run assurance timing uses `execution_s`.</li></ul> **Resource feedback:** <ul><li>Recorded **only** for `completed` runs, using `execution_s`.</li><li>Passes the correction factor that was applied.</li></ul> | M3, H5. `pipeline_key` (the anomaly detector's identity) lets history checks compare the same pipeline. |
+| `central_manager_agent/router.py` | The monitor's Databricks record and the anomaly detector use `execution_s` when the pipeline ran. | Same measure everywhere a duration is compared. |
+| `resource_agent/resource_agent.py` | **Recording:** `record_actual(..., correction_factor=1.0)` stores `correction_factor` and `raw_predicted_duration_s`. **`get_correction_factor`:** <ul><li>skips rows with `success False`, and legacy rows whose run the manager logged as failed (cross-checked against `manager_feedback.jsonl`, so no data is deleted);</li><li>uses the ratio against the **raw** prediction;</li><li>returns the **median** of the last 10 ratios, bounded to [0.33, 3.0].</li></ul> The accuracy report uses the same function. | H5, M1. With raw ratios, the median is itself the right multiplier; permanent damping only under-corrects, and the median plus bounds resist outliers. |
+| `learning_policy_agent/feedback_collector.py` | `normalize()` adds `raw_predicted_duration_s` (from `perf_uncorrected_total_s`) and `raw_estimated_cost_usd` (from `cost_uncorrected_estimated_usd`). Both fields were already logged. | M2 |
+| `learning_policy_agent/error_analyzer.py` | `duration_ratio` and `cost_ratio` (what the factors target) use the **raw** values. `duration_ape` and `cost_ape` (MAPE) stay on the **corrected** values. | The factors converge to the true ratio, while MAPE still measures the error users actually saw. That is what the policy review compares before and after a change, so rollbacks keep working. |
+| `cost_optimization_agent/cost_optimizer.py` | `estimate_actual_cost` scales each allocation's `duration_s` by actual ÷ `resource_plan.estimated_total_s` before costing. | H6. Allocation durations add up to the Resource estimate, so scaling them makes actual cost follow the real duration. |
+| `performance_prediction_agent/performance_agent.py` | **History:** the formula path uses only executed runs (not `failed`, `executed` not false), and this pipeline's runs when at least 5 exist. **Failure rate:** uses only this pipeline's runs, and needs at least 3. New `_pipeline_key(plan)`. | M9 |
+
+### Verification
+
+- **M1, simulated with the real `ResourceAgent`** (temp feedback log): raw estimates 2× too long converge to **0.5**, and 2× too short to **2.0**. They were 0.809 and 1.281 before.
+- **H5:** 6 legacy failed-run rows with ratio 0.01 alongside 4 good rows → factor 1.0; the bad rows are ignored.
+- **M2, through the real `normalize` → `per_run_errors` → `PolicyEngine._gradual`:** converges to **0.5** and **2.0**. It was 0.707 and 1.414 before.
+- **H6:** actual cost at 105 s, 210 s and 420 s gives $0.028, $0.055 and $0.110; the estimate is $0.055. Before, all three gave $0.055.
+- **Manager flow, mocked executor and temp logs:**
+  - A successful run logs `actual_duration_s = 0.3` (execution) against `total_elapsed_s = 2.5`. The total includes a simulated 1 s assurance step, and assurance timing uses 0.3.
+  - A failed run is logged with `executed: false` and writes **no** Resource feedback rows.
+  - New rows include `correction_factor` and `raw_predicted_duration_s`.
+- **M9:** 8 failed-assurance runs of **another** pipeline → outcome `success`. The same records for **this** pipeline → `failure`.
+- **Regressions:**
+  - the integration test passes, and so do the teammate's 13 cost tests;
+  - `ruff` is clean;
+  - the backend has no tracebacks, and all 25 GET endpoints return 200;
+  - the real feedback logs were not touched by the tests.
+
+### Effect on live behaviour (expected)
+
+- **Resource factors drop sharply.** On existing data they go from copy 1.032 / notebook 0.766 to **0.657 / 0.525**. Real stages run well under the raw heuristic estimates, and the old formula hid that by including failed runs and halving every correction. Duration estimates (and anything derived from them) will be noticeably shorter.
+- **History baselines mix old and new measures for a while.** Anomaly `run_metrics` and monitor baselines hold older whole-run durations; new rows use execution time. The mixing fades as new runs replace the old window.
+- **Pipeline history starts empty.** Legacy feedback has no `pipeline_key`, so the M9 failure check has no history for any pipeline until new runs are logged. That is the safe default: no aborts based on unrelated runs.
+
+### Not changed
+
+- The formula path's own history adjustment (`DAMPING = 0.4`) is left as is. It now acts only on the residual left after the (now correct) Resource correction, so its effect is small.

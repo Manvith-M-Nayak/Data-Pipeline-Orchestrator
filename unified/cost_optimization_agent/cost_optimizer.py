@@ -402,10 +402,22 @@ class CostOptimizationAgent:
         Returns the CostBreakdown as a dict (compute_usd, databricks_dbu_usd,
         adf_usd, storage_usd, total_usd, currency).
         """
+        # _estimate_cost bills every allocation for its own predicted
+        # duration_s, so the run-level override alone changed nothing and
+        # "actual" always equalled the estimate. Scale each allocation by how
+        # long the run really took relative to the Resource Agent's estimate
+        # (the critical path those allocation durations add up to).
+        rp = copy.deepcopy(resource_plan or {})
+        planned_total = float(rp.get("estimated_total_s") or 0)
+        if actual_duration_s and planned_total > 0:
+            scale = float(actual_duration_s) / planned_total
+            for alloc in rp.get("allocations", []):
+                if alloc.get("duration_s"):
+                    alloc["duration_s"] = float(alloc["duration_s"]) * scale
         breakdown = self._estimate_cost(
             plan,
             performance_prediction,
-            resource_plan,
+            rp,
             override_duration_s=actual_duration_s,
         )
         return asdict(breakdown)

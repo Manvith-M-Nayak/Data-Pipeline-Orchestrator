@@ -107,14 +107,21 @@ class ErrorAnalyzer:
         predicted = record.get("predicted_duration_s")
         est_cost = record.get("estimated_cost_usd")
         act_cost = record.get("actual_cost_usd")
+        # Ratios drive the correction factors, which are applied to RAW model
+        # output — so they are measured against the uncorrected prediction.
+        # APE/MAPE stay on the corrected value: that is the error the user
+        # actually saw, and what the policy review compares before/after.
+        raw_pred = record.get("raw_predicted_duration_s") or predicted
+        raw_est = record.get("raw_estimated_cost_usd") or est_cost
 
+        if actual and raw_pred and raw_pred > 0:
+            out["duration_ratio"] = round(actual / raw_pred, 4)
         if actual and predicted and predicted > 0:
-            out["duration_ratio"] = round(actual / predicted, 4)
             out["duration_ape"] = round(abs(actual - predicted) / actual, 4) if actual > 0 else None
         if est_cost is not None and act_cost is not None and act_cost > 0:
             out["cost_ape"] = round(abs(est_cost - act_cost) / act_cost, 4)
-            if est_cost > 0:
-                out["cost_ratio"] = round(act_cost / est_cost, 4)
+        if raw_est is not None and act_cost is not None and raw_est > 0 and act_cost > 0:
+            out["cost_ratio"] = round(act_cost / raw_est, 4)
         return out
 
     # ------------------------------------------------------------ aggregate
