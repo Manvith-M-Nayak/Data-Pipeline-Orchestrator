@@ -1105,3 +1105,51 @@ colour comes from the theme tokens.
   - **Backup:** the run pointer and theme were backed up first to a scratchpad file (`browser_backup_stage17.json`), not tab storage — see the stage 15 mistake.
   - **Untouched:** the checks only read; afterwards `run_id`, `run_origin` and `theme` were unchanged, and the plan, schema, prompt and stored file were never written.
 
+
+---
+
+## Stage 18 — Results catalogue for the paper (docs only)
+
+**Commit message:** `docs: add paper results catalogue with measured, computed and planned results`
+
+### Why
+
+The user is writing a journal paper and asked for one document listing every result the project can support: metrics, with/without agents, agent combinations.
+
+### Changes
+
+| File | Change |
+|---|---|
+| `docs/PAPER_RESULTS.md` *(new)* | Every result tagged MEASURED (saved artifact), COMPUTED (recomputed from real logs on 2026-10-03) or TO RUN (protocol only). Covers each agent, real-run accuracy, a learning-agent with/without comparison, the ablation and agent-stack tables, figures, threats to validity and reproduction commands. |
+
+No code, model or data file was changed.
+
+### Verification
+
+- **Re-run today:** dataset validator (5,000/5,000 valid), legacy v1 dataset through the same validator (5,000/5,000 rows violate at least one rule), assurance examples (6/6 as designed), resource examples, integration test (pass), cost safety tests (13/13).
+- **Recomputed from real logs:** runtime MAPE by predictor (`manager_feedback.jsonl`), raw vs corrected stage error (`resource_feedback.jsonl`), cost MAPE with/without the learned factor, monitor history with the 15 demo rows excluded, Ollama call latency (`ollama.log`).
+
+### Found while doing this (not fixed)
+
+- `resource_agent/examples/run_examples.py` section F still expects the old "damped halfway" correction factor and fails since stage 3 changed it to the median of raw ratios. The test is stale, not the agent.
+- The performance duration model was retrained at 14:35 on 2026-09-30 by the learning loop, so 3 of the 6 ML-path real runs may overlap its training data; the doc reports the 3 clean runs separately.
+
+### Stage 18, continued — experiments for the paper (2026-10-03)
+
+**Commit message (whole stage):** `docs: add paper results with with/without ablations, live Azure benchmark and eval scripts`
+
+| File | Change |
+|---|---|
+| `scripts/paper_eval/` *(new)* | `real_run_metrics.py`, `ablation_offline.py`, `ablation_planner.py`, `live_benchmark.py`, `README.md` — reproduce every Part A/B number. They drive the real agents from outside; no agent code changed. |
+| `docs/PAPER_RESULTS.md` | Part B: method, results and explanation for every experiment; headline rows H16–H24. |
+| `performance_prediction_agent/models/metrics.json` | **Changed by the system itself**: the learning agent triggered an automatic retrain during the live runs (ML MAPE 27% > 20%); new model deployed, MAE 224.05 → 224.02. Commit it or `git checkout` it together with the `.pkl` files (snapshot `20261003_180820_perf_models` holds the previous model). |
+
+**Experiments run:** planner ablation (24 prompts, 7 conditions, local Ollama), offline Resource / Assurance-gate / manual-effort ablations, 12 live batch runs + 8 parallel/sequential runs + 6 streaming drops on the user's Azure for Students subscription (≈ $0.30–0.40 by the cost formula). Data: `data/paper_eval/` (git-ignored), including a backup of the feedback logs, monitor DB and learning state from before the live runs.
+
+**Found (not fixed — the user decides):**
+1. Assurance column check treats `double`/`integer` in `cast(x as double)` as columns → 614/5,000 (12.3%) valid plans wrongly rejected. Fix: add SQL type names to `sql_keywords` in `assurance_agent/config/allowed_operations.json`.
+2. Learning rollback review (`policy_engine._review_pending_changes`, duration branch) counts runs aborted before execution (actual ≈ 0.1 s) → post-change MAPE 68,094.7% → a correct duration correction was rolled back. Fix: exclude `success is False` / `executed is False` records from `post_change`.
+3. Performance gate aborts on a coin-flip (P(failure) 0.49–0.52): 4/12 live runs aborted; the same stages grouped in parallel passed and completed. Suggest a confidence threshold.
+4. Stale test: `resource_agent/examples/run_examples.py` section F (from the first part of this stage).
+
+**Mistakes:** result files first written into `unified/` (moved; scripts fixed); a fault-injection tuple-assignment bug (found, fixed, re-run); planner experiment run alongside live planning overheated the laptop (stopped, finished later in low-heat mode); an opt-in perf-gate bypass switch was blocked by the environment's safety policy and reverted — `manager.py` unchanged (`git diff` empty).
