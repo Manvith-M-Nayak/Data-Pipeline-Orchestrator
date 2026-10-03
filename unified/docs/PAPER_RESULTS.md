@@ -10,7 +10,8 @@
 > **Part B (end of this file)** holds the experiments run on 2026-10-03: with vs without
 > each agent, with vs without the whole system, live Azure runs, streaming, parallel runs,
 > human-vs-system time, how each was tested, what else can be done, and a paper-writing kit.
-> Its §B9 table is the one-page "with vs without" summary.
+> Its §B9 table is the one-page "with vs without" summary; §B12 has a detailed side-by-side
+> table for every agent and §B8.1 the system-vs-human side by side.
 
 ## 0. How to read this document
 
@@ -24,9 +25,10 @@ Every result has a status tag:
 
 **Most important caveats (read before writing any claim):**
 
-1. **Real-cloud sample size is small.** 34 managed runs (26 succeeded), 13 real Databricks
-   job runs recorded in the monitor DB, 60 per-stage resource feedback rows. Report *n*
-   next to every real-run number, and use medians alongside means.
+1. **Real-cloud sample size is small.** History before 2026-10-03: 34 managed runs
+   (26 succeeded), 13 real Databricks job runs in the monitor DB, 60 per-stage resource
+   feedback rows. Part B adds 20 managed runs and 6 streaming ticks run on 2026-10-03.
+   Report *n* next to every real-run number, and use medians alongside means.
 2. **All ML agents except the planner were trained on synthetic data** (calibrated to real
    telemetry in some cases). Their test metrics measure agreement with a synthetic labeler,
    not real-world accuracy. Say so explicitly.
@@ -35,9 +37,10 @@ Every result has a status tag:
 4. **15 of 78 rows in `pipeline_runs` and all 5 rows in `anomaly_log` are demo rows**
    (`run_id LIKE 'demo-%'`, written by `scripts/seed_anomalies.py`). They are excluded from
    every number below. Never report them as real anomalies.
-5. **The planner's live out-of-distribution score (84%) was measured on an earlier model
-   revision** (when the `processed_time` rule existed). Re-run `eval_live_planner.py` on the
-   current model before publishing (see §3.4).
+5. **The planner's older live score (84%, §3.4) used an older scoring script** (it still
+   checked the since-removed `processed_time` rule) on 8 prompts; whether the adapter was the
+   same one served today is not recorded. **Use Part B §B1 instead** (24 prompts, current
+   served model, current scoring).
 
 ---
 
@@ -61,8 +64,9 @@ cooperating agents, each owning exactly one decision (`docs/RESPONSIBILITIES.md`
 
 **Candidate contribution claims (each backed by a section below):**
 
-- C1. A small (7B) locally-served fine-tuned model can replace a large cloud LLM for
-  pipeline planning when paired with a deterministic repair layer (§3).
+- C1. A small (7B) locally-served fine-tuned model, paired with a deterministic repair
+  layer and a self-check, plans pipelines correctly from free-form requests (§3, §B1).
+  (A head-to-head with a large cloud LLM has not been run — 🧪 §B10.)
 - C2. Validated, rule-checked synthetic training data (§3.5) — 0 violations vs 100% of
   rows violating at least one rule in the earlier templated dataset.
 - C3. Strict single-owner decision boundaries remove a circular dependency between
@@ -80,24 +84,24 @@ cooperating agents, each owning exactly one decision (`docs/RESPONSIBILITIES.md`
 
 | # | Result | Value | n | Tag | Section |
 |---|---|---|---|---|---|
-| H1 | Fine-tuned vs base Qwen2.5-7B, live free-form prompts, overall check pass rate | **84% vs 50% (+34 pts)** | 8 prompts × 8 checks | ✅ (older revision) | 3.4 |
+| H1 | Fine-tuned vs base Qwen2.5-7B, live free-form prompts, overall check pass rate (older script; superseded by H16) | **84% vs 50% (+34 pts)** | 8 prompts × 8 checks | ✅ (older) | 3.4 |
 | H2 | Fine-tuned vs base, in-distribution held-out | **100% vs 32%** | held-out synthetic rows | ✅ | 3.3 |
 | H3 | Valid-JSON / contract rate, base → fine-tuned (Kaggle) | 50→100% / 0→100% | 2 prompts | ✅ | 3.3 |
 | H4 | Trainable parameters | 40.37M of 7.66B (**0.53%**) | — | ✅ | 3.1 |
 | H5 | Training dataset validity | **5,000/5,000 rows pass all 19 rules** (v1 dataset: 0/5,000) | 5,000 | ✅ re-run today | 3.5 |
-| H6 | Runtime prediction error on real runs: Performance ML model vs formula vs Resource heuristic | **MAPE 8.8% vs 81.3% vs 72.3%** | 6 / 13 / 26 | 🧮 | 6.5 |
+| H6 | Runtime prediction error on real runs (history; in-distribution): Performance ML vs formula vs Resource heuristic — out-of-sample see H24 | **MAPE 8.8% vs 81.3% vs 72.3%** | 6 / 13 / 26 | 🧮 | 6.5 |
 | H7 | Learning agent: cost-estimate MAPE without → with learned correction (same runs) | **50.3% → 29.9%** | 8 | 🧮 | 8.2 |
 | H8 | Resource self-correction: per-stage duration MAPE raw → corrected | copy **151% → 60%**, notebook **224% → 62%** | 5 / 6 | 🧮 | 5.4 |
 | H9 | Intent checker accuracy after grounding + guards | **27/27** (from 15/18) | 9 cases × 3 runs | ✅ | 4.2 |
 | H10 | Cost model, fresh-sample worker R² before → after safety rebuild | **0.239 → 0.962** | 5,002 / 5,000 | ✅ | 7.2 |
 | H11 | Cost safety regression tests | **13/13 pass** | 13 | ✅ re-run today | 7.3 |
 | H12 | End-to-end managed runs | **26/34 succeeded (76.5%)**; 0 planner fallbacks | 34 | 🧮 | 11.1 |
-| H13 | Local LLM call latency (Apple M5, 16 GB) | median **5.0 s**, p90 9.6 s | 280 calls | 🧮 | 3.8 |
+| H13 | Local LLM latency (Apple M5, 16 GB): one full plan generation / all logged calls (mostly short intent checks) | **~41 s** (39–48 s) / median 5.0 s | 12 / 280 | ✅ / 🧮 | B1, 3.8 |
 | H14 | Resource model, workers / DIU exact-match accuracy | **96.4% / 97.9%** (within ±1: 99.98% / 99.65%) | 100k test rows | ✅ | 5.2 |
 | H15 | Performance outcome classifier, balanced accuracy | **0.713** (5-fold CV 0.719 ± 0.004) | 21,006 test | ✅ | 6.2 |
 | H16 | Planner correct (executable + intent): no AI / base / fine-tuned raw / fine-tuned + repair / full | **0% / 0% / 33% / 96% / 100%** | 24 (full: 12) | ✅ new | B1 |
-| H17 | Faulty plans reaching the cloud without vs with the assurance gate | **43% → 0%** | 1,400 injected | ✅ new | B3 |
-| H18 | Plans exceeding subscription limits without vs with Resource Agent | **24.8% → 0%** | 1,000 | ✅ new | B2 |
+| H17 | Faulty plans reaching Databricks without vs with the assurance gate (400 of the 600 would run and silently give wrong output) | **43% → 0%** | 1,400 injected | ✅ new | B3 |
+| H18 | Plans exceeding the configured tier limits without vs with Resource Agent (planner's own repaired settings as baseline) | **18.6% → 0%** | 1,000 | ✅ new | B2 |
 | H19 | Live Azure runs: executed runs that completed with correct output | **8/8** (+4 aborted by perf gate) | 12 | ✅ new | B5 |
 | H20 | Cost-estimate MAPE without vs with learning, new out-of-sample live runs | **51.9% → 27.4%** | 8 | ✅ new | B5.3 |
 | H21 | Parallel vs sequential execution groups (fan-out, live) | **143.7 s → 92.4 s (−36%)** | 2+2 | ✅ new | B7 |
@@ -208,7 +212,9 @@ column, uppercase, aggregation, numbered stages, typo "filtr rows whre quantiy >
 - The deterministic repair layer (§3.6) fixes routing completely; it cannot recover a
   dropped aggregation.
 
-🧪 **Re-run for the paper** (current model, more prompts):
+**Superseded:** Part B §B1 is the current, larger version of this test (24 prompts,
+3 schemas, current model and scoring, with/without each planner component). The commands
+below reproduce the older 8-prompt test:
 ```bash
 ollama serve &      # planner-agent model must be built
 python planner_agent/training/eval_live_planner.py planner-agent
@@ -257,7 +263,7 @@ later removed; even excluding those, every v1 row still fails F1 or F5.
 🧪 **Ablation worth running:** fine-tune the same recipe on v1 vs v2 and compare §3.4
 scores — directly measures the value of validated data.
 
-### 3.6 Deterministic repair layer (guardrails) — 🧪 TO RUN, high value
+### 3.6 Deterministic repair layer (guardrails) — ✅ measured in §B1
 
 The planner never returns raw model output. `planner_common.py` applies, in order:
 `enforce_container_count → redistribute_operations → reconcile_prompt_filters →
@@ -271,8 +277,9 @@ Report the same 8 checks plus "executable" (passes `plan_safety_issues` + notebo
 compiles). Also count, per repair function, how often it changed the plan — a
 "repair-hit rate" table is a strong figure.
 
-Expected shape (from §3.4): routing 12% raw → ~100% repaired; aggregation drop not
-recoverable.
+**Result (§B1, 24 prompts, paired):** executable 33% raw → **100%** after repair, intent
+unchanged at 96%; the one miss is a dropped aggregation the repair cannot recover. The
+per-repair-function hit rate is still 🧪.
 
 Implementation hint: `ollama_planner.decide_pipeline_config` already builds raw JSON
 before the chain; log `raw` and each intermediate in an eval script.
@@ -291,13 +298,14 @@ streaming 53 s.
 Also measured: before this change, the separate assurance step flagged **10 of 11 real
 runs, all false alarms** — the motivation for moving verification into planning.
 
-🧪 Report on ≥ 40 prompts: % verified on attempt 1, % fixed by the re-plan, % still
-unverified, added latency per re-plan (~20–30 s).
+**Rates (§B1, 12 prompts):** fine-tuned model verified on attempt 1 in 11/12; 1/12
+re-planned. 🧪 Repeat on ≥ 40 prompts.
 
 ### 3.8 Planner latency & cost 🧮
 
-From `data/ollama.log` (all 280 local `/api/chat` calls; mixes planner and intent-check
-calls, both 7B models on the same machine):
+From `data/ollama.log` (all 280 local `/api/chat` calls logged before 2026-10-03; mixes
+planner and intent-check calls — most are short intent checks, so this is **not** the
+time to generate a plan; a full plan generation takes ~41 s, §B1):
 
 | Statistic | Seconds |
 |---|---|
@@ -438,6 +446,10 @@ improvements."
 
 ## 6. Performance Prediction Agent
 
+> **Note:** §6.1–6.3 describe the model as committed in git (before 2026-10-03). During the
+> Part B live runs the learning agent retrained it automatically (§B5.5): 29 real rows
+> blended instead of 20, MAE 224.02 s, balanced accuracy 0.716, CV 0.711 ± 0.006.
+
 ### 6.1 Training data ✅
 
 `run_training.py` (v4): 100,000 general + 5,000 tiny-file synthetic rows; real runs blended
@@ -504,8 +516,8 @@ All successful managed runs, predicted runtime vs measured execution time:
 2026-09-30 by the learning loop, which blends exported real runs. The 3 runs *after* that
 time are clean out-of-sample: predicted 89/88/81 s vs actual 93.6/93.7/91.6 s → **MAPE 7.5%
 (n = 3)**. The 3 earlier ones may overlap training data. All 6 come from 1–2 stage, small-file
-pipelines. 🧪 Collect ≥ 20 new runs over varied sizes/stage counts before claiming
-generalization.
+pipelines. **Out-of-sample check done in §B5.3:** on 8 new live runs (other sizes and
+shapes) the ML path's MAPE was **51.1%** — so 8.8% is an in-distribution number only.
 
 Real durations by stage count (successful runs): 1 stage 75.2 ± 7.0 s (n=7);
 2 stages 114.9 ± 22.4 s (n=17); 5 stages 317.3 ± 19.1 s (n=2).
@@ -565,7 +577,7 @@ model loading, safe fallback, valid saving candidate).
 ### 7.4 Behaviour in real runs 🧮
 
 Auto-apply changed nothing in the logged real runs (`cost_slowdown_applied` false in all 6
-runs that log it) — by design it is **fail-closed**: no runtime trade without a learned
+history runs that log it, and in all Part B runs, §B5.6) — by design it is **fail-closed**: no runtime trade without a learned
 deadline (needs 3 comparable runs). Integration test: 0 recommendations, source
 "heuristic" (no safe candidate).
 
@@ -594,8 +606,9 @@ The manager logs both the raw and corrected estimate, so this is a clean paired 
 | Corrected (factor 0.8644) | 8 | **29.9%** | 37.8% | **100%** |
 
 The agent's own review log agrees: pre-change cost MAPE **91.6%** (its window) → post-change
-**29.9%** over 8 runs → change **confirmed**. Second update 0.8644 → 0.7856 (pre-change MAPE
-65.6%) is pending review.
+**29.9%** over 8 runs → change **confirmed**. The second update 0.8644 → 0.7856 (pre-change
+MAPE 65.6%) was reviewed during the Part B runs and **rolled back — wrongly**, because the
+review counted a run aborted before execution (§B5.5).
 
 Policy history (`learning_policy_agent/data/learning_log.jsonl`): 1 signature flagged
 (`2stages_low`, 33% failure rate over 12–15 runs → human review); 2 cost-factor updates;
@@ -644,13 +657,14 @@ This forced the final architecture: ADF for copy, Databricks Jobs API directly f
 Worth one paragraph in the paper.
 
 **Streaming incremental effect:** same pipeline, first tick 70.5 s, next tick 47.2 s (−33%)
-because the checkpoint skips already-processed files. n = 1 pair — 🧪 repeat 10 ticks.
+in the history. Part B §B6 measured streaming properly (3 drops × 2 layouts, exactly-once
+processing confirmed).
 
 ### 9.2 Anomaly detector ✅ (design) / 🧪 (accuracy)
 
-9 detected kinds: failure, timeout, retry_storm, slow_runtime (> 1.2× own p95, ≥ 3 runs),
-cold_start (slow + idle > 6 h), zero_rows, cost_spike (> 2× trailing avg), schema_drift,
-(data_skew documented as not detectable on serverless). Real events: 2 (one `failure`, one
+8 detected kinds (`anomaly_detector.py`): failure, timeout, retry_storm, slow_runtime
+(> 1.2× own p95, ≥ 3 runs), cold_start (slow + idle > 6 h), zero_rows, cost_spike
+(> 2× trailing avg), schema_drift. data_skew is documented as not detectable on serverless. Real events: 2 (one `failure`, one
 `retry_storm`, same run: filter `predator IS TRUE` could not compile → 2 retries).
 
 🧪 **Detector evaluation:** use `scripts/seed_anomalies.py`-style injection to create
@@ -678,8 +692,9 @@ shared ADF pipeline). Unique run tags; per-run notebook folders deleted even on 
 
 Deterministic failures (unsafe/uncompilable plan, missing references) now return
 `retryable: false` → **1 attempt instead of 3**, saving 40 s of backoff (10 s + 30 s) plus
-two wasted executions. Real logs show 4 failed runs that each used 2 retries (347–505 s),
-e.g. the uncompilable `predator IS TRUE` filter — exactly the case this fix removes.
+two wasted executions. Real logs show 4 failed runs that each used 2 retries (logged
+durations 48.3, 347.5, 485.5 and 505.4 s), e.g. the uncompilable `predator IS TRUE` filter —
+exactly the case this fix removes.
 
 ### 10.3 Safety of generated code ✅
 
@@ -689,11 +704,10 @@ correct precedence, BETWEEN, and `and` inside quoted values handled; the injecti
 compiles to an inert literal. 🧪 Fuzz: generate 1,000 adversarial filter strings and report
 0 executable injections + % of benign filters compiled.
 
-### 10.4 Parallel execution groups 🧪
+### 10.4 Parallel execution groups ✅ (§B7)
 
-`execution_groups` run concurrently (ThreadPoolExecutor, max 3). No real fan-out run is
-logged (all real plans were linear chains). 🧪 Build a fan-out plan (copy → 3 independent
-notebook branches) and compare sequential vs grouped wall time on Databricks.
+`execution_groups` run concurrently (ThreadPoolExecutor, max 3). Measured live in §B7 on a
+fan-out plan: sequential 143.7 s vs parallel 92.4 s (−35.7%, n = 2 each).
 
 ---
 
@@ -740,24 +754,24 @@ logged paired data; the rest need runs. Two kinds of runs:
 
 | ID | Configuration | Metric(s) | Status | Known value |
 |---|---|---|---|---|
-| A0 | **Full system** | success rate, plan validity, intent, runtime MAPE, cost MAPE | 🧮 partial | 76.5% success; runtime MAPE 8.8% (ML); cost MAPE 29.9% |
-| A1 | Planner LLM → deterministic default plan only | intent accuracy, executable rate | 🧪 offline | default plan ignores intent → intent ≈ 0% except trivial prompts |
-| A2 | Planner raw output, no repair layer | 8 checks + executable | 🧪 offline | routing 12% (§3.4) |
-| A3 | Base Qwen2.5-7B instead of fine-tuned | 8 checks | ✅ | 50% vs 84% overall |
+| A0 | **Full system** | success rate, plan validity, intent, runtime MAPE, cost MAPE | ✅ | history 26/34 runs; live 8/8 executed runs correct (§B5); planner 100% correct (§B1, n = 12); runtime MAPE 51.1% out-of-sample; cost MAPE 27.4% |
+| A1 | Planner LLM → deterministic default plan only | correct (executable + intent) | ✅ §B1 | 0% (24 prompts) |
+| A2 | Planner raw output, no repair layer | executable / correct | ✅ §B1 | 33% / 33% (vs 100% / 96% with repair) |
+| A3 | Base Qwen2.5-7B instead of fine-tuned | intent / correct | ✅ §B1 | intent 33% vs 96%; correct 4% vs 96% (with repair) |
 | A4 | Groq cloud LLM instead of local fine-tuned | 8 checks, latency, $ | 🧪 offline | — |
-| A5 | No self-check / re-plan | % verified plans, latency | 🧪 offline | — |
+| A5 | No self-check / re-plan | correct | ✅ §B1 | 11/12 vs 12/12 (sales prompts) |
 | A6 | No intent guards (Guard 1/2) | intent-check accuracy, false flags | 🧪 offline | progression 15/18 → 27/27 (§4.2) |
-| A7 | No structural assurance gate | % bad plans reaching executor (inject the 5 bad example plans + fuzzed plans) | 🧪 offline | — |
-| A8 | No Resource Agent (planner's settings used) | feasibility violations, cost, runtime | 🧪 live | — |
+| A7 | No structural assurance gate | faulty plans reaching Databricks | ✅ §B3 | 600/1,400 (43%) vs 0; 400 of them silently wrong |
+| A8 | No Resource Agent (planner's settings used) | plans over tier limits | ✅ §B2 (offline) | 18.6% vs 0%; live runtime/cost 🧪 |
 | A9 | Resource heuristic only (no ML) | settings agreement, runtime | 🧪 live | — |
 | A10 | No Resource correction factor | per-stage MAPE | 🧮 | 151%/224% vs 60%/62% (§5.4) |
 | A11 | Performance formula only (no ML) | runtime MAPE | 🧮 | 81.3% vs 8.8% (§6.5) |
-| A12 | No Performance gate (never abort on predicted failure) | wasted cloud seconds on doomed runs | 🧪 offline+live | — |
+| A12 | No Performance gate (never abort on predicted failure) | runs aborted that would have run | ✅ partial §B5.4/B7 | gate aborted 4/12 live runs at P ≈ 0.5; same stages completed when grouped in parallel |
 | A13 | No Cost Optimization | formula cost, runtime | 🧪 live | currently identical (fail-closed, no change applied) |
 | A14 | No Learning agent (factors = 1.0) | cost MAPE | 🧮 | 50.3% vs 29.9% (§8.2) |
 | A15 | No retries | success rate, time | 🧪 replay | 4 of 34 runs retried twice; all still failed (deterministic causes) |
 | A16 | No `retryable:false` classification | wasted time on deterministic failures | ✅ | 3 attempts → 1, −40 s backoff (§10.2) |
-| A17 | Sequential vs parallel execution groups | wall time | 🧪 live | — |
+| A17 | Sequential vs parallel execution groups | execution time | ✅ §B7 | 143.7 s vs 92.4 s (−35.7%) |
 | A18 | No Monitor feedback to `dynamic_reallocate` | reaction to slow stages | 🧪 simulation | — |
 
 ### 12.2 Cumulative "agent stack" table (adding agents one at a time)
@@ -791,7 +805,10 @@ agents" table:
 
 ### 12.4 How to add switches (needed for offline ablations)
 
-The only existing switch is `constraints["auto_apply_cost"]`. Suggested minimal additions
+The only existing switch is `constraints["auto_apply_cost"]`. Note: adding a switch that
+turns off a safety gate (e.g. the Performance gate) was blocked by the test environment's
+safety policy during Part B — such switches must be added by the authors themselves.
+Suggested minimal additions
 (env flags read in `manager.py`): `ABLATE_ASSURANCE_GATE`, `ABLATE_PERF_GATE`,
 `ABLATE_COST`, `ABLATE_LEARNING`, `ABLATE_RESOURCE_ML`, `ABLATE_RETRIES`; in the planner:
 `ABLATE_REPAIR`, `ABLATE_SELF_CHECK`. Log the active flags into each feedback record so
@@ -832,7 +849,7 @@ results can be grouped.
 | Item | Value | Source |
 |---|---|---|
 | Full-project scan findings | 35 (4 critical, 11 high, 11 medium, 7 low, 2 no-action) + 80 lint findings | `docs/PROJECT_SCAN_FINDINGS.md` |
-| Fixed and verified in staged logs | stages 1–14 with verification per stage | `docs/LOGIC_FIXES_LOG.md` |
+| Fixed and verified in staged logs | stages 1–18 with verification per stage (stage 18 = this results work) | `docs/LOGIC_FIXES_LOG.md` |
 | Regression checks per stage | integration test, 13 cost tests, ruff clean, 25 GET endpoints 200 | same |
 | Security | injection-safe codegen, secrets moved to `.env` + Databricks secret scope, API key (timing-safe), localhost-only default, upload caps | scan + fixes |
 | Codebase | 172 commits since 2026-03-22; FastAPI backend, React dashboard (15 pages) | git |
@@ -864,18 +881,22 @@ results can be grouped.
 
 ## 17. Threats to validity / limitations (write these in, reviewers will ask)
 
-- Small real-run sample (26 successful managed runs; ML runtime result n = 6, clean n = 3).
-- Most real runs are small files (≈ 1 KB–4 MB) with 1–2 stages; results may not hold at scale.
+- Small real-run sample (history: 26 successful managed runs; Part B: 12 completed batch
+  and parallel runs + 6 streaming ticks; ML runtime out-of-sample n = 8).
+- Real files are small (≤ 25.5 MB, ≤ 3 stages); results may not hold at larger scale.
+- Learned Performance gate aborts at P(failure) ≈ 0.5 (§B5.4); learning-agent rollback review
+  counts aborted runs (§B5.5) — both affect live results until fixed.
+- Assurance gate falsely rejects 12.3% of valid plans that use `cast(...)` (§B3).
 - Synthetic training data for resource, performance, cost models; metrics measure agreement
   with labelers. Resource labels are calibrated to real telemetry; others are assumptions.
 - "Actual cost" is formula-based, not billing.
-- Planner in-distribution score is inflated by template-like data; OOD eval had 8 prompts
-  and was on an earlier revision.
+- Planner in-distribution score is inflated by template-like data; the out-of-distribution
+  test (§B1) has 24 prompts, one sample each; self-check conditions only 12.
 - Workers / node type are advisory on serverless Databricks; only DIU and shuffle
   partitions are actually applied.
 - Performance model still uses `baseline_s` (circular feature).
 - Student-tier Azure limits (4 workers, 8 DIU) bound all results.
-- One user/environment; no user study yet.
+- One user/environment; no timed human comparison yet (§B8.2).
 
 ---
 
@@ -917,14 +938,9 @@ Run from `unified/` with the project venv unless noted.
 9. **Limitations** — §17.
 10. **Conclusion.**
 
-**Minimum extra work before submission (in priority order):**
-1. Re-run the planner OOD eval on the current model with ~40 prompts, base vs fine-tuned
-   (+ Groq) — §3.4, A3/A4.
-2. Raw vs repaired vs self-checked planner scores — §3.6, A2/A5.
-3. ≥ 20 more real runs across sizes/stage counts → firm up §6.5 and §8.2, unlock cost
-   deadline for §7.4.
-4. Add ablation flags (§12.4) and run the agent-stack table (§12.2) on a 10-pipeline benchmark.
-5. Anomaly detector P/R with injected runs (§9.2).
+**Minimum extra work before submission:** see §B10 (updated after the Part B experiments;
+items 1–2 of the old list — planner base vs fine-tuned and raw vs repaired vs self-checked —
+are done in §B1).
 
 ---
 ---
@@ -936,14 +952,14 @@ Run from `unified/` with the project venv unless noted.
 > for the paper: **with vs without each agent**, **with vs without the whole system**,
 > live Azure runs, streaming, parallel execution, and human-vs-system time.
 > Each experiment says **what was done, how, the result, why the result came out that
-> way, and what it means for the paper.** Status markers: ✅ done, ⏳ running, 🧪 planned.
+> way, and what it means for the paper.** Status markers: ✅ done, 🧪 planned (not run yet), ⏱ needs a timed human measurement.
 
 ## B0. Test setup — how everything was tested
 
 | Item | Value |
 |---|---|
 | Machine | Apple M5, 16 GB unified memory (Ollama sees 11.8 GiB GPU memory), macOS |
-| Local models | `planner-agent` (Qwen2.5-7B + our LoRA, Q4_K_M, built 2026-06-29 from the adapter trained 2026-06-28) and base `qwen2.5:7b-instruct` (Q4_K_M), both via Ollama |
+| Local models | `planner-agent` (Qwen2.5-7B + our LoRA, Q4_K_M; Ollama model built 2026-06-29 from the adapter files dated 2026-06-28 — the latest adapter in the repo) and base `qwen2.5:7b-instruct` (Q4_K_M), both via Ollama |
 | Sampling | temperature 0.2, top-p 0.8, `num_ctx` 4096, JSON mode — identical to production |
 | Cloud | the user's **Azure for Students** subscription: ADF (copy), Databricks **serverless** jobs, Blob storage |
 | Backend | `uvicorn main:app` single process, exactly as in production (`unified/README.md`) |
@@ -966,8 +982,19 @@ pre-checks, polling); (3) no agent code was edited, so results describe the syst
   local model) and overheated the laptop; it was stopped at 12/24 cases and the other 12 were
   finished later without the self-check conditions (low-heat mode), so `*_full` has n = 12.
 - An attempt to add an opt-in switch that bypasses the Performance gate (to measure false
-  aborts, §B5.3) was blocked by the environment's safety policy and reverted; `manager.py`
+  aborts, §B5.4) was blocked by the environment's safety policy and reverted; `manager.py`
   is unchanged (verified with `git diff`).
+- **First versions of B2 and B3 were wrong and were re-done** after a review against the code:
+  B2 compared the Resource Agent with the planner's *training targets* instead of the
+  planner's *repaired* output (the repair layer already caps workers), which overstated the
+  effect (24.8% → corrected 18.6%; "half the workers" → actually the Resource Agent gives
+  *more* workers than the capped planner). B3 skipped the Manager's Phase-1 validation and
+  assumed the executor rejects unknown stage types; in the code it silently skips them and
+  silently drops unsupported aggregations. The corrected B3 runs the real Phase-1 validation
+  and classifies those cases as "runs with wrong output". Both now use the real code paths.
+- The automatic learning cycles during the live runs changed the system's state (correction
+  factors, a model retrain) — this is the system's normal behaviour and is reported in §B5.5;
+  the pre-run state is kept in `data/paper_eval/state_backup_before_live/`.
 
 ---
 
@@ -1013,11 +1040,18 @@ case; they were run on the 12 sales prompts only (stopped for laptop heat, see B
 By schema (correct): sales — ft_raw 2/12, ft_repair 11/12; zoo — ft_raw 0/6, ft_repair 6/6;
 IoT — ft_raw 6/6, ft_repair 6/6. The only `ft_repair` miss is `s_agg` (below).
 
-Other measurements: base model output was unusable after repair → **fallback to the default
-plan in 15/24** cases (fine-tuned: **0/24**). Fine-tuned self-check verified 11/12 on the
-first attempt and re-planned 1/12; base model verified only 5/12. One full-JSON plan generation
-takes **~41 s** (fine-tuned, median, 39–48 s) and ~35 s (base) on the M5 when the model is
-not shared; the plans are long JSON documents (≈ 1,000+ tokens).
+Other measurements:
+- After repair, base-model output could not be used and the system **fell back to the default
+  plan in 15/24** cases (fine-tuned: **0/24**).
+- Self-check, fine-tuned (12 prompts): verified on attempt 1 in 11/12; 1/12 (`s_agg`)
+  re-planned, and its final plan was still marked *not verified* by the intent checker even
+  though it contains the requested aggregation (regex) — a false flag, not a wrong plan.
+- Self-check, base model: it marked **5/12 plans verified although none was correct** — the
+  intent checker missed the mismatch (false accepts). Whether these were fallback plans was not
+  recorded for the self-check run; for the same 5 prompts, the separate repair-only run fell
+  back to the default plan in 4. With the fine-tuned model there were no false accepts.
+- Generation time: one full plan takes **~41 s** (fine-tuned, median, 39–48 s) and ~35 s
+  (base, 30–47 s) on the M5, measured on the 12 cases run while nothing else used the model.
 
 **Why it came out this way:**
 - *Default = 0% intent:* the default plan is a safe pass-through pipeline; it never applies
@@ -1035,10 +1069,12 @@ not shared; the plans are long JSON documents (≈ 1,000+ tokens).
   yet explained — likely how close the schema is to the training domains' naming).
 - *FT + repair = 96%:* the repair layer lowercases names, rewires stage chaining and fixes
   types — every fine-tuned plan becomes executable without touching intent.
-- *Full = 100%:* the one remaining miss (`s_agg`: "average unit_price per region and a row
-  count" — the model dropped the aggregation) is caught by the intent check and fixed by the
-  single re-plan. The self-check recovers silent intent loss — the one error the
-  deterministic repair cannot fix.
+- *Full = 100%:* the one `ft_repair` miss (`s_agg`: "average unit_price per region and a row
+  count") failed the intent regex — the aggregation was missing or different. In the full
+  planner the self-check flagged the first attempt, the re-plan produced a plan with the
+  requested aggregation, so the final plan is correct. This is the one error class the
+  deterministic repair cannot fix: lost intent. (Caveat: `ft_full` is a fresh generation, not
+  the same sample as `ft_repair`.)
 
 **What it means (claim C1 + ablation):** each component does a different job — fine-tuning
 gives *understanding* (intent 33% → 96%), repair gives *executability* (33% → 100%),
@@ -1046,100 +1082,125 @@ self-check fixes *the last intent errors* (11/12 → 12/12 on sales). Only the c
 reliably correct.
 
 **Caveats:** one sample per prompt (repeat ×3 for mean ± std); self-check conditions on 12
-prompts; intent scored by regex (checked by hand for the misses).
+prompts; intent is scored by regexes written before the run (listed in
+`ablation_planner.py`), which can miss a correct but differently-phrased plan; raw outputs were
+not saved, so failures cannot be inspected afterwards (🧪 save them in the next run).
 
 ---
 
-## B2. Resource Agent — with vs without ✅
+## B2. Resource Agent — with vs without ✅ (re-done, see B0)
 
-**What:** what would run if the planner's settings went straight to Azure (no Resource
-Agent) vs after the Resource Agent.
-**How:** `ablation_offline.py`, 1,000 random planner-format plans from the validated
-dataset (seed 20261003); `ResourceAgent.analyze()` on each; compared with the student-tier
-hard limits (≤ 4 workers, ≤ 8 DIU).
+**What:** what settings would reach Azure without the Resource Agent, vs with it.
+**How:** `ablation_offline.py`, 1,000 random plans from the validated planner dataset
+(seed 20261003). Three settings sources per plan:
+1. *model output* — the settings in the plan as the fine-tuned model is trained to emit them;
+2. *planner after repair* — the same plan after the planner's own repair layer
+   (`_structural_validate`, which caps notebook workers by data size). **This is what the
+   system would execute without the Resource Agent** — the fair baseline;
+3. *Resource Agent* — `ResourceAgent.analyze()` on the repaired plan.
+Each is compared with the project's configured student-tier limits (`resource_agent.py`:
+≤ 4 workers, ≤ 8 DIU).
 
-| Metric | Without Resource Agent | With Resource Agent |
-|---|---|---|
-| Plans exceeding the subscription's hard limits | **248 / 1,000 (24.8%)** | **0 / 1,000** |
-| — by size: small / medium / large / xlarge | 0/295, 0/301, 62/218, **186/186** | 0 everywhere |
-| Mean workers per notebook stage | 4.08 | 2.07 (−49%) |
-| Max workers | 16 | 4 |
-| Mean DIU per copy stage | 6.51 | 3.45 (−47%) |
-| Max DIU | 16 | 8 |
-| Plans flagged infeasible (memory) | — | 0 |
-
-**Why:** the planner's settings follow a generic size table (xlarge → 8–16 workers, 16 DIU)
-that does not know the subscription's limits. The Resource Agent clamps to the tier, sizes
-from demand (rows, operations), and splits over-sized parallel groups.
-**Meaning:** without the Resource Agent, every xlarge pipeline and 28% of large ones would
-request resources the account cannot provide (rejected by Azure or failing at submit),
-and the rest would be provisioned ~2× higher on average.
-**Caveat:** synthetic plans; the live part (runtime/cost with vs without) is 🧪 (needs
-pinning the planner's settings via `custom_settings` on identical runs).
-
----
-
-## B3. Assurance gate — with vs without (fault injection) ✅
-
-**What:** inject 7 kinds of realistic plan errors and see where each is caught.
-**How:** `ablation_offline.py`: 200 clean plans (that pass the gate) × 7 faults = 1,400 faulty
-plans. "Without gate" = only what the executor checks before calling the cloud
-(Azure-name safety + notebook code generation). "With gate" = structural assurance first.
-
-| Injected fault | Caught by gate | Reaches the cloud **without** gate | Reaches the cloud **with** gate |
+| Metric | Model output | **Without Resource Agent** (planner after repair) | **With Resource Agent** |
 |---|---|---|---|
-| Filter on a column that doesn't exist | 200/200 | **200/200** | 0 |
-| Unsupported aggregation (`median`) | 200/200 | **200/200** | 0 |
-| Required key missing (`execution_order`) | 200/200 | **200/200** | 0 |
-| Stage order inverted | 200/200 | 0 (executor also refuses) | 0 |
-| Unsafe container name | 0/200 | 0 (executor catches) | 0 |
-| Code-injection string in filter | 200/200 | 0 (compiler neutralises) | 0 |
-| Unknown stage type | 200/200 | 0 (executor refuses) | 0 |
-| **Total** | 1,200/1,400 | **600/1,400 (43%)** | **0/1,400** |
+| Plans exceeding the tier limits | 248 / 1,000 (24.8%) | **186 / 1,000 (18.6%)** | **0 / 1,000** |
+| — small / medium / large / xlarge | 0, 0, 62/218, 186/186 | 0, 0, 0, **186/186** | 0 everywhere |
+| Mean workers per notebook stage | 4.08 | 1.14 | 2.07 |
+| Max workers | 16 | 4 | 4 |
+| Mean DIU per copy stage | 6.51 | 6.51 | 3.45 (−47%) |
+| Max DIU | 16 | 16 | 8 |
+| Plans flagged infeasible (memory) | — | — | 0 |
 
-Time to catch an error with the gate: **median 0.07 ms** (p95 0.12 ms) per plan, before any
-cloud spend. Without it, a bad plan reaches Databricks; real history shows failed runs took
-**48–505 s** of cloud time before failing (with 2 automatic retries), e.g. the uncompilable
-`predator IS TRUE` filter.
+**Why:**
+- The planner's repair layer already fixes *workers* (size-based caps), but not *DIU*: its size
+  table gives xlarge data 16 DIU, above the tier's 8. So every xlarge plan still breaks the
+  limit without the Resource Agent.
+- The planner's caps are blunt (by size bucket only): mean 1.14 workers, often 0 (driver only).
+  The Resource Agent sizes from demand (rows, operations, aggregation) and gives **more**
+  workers where a stage needs them (mean 2.07) while staying within limits, and halves DIU
+  for copies.
 
-**Why:** the executor only checks what it needs to *generate code* (names, syntax). A filter
-on a missing column or a `median` aggregation is valid Python, so it compiles and fails only
-inside the Spark job. The gate checks *meaning against the schema*.
-**Meaning:** the two layers are complementary (defence in depth): the gate stops 3 fault
-classes the executor cannot see; the executor stops name/injection faults the gate does not
-check.
+**Meaning:** the Resource Agent is the component that enforces the subscription's limits
+(18.6% → 0%) and right-sizes in both directions — not just a cost cutter.
+**Caveats:** offline, on dataset plans; what Azure itself does with an over-limit request was not
+tested; the live with/without runtime and cost comparison is 🧪 (pin the planner's settings via
+`custom_settings` on identical runs).
+
+---
+
+## B3. Assurance gate — with vs without (fault injection) ✅ (re-done, see B0)
+
+**What:** inject 7 kinds of realistic plan errors and follow each through the real run-time
+layers, with and without the Assurance gate.
+**How:** `ablation_offline.py`: 200 valid plans (that pass the gate when clean) × 7 faults =
+1,400 faulty plans. Layers, in the order `manager.execute_run` applies them:
+1. **Manager Phase-1 validation** — the real `CentralManager.validate_plan` (required keys,
+   stage references, name safety);
+2. **Assurance structural gate** — the real `AssuranceAgent`, rules only;
+3. **Executor pre-cloud checks** — the same checks `executor._execute_pipeline` makes before any
+   cloud call (name safety, container/dataset references, building every notebook).
+A plan that passes all of them reaches Databricks. Its outcome there is classified from the
+code: the executor **ignores stages of unknown type**, and the notebook builder **drops
+aggregation operations it does not support** (`_build_agg_expr` returns nothing) — both
+"succeed" with wrong output. A filter on a missing column is expected to fail inside Spark
+(not executed — that would require bypassing the gate).
+
+| Injected fault (200 each) | **Without the gate**: where it ends | **With the gate**: where it stops |
+|---|---|---|
+| Filter on a column that doesn't exist | reaches Databricks → **fails in Spark** (expected) | assurance gate |
+| Unsupported aggregation (`median`) | reaches Databricks → **runs, aggregation silently dropped** | assurance gate |
+| Unknown stage type (`spark_sql`) | reaches Databricks → **runs, stage silently skipped** | assurance gate |
+| Code-injection string in filter | executor pre-cloud check | assurance gate |
+| Stage order inverted | manager validation | manager validation |
+| Required key missing (`execution_order`) | manager validation | manager validation |
+| Unsafe container name | manager validation | manager validation |
+| **Reach Databricks** | **600 / 1,400 (43%)** — 400 silently wrong, 200 failing | **0 / 1,400** |
+
+Speed: the gate takes **median 0.07 ms** per plan offline (p95 0.12 ms); in the live runs the
+whole validate + gate phase took 7 ms (§B8). Without the gate, the cost of a fault is a cloud run:
+real history shows failed runs taking **48–505 s** of wall time each (including 2 automatic
+retries and their back-off), e.g. the uncompilable `predator IS TRUE` filter.
+
+**Why:** Phase-1 validation and the executor check what they need to *build and address* the
+job (keys, names, syntax). Whether a column exists or an operation is supported is a question
+about *meaning against the schema* — only the gate asks it. Worse, the executor and notebook
+builder are tolerant by design (skip unknown stage types, drop unsupported aggregations), so
+without the gate these faults do not even fail: they produce wrong data.
+**Meaning:** the gate is the only layer that stops 3 of the 7 fault classes, and 2 of those
+would otherwise be **silent wrong results** — the most dangerous failure for a data pipeline.
 
 **Bug found by this experiment (not fixed — reported):** the gate's column check treats the
 type name in `cast(x as double)` / `cast(x as integer)` as a column. It wrongly rejects
-**614 / 5,000 (12.3%)** valid plans that use casts. Fix: add the SQL type names
+**614 / 5,000 (12.3%)** valid dataset plans (all that use casts). Fix: add the SQL type names
 (`double`, `integer`, `int`, `string`, `long`, `float`, `boolean`, `date`, `timestamp`) to
-`sql_keywords` in `assurance_agent/config/allowed_operations.json`. Worth a sentence in the
-paper's lessons: an evaluation harness found a false-positive class unit tests missed.
+`sql_keywords` in `assurance_agent/config/allowed_operations.json`.
 
 ---
 
-## B4. With vs without the whole system — manual work replaced ✅ (proxy) / 🧪 (timed)
+## B4. With vs without the whole system — manual work replaced ✅ (proxy) / ⏱ (timed)
 
 **What:** what a person would have to author by hand for the same pipelines.
-**How:** for each plan, the notebook code the system generates is counted (non-blank,
-non-comment lines), plus ADF objects (datasets, pipeline, copy activities, linked service),
-containers and sizing decisions. Two sets: 1,000 dataset plans and the 14 plans of real
-completed runs.
+**How:** `ablation_offline.py` counts, per plan: lines of PySpark the system generates
+(non-blank, non-comment), notebooks, storage containers, ADF objects (datasets + pipeline +
+copy activities + 1 linked service) and sizing decisions (1 DIU per copy stage; workers +
+shuffle per notebook stage). Two sets: 1,000 varied dataset plans, and the plans of all
+**24 completed runs** in the manager DB (history + Part B).
 
-| Per pipeline | Real completed plans (n = 14) | Varied plans (n = 1,000) |
+| Per pipeline | Real completed plans (n = 24) | Varied plans (n = 1,000) |
 |---|---|---|
-| PySpark notebook lines generated | **89** (88–90) | **195** (87–363) |
-| Notebooks | 1.0 | 2.2 |
-| Storage containers | 2.1 | 4.2 |
-| ADF objects (datasets, pipeline, activities, linked service) | 4.1 | 7.2 |
-| Sizing decisions (DIU, workers, shuffle) | 2.5 | 5.4 |
+| PySpark notebook lines generated | **108** mean (88–181) | **195** mean (87–363) |
+| Notebooks | 1.2 | 2.2 |
+| Storage containers | 2.5 | 4.2 |
+| ADF objects (datasets, pipeline, activities, linked service) | 5.0 | 7.2 |
+| Sizing decisions (DIU, workers, shuffle) | 3.1 | 5.4 |
 
 System-side times measured: gate 0.07 ms, notebook generation **0.18 ms** for all stages,
-planner repair 0.18 ms, full planning 29–53 s (uncontended), pre-checks 2–7 s.
+planner repair 0.18 ms (offline, 500 plans); in live runs validate + gate 7 ms and pre-checks
+0.56 s median (§B8).
 
-**Caveat:** generated code includes boilerplate (blob I/O via the SDK, logging, row counts)
-that a human might write shorter, so line counts are an upper-bound proxy, not effort.
-The timed comparison is in B8.
+**Caveat:** the generated code includes boilerplate (blob I/O via the SDK, logging, row counts)
+that a person might write shorter, so line counts are an upper-bound proxy for effort, not
+time. The timed comparison is §B8.
 
 ---
 
@@ -1196,6 +1257,10 @@ Identical row counts across repeats ✓ (deterministic).
 | **Cost estimate without learned correction** | 8 | **51.9%** | 42.5% |
 | **Cost estimate with learned correction** | 8 | **27.4%** | 17.5% |
 
+Including the 6 completed parallel-test runs (§B7), n = 14: cost estimate without learning
+54.6% → with learning 33.6%; Performance ML 45.8%; Resource heuristic 55.2%; the Manager's quick
+estimate 84.3% (under-estimates ~7×).
+
 **Why runtime barely grows with size:** serverless Databricks spends most of each run on fixed
 costs (job submit, cold start, `pip install`, SDK blob I/O); Spark work on 400k rows takes
 seconds. The predictors scale with size and stage count more than reality does at this
@@ -1214,7 +1279,8 @@ judged on new real runs — 🧪 the next live batch.
 factor (it over-estimates duration-driven compute), so a single learned multiplier (0.79–0.86)
 transfers to new pipelines. Runtime error is shape/size-dependent, so one multiplier helps less.
 **Paper value:** replicates Part A §8.2 on fresh data: **with learning 27.4% vs without
-51.9%** (n = 8). Together: 16 paired runs, both showing ~45% relative error reduction.
+51.9%** (n = 8). Together: 16 paired runs, relative error reduction 41% (history) and 47%
+(new runs).
 
 ### B5.4 Finding: the Performance gate aborts runnable pipelines ✅
 
@@ -1242,21 +1308,27 @@ Two learning cycles fired during the benchmark (every 5 runs). From `learning_lo
 | Event | Detail |
 |---|---|
 | duration factor 1.0 → 0.9689 | ML path over-estimates (mean actual/predicted 0.8965 over 10 ML runs) |
-| cost factor rolled back 0.7856 → 0.8644 | post-change cost MAPE 195.6% vs 65.6% before |
+| cost factor rolled back 0.7856 → 0.8644 | post-change cost MAPE 195.6% vs 65.6% before — **wrong, see bug below** |
 | **retrain triggered** | ML duration MAPE 27% > 20% threshold over 10 runs |
 | cost factor 0.8644 → 0.7902 | mean actual/estimated cost ratio 0.6172 over 26 runs |
-| duration factor rolled back 0.9689 → 1.0 | post-change duration MAPE **68,094.7%** vs 26.6% |
+| duration factor rolled back 0.9689 → 1.0 | post-change duration MAPE **68,094.7%** vs 26.6% — **wrong, see bug below** |
 | Resource copy factor drifted 0.530 → 0.33 | self-correction on today's copies (floor of its bounds) |
 | **automatic retrain ran and deployed** (18:08–18:10) | real rows blended 20 → **29** (37 available, 8 held out); duration MAE 224.05 → 224.02 s; outcome balanced accuracy 0.713 → 0.716; CV 0.719 → 0.711; snapshot `20261003_180820_perf_models` kept for rollback; `models/metrics.json` changed in git because of this |
 
-**Bug found (not fixed — reported):** the 68,094.7% is not real. The rollback review in
-`learning_policy_agent/policy_engine.py` (`_review_pending_changes`, duration branch) counts
-runs that were **aborted before executing** (perf-gate aborts log `actual_duration_s` ≈ 0.1 s,
-so APE ≈ 2,000×). The main analyzer already excludes failed runs (`_run_failed`), the review
-step does not. A correct change was rolled back because of this. One-line fix: add
-`and r.get("success") is not False` (and/or `r.get("executed") is not False`) to the
-`post_change` filter. **Paper value:** a concrete case of a safety mechanism misfiring on
-unfiltered evidence — good for the lessons section, and fix before running more experiments.
+**Bug found (not fixed — reported): both rollbacks today were wrong.** The rollback review in
+`learning_policy_agent/policy_engine.py` (`_review_pending_changes`) counts runs that were
+**aborted before executing**; the main analyzer excludes them (`_run_failed`), the review does not.
+- *Duration branch:* perf-gate aborts log `actual_duration_s` ≈ 0.1 s, so their error is
+  ≈ 2,000× and the post-change MAPE became 68,094.7%.
+- *Cost branch:* reconstructed from the log — of the 5 post-change records it used, one was an
+  aborted run (estimate $0.0105 — the Manager's quick estimate, which the normalizer uses when
+  the Cost agent's estimate is missing — vs "actual" $0.0010, error 904%). The other four had
+  errors of 13%, 45%, 8% and 8%. With the aborted run: (0.13 + 0.45 + 0.08 + 9.04 + 0.08) / 5 =
+  **195.6%** (matches the log exactly). Without it: **18.5%** — better than the 65.6% before, so
+  the change should have been **confirmed**.
+Fix: add `and r.get("success") is not False` to both `post_change` filters (and do not fall back
+to `cost_estimate_usd` for runs that never executed). **Paper value:** a concrete case of a
+safety mechanism misfiring on unfiltered evidence; fix before running more experiments.
 
 ### B5.6 Cost ✅
 Formula cost per completed run (at measured runtime): $0.024–0.036 (2-stage), $0.041–0.043
@@ -1296,7 +1368,8 @@ Planning: 58.3 s (single), 55.7 s (multi), both verified.
   copy stage and processes only new files.
 
 **Why:** multi-stage runs one Databricks job per stage in sequence, so every tick pays the job
-start-up twice; single merges both filters into one job (`(region = 'EU') AND (quantity > 5)`).
+start-up twice; single merges both filters into one job's filter (the planner combines the steps
+with AND).
 Multi exists for cases single cannot express correctly (aggregation in the middle, a filter on a
 column a later stage creates) — the planner switches to multi automatically then (Part A stage 11).
 **Caveats:** one stream per layout, 3 drops each; drop-3 single (59.9 s) shows start-up variance.
@@ -1319,10 +1392,12 @@ Manager. Done on the 1,000-row file (xs) and the 50,000-row file (m).
 | m (3.1 MB) | sequential | aborted by perf gate (P(failure) 0.50) | aborted (0.50) | — |
 | m (3.1 MB) | parallel | 146.4 s | 108.4 s | 127.4 s |
 
-**Why parallel is faster:** each Databricks notebook job pays a large fixed start-up cost
-(serverless cold start + library install ≈ 40–60 s). Sequential groups pay it twice back to
-back; parallel groups overlap the two start-ups, so wall time ≈ copy + the slower branch.
-The saving (~51 s) is about one notebook start-up, as expected.
+**Why parallel is faster:** each Databricks notebook stage is its own job with a large fixed
+start-up (serverless job submission, cold start, library install). Sequential groups run the two
+jobs back to back; parallel groups overlap them, so execution time ≈ copy + the slower branch.
+The saving (~51 s) is about the length of one notebook job in these runs (in the six live
+2-stage runs, which have exactly one notebook job, the notebook phase took median 43.8 s,
+32.6–54.7 s), consistent with that explanation.
 
 **Second evidence of false aborts (strengthens B5.4):** on the 3 MB file the *same three
 stages* were aborted when grouped sequentially (P(failure) = 0.50) but passed the gate and
@@ -1346,27 +1421,60 @@ phase-start events. 14 completed live runs (B5 + B7), 6 aborted runs.
 
 | Step | What the system does | Median (min–max) |
 |---|---|---|
-| Describe data + request | upload CSV, one sentence | user time (~1 min) |
-| Design the pipeline | planner incl. self-check | 29–53 s uncontended (B1, Part A); 41–201 s while sharing the model (B5.1) |
+| Describe data + request | upload CSV, one sentence | user time (not measured) |
+| Design the pipeline | planner incl. self-check | 29–53 s in earlier live tests (Part A §3.7); one plan generation ~41 s (B1); 41–201 s while the model was shared (B5.1) |
 | Validate + gate the plan | structural rules, name safety | **7 ms** (5–26 ms) |
 | Size compute, predict runtime + cost, optimise | Resource, Performance, Cost agents | **0.56 s** (0.19–13.2 s) |
-| Write code | notebook generation | 0.18 ms (B4) |
+| Write code | notebook generation | 0.18 ms offline (B4) |
 | Create containers, upload, ADF copy | Executor + ADF | **55.6 s** (49.8–92.4 s) |
 | Run Databricks notebook stage(s) | Executor + Databricks | **44.7 s** (32.6–99.1 s) |
 | Check the result, log feedback | post-run assurance + learning | **8.5 ms** |
-| **Request → verified output in storage** | | **116 s** (83–154 s) of run time + planning |
+| **Run time, plan submitted → verified output in storage** | | **116 s** (83–154 s) |
 | Reject a run predicted to fail | perf gate | 0.2 s (before any cloud spend) |
 | Explain a failure | anomaly event + LLM root cause | automatic, right after the run |
 
-So **request → correct output ≈ 2.5–4.5 minutes**, almost all of it Azure's own copy and
-Spark start-up time; the system's own decision-making (gates, sizing, predictions, code
-generation) takes **under 1 second** per run.
+So **request → correct output ≈ 2–3.5 minutes** (planning 29–53 s + run 83–154 s), plus the
+time the user takes to upload the file and type the request (not measured). Almost all of it is
+Azure's own copy and Spark start-up time; the system's own decision-making (gates, sizing,
+predictions, code generation) takes **under 1 second** per run (median 7 ms + 0.56 s).
+
+### B8.1 Side by side — with the system vs a human doing it by hand
+
+Same job: the `filter2` / `agg3` pipelines from B5 (CSV → ADF copy → Databricks
+filter/aggregate → output in storage). **System column = measured. Human column = the
+work that is countable now (from B4 / real failure logs) + the minutes that must be timed
+with the B8.2 protocol (marked ⏱).** Never fill ⏱ cells with guesses.
+
+| Part of the job | **With our system** (measured) | **Human, by hand** | Evidence |
+|---|---|---|---|
+| Understand data & decide stages | automatic, 29–53 s planning (self-checked) | read the CSV, design containers/stages: ⏱ | B1, A3.7 |
+| Storage containers | created automatically | create ~2.5–4 by hand in the portal: ⏱ | B4 (2.5 real / 4.2 varied per pipeline) |
+| ADF objects (linked service, datasets, pipeline, copy activity) | generated + deployed automatically | build ~5–7 objects in ADF Studio: ⏱ | B4 (5.0 real / 7.2 varied) |
+| Transformation code | **0.18 ms**, 108 lines (real plans, mean) to 195 (varied plans, mean) of PySpark generated | write + debug the same logic (blob I/O, filter, agg): ⏱ | B4 |
+| Compute sizing (DIU, workers, shuffle) | 0.56 s, 0% over the tier limits | 3.1–5.4 decisions by hand: ⏱; for comparison, the planner's size-table settings alone exceed the limits in 18.6% of plans | B2, B4 |
+| Runtime / cost estimate before running | 0.56 s (cost error 27% with learning) | usually none | B5.3 |
+| Catch a plan error | **7 ms** before any cloud spend; all 1,400 injected faults stopped before Databricks | found when the cloud run fails (**48–505 s** per failed run in the history, incl. 2 retries) — or never, for faults that silently give wrong output (400 of 1,400 in B3); + diagnose ⏱ | B3, Part A §11 |
+| Fix an error | repair layer (0.18 ms) + 1 automatic re-plan (~40 s); 96% → 100% correct | read logs, edit, re-run: ⏱ per failure + a full re-run (~2 min of Azure time, B5) | B1, B5 |
+| Explain a failure | automatic anomaly event + LLM root cause | read Databricks/ADF logs: ⏱ | Part A §9 |
+| Run on Azure | 116 s median (83–154 s) | similar Azure time if built the same way, + clicking/triggering: ⏱ | B8 table above |
+| Learn from past runs | automatic correction factors, retrain | manual | B5.5 |
+| Skill needed | upload + one sentence | ADF, Databricks, PySpark, Azure limits | — |
+| **Total, request → correct output** | **≈ 2–3.5 min** + user's upload/typing, decisions < 1 s | **⏱ — measure with B8.2** | — |
+
+**What can be claimed today without a user study:** the system removes all hand-written
+code (108–195 lines per pipeline on average), ~5–7 ADF objects and every sizing decision; it
+catches plan errors in milliseconds, before any cloud spend, instead of after a failed cloud run
+(48–505 s each in the history) or not at all (silently wrong output); and it delivers correct
+output in ≈ 2–3.5 minutes of system time. **What cannot be claimed yet:** "X times faster than a human" —
+that needs the timed study below.
+
+### B8.2 How to time the human side
 
 **Human, without the system — what a person must do** (same pipeline): create 2–4
 containers; create ADF linked service, 2–4 datasets, pipeline + copy activity; write
 and debug an ~90–200 line PySpark notebook (blob read/write, filter/agg); create a
 Databricks job; choose DIU/workers/shuffle; trigger, wait, check output; on error, read
-logs, fix, re-run (each failed cloud attempt costs ~1.5–8 min, measured: 48–505 s).
+logs, fix, re-run (failed runs in the history took 48–505 s each, incl. 2 automatic retries).
 
 **How to measure the human side properly (protocol — needed before publishing a number):**
 1. Participants: the authors + 2–4 classmates who know Azure basics. Record experience.
@@ -1387,21 +1495,22 @@ will ask for the measurement.
 
 | Agent / component | Metric | **Without** | **With** | n | How measured | Status |
 |---|---|---|---|---|---|---|
-| Whole system | correct pipeline from a request | manual (B8) | 100% of 12 planner prompts executable+correct; live: 8/8 executed runs completed with correct output | 12 / 12 | B1, B5 | ✅/🧪 human time |
+| Whole system | correct pipeline from a request | by hand (B8.1, time ⏱) | planner: 12/12 prompts correct; live: 8/8 executed runs completed with correct output | 12 / 12 | B1, B5 | ✅ / ⏱ human time |
 | Planner fine-tuning | intent correct (raw) | 33% (base) | 96% | 24 | B1 | ✅ |
 | Planner AI at all | correct | 0% (default plan) | 96% (repair) / 100% (full, n=12) | 24 | B1 | ✅ |
 | Repair layer | executable | 33% | 100% | 24 | B1 (paired) | ✅ |
 | Self-check / re-plan | correct (sales prompts) | 11/12 | 12/12 | 12 | B1 | ✅ |
-| Assurance gate | faulty plans reaching cloud | 43% | 0% | 1,400 | B3 | ✅ |
-| Assurance gate | valid plans wrongly rejected | — | 12.3% (cast bug) | 5,000 | B3 | ✅ |
-| Resource Agent | plans over hard limits | 24.8% | 0% | 1,000 | B2 | ✅ |
-| Resource Agent | mean workers / DIU | 4.08 / 6.51 | 2.07 / 3.45 | 1,000 | B2 | ✅ |
+| Assurance gate | faulty plans reaching Databricks | 43% (400 silently wrong, 200 failing) | 0% | 1,400 | B3 | ✅ |
+| Assurance gate | valid plans wrongly rejected | 0% | 12.3% (cast bug) | 5,000 | B3 | ✅ |
+| Resource Agent | plans over the tier limits | 18.6% (planner after repair) | 0% | 1,000 | B2 | ✅ |
+| Resource Agent | mean workers / DIU per stage | 1.14 / 6.51 | 2.07 / 3.45 | 1,000 | B2 | ✅ |
 | Resource self-correction | per-stage runtime MAPE | 151% / 224% | 60% / 62% | 5 / 6 | Part A §5.4 | ✅ |
-| Performance agent (ML vs formula) | runtime MAPE, Part A runs | 81.3% (formula) | 8.8% (ML) | 13 / 6 | Part A §6.5 | ✅ |
+| Performance agent (ML vs formula) | runtime MAPE, history (in-distribution) | 81.3% (formula) | 8.8% (ML) | 13 / 6 | Part A §6.5 | ✅ |
 | Performance agent on new shapes (out-of-sample) | runtime MAPE | — | 51.1% (resource heuristic 53.6%) | 8 | B5.3 | ✅ |
 | Performance gate | runs aborted pre-execution | 0 | 4/12 runs (+ fan-out plan), all at P(failure) 0.49–0.52 | 12 | B5.4 | ✅ (outcome without gate 🧪) |
 | Learning agent | cost-estimate MAPE (history) | 50.3% | 29.9% | 8 | Part A §8.2 | ✅ |
 | Learning agent | cost-estimate MAPE (new live runs, out-of-sample) | 51.9% | 27.4% | 8 | B5.3 | ✅ |
+| Learning agent rollback | correct changes kept | — | 0 of 2 today (both rolled back because of the aborted-run bug) | 2 | B5.5 | ✅ |
 | Executor retry classification | attempts on deterministic failure | 3 (+40 s backoff) | 1 | — | Part A §10.2 | ✅ |
 | Parallel groups | execution time (xs fan-out) | 143.7 s (sequential) | 92.4 s (−35.7%) | 2+2 | B7 | ✅ |
 | Streaming layout | tick time (same output) | 78.8 s (multi) | 46.8 s (single, −40.6%) | 3+3 drops | B6 | ✅ |
@@ -1416,7 +1525,8 @@ will ask for the measurement.
    evaluate a confidence threshold offline on the synthetic test set (precision/recall of
    "abort" at thresholds 0.5–0.9) — turns a weakness into a calibrated-gate result.
 4. **Fix the cast false-reject** and re-run B3 → report 0% false rejects after the fix.
-4b. **Fix the learning rollback filter** (B5.5) before more live runs, otherwise aborted runs keep reverting good corrections.
+4b. **Fix the learning rollback filter** (B5.5, both duration and cost branches) before more live
+   runs, otherwise aborted runs keep reverting good corrections.
 5. **More live runs** (≥ 20) across sizes/shapes so the learning loop's duration factor and
    the cost agent's learned deadline (needs 3 comparable runs) kick in → a real
    cost-optimisation with/without result.
@@ -1434,23 +1544,25 @@ will ask for the measurement.
   from 33% to 96% over the base model on 24 prompts; a deterministic repair layer raises
   executability from 33% to 100%, and a single self-verification re-plan brings end-to-end
   correctness to 100% on [12] prompts."
-- "A structural assurance gate blocks 100% of [1,400] injected faulty plans before any
-  cloud spend in under 0.1 ms, while 43% would otherwise reach Databricks and fail at run
-  time."
-- "Without the Resource Agent, 24.8% of plans request more compute than the subscription
-  allows; with it, none do, at half the provisioned workers."
-- "On real Azure runs, a closed-loop learning agent reduced cost-estimate error from 50.3%
-  to 29.9%, and per-stage duration error from 151–224% to 60–62%."
+- "Of 1,400 injected faulty plans, 43% would reach Databricks without the structural
+  assurance gate — two thirds of those would run and silently produce wrong output; with the
+  gate (≈ 0.07 ms per plan) none reach the cloud."
+- "Without the Resource Agent, 18.6% of plans exceed the subscription tier's limits even after
+  the planner's own repairs; with it, none do, while workers are re-sized from demand (mean
+  1.14 → 2.07) and copy throughput units nearly halved (6.51 → 3.45 DIU)."
+- "On real Azure runs, a closed-loop learning agent reduced cost-estimate error from 50.3% to
+  29.9% on past runs and from 51.9% to 27.4% on new out-of-sample runs, and per-stage duration
+  error from 151–224% to 60–62%."
 
 **Claim → evidence map:**
 
 | Claim | Evidence | Section |
 |---|---|---|
 | Fine-tuning gives understanding | intent 33% → 96% | B1, A3.3–3.4 |
-| Deterministic layers give reliability | executable 33% → 100%; gate 43% → 0% | B1, B3 |
+| Deterministic layers give reliability | executable 33% → 100%; faulty plans reaching the cloud 43% → 0% | B1, B3 |
 | Agents are complementary, not redundant | each removal hurts a different metric | B9 |
-| Learning loop helps on real data | 50.3% → 29.9% cost MAPE | A8.2 |
-| Honest limitations | perf-gate false aborts, cast false rejects, small n | B5.3, B3, A17 |
+| Learning loop helps on real data | cost MAPE 50.3% → 29.9% (history), 51.9% → 27.4% (new runs) | A8.2, B5.3 |
+| Honest limitations | perf-gate false aborts, rollback bug, cast false rejects, small n | B5.4, B5.5, B3, A17 |
 
 **Figures to make from Part B data:** grouped bars of B1 (7 conditions × executable/intent/
 correct); stacked bar of B3 (where each fault is caught, with vs without gate); B2 size-bucket
@@ -1464,3 +1576,108 @@ material): `planner_ablation_24cases.json` (B1), `offline_results.json` (B2–B4
 run logs `*.log`, and `state_backup_before_live/` (feedback logs, monitor DB and learning
 state as they were before the live runs). Test CSVs are not kept; `live_benchmark.py`
 regenerates them identically from fixed seeds.
+
+---
+
+## B12. Side by side — with vs without each agent
+
+Same format as §B8.1. **"With" = measured. "Without" = what the system does instead when that
+agent is absent, read from the code, plus the measured number where one exists.** ⏱/🧪 marks
+what is not measured yet. Every number points to the section it comes from.
+
+### B12.1 Planner Agent (fine-tuned model + repair layer + self-check)
+
+| Aspect | **With the Planner** | **Without** (deterministic default plan, `build_default_config`) | Evidence |
+|---|---|---|---|
+| Plan does what the user asked | **96%** (model + repair), **100%** with self-check (n = 12) | **0%** — pass-through pipeline, ignores the request | B1 |
+| Plan executable | 100% | 100% | B1 |
+| Understands free-form wording / typos | yes ("drop the cheap stuff" → `unit_price >= 100`; "quantiy" → `quantity`) | no | A3.4, B1 |
+| Time to a plan | ~41 s per generation (+ intent check, + ~40 s if re-planned) | 0.008 ms median (measured, 480 calls) | B1, B12.1 |
+| Cloud LLM cost | $0 (local) | $0 | A3.8 |
+
+Component by component (B1): fine-tuning raises intent 33% → 96%; the repair layer raises
+executability 33% → 100%; the self-check fixes the remaining lost-intent case (11/12 → 12/12).
+
+### B12.2 Assurance (structural gate + intent check)
+
+| Aspect | **With the gate** | **Without** (Manager Phase-1 validation + executor checks only) | Evidence |
+|---|---|---|---|
+| Faulty plans reaching Databricks | **0 / 1,400** | **600 / 1,400 (43%)** | B3 |
+| Faults that would silently produce wrong output | 0 | 400 (unsupported aggregation dropped, unknown stage skipped) | B3 |
+| Faults that would fail inside Spark | 0 | 200 (filter on a missing column — expected, not executed) | B3 |
+| Time to reject a bad plan | 0.07 ms offline; 7 ms live (validate + gate) | after a cloud run (48–505 s per failed run in history) or never | B3, B8 |
+| Valid plans wrongly rejected | 12.3% (cast bug, fixable) | 0% | B3 |
+| Intent check catches lost intent (self-check) | 1/1 dropped aggregation recovered (fine-tuned) | not caught | B1 |
+| Intent check false accepts | 0/12 (fine-tuned); 5/12 (base model) | — | B1 |
+
+### B12.3 Resource Agent
+
+| Aspect | **With the Resource Agent** | **Without** (planner's settings after its own repair layer) | Evidence |
+|---|---|---|---|
+| Plans exceeding the tier limits (≤ 4 workers, ≤ 8 DIU) | **0%** | **18.6%** (every xlarge plan, via 16 DIU) | B2 |
+| Mean workers per notebook stage | 2.07 (sized from rows/operations) | 1.14 (size-bucket caps; often driver-only) | B2 |
+| Mean DIU per copy stage | 3.45 | 6.51 | B2 |
+| Feasibility gate (memory) | checked, 0 infeasible in 1,000 | none | B2 |
+| Per-stage duration estimate error (its own feedback loop) | 60% (copy), 62% (notebook) | 151% / 224% raw heuristic | A5.4 |
+| Live runtime / cost effect | ⏱/🧪 not measured (needs pinned-settings runs) | — | B2 |
+
+Note: on serverless Databricks only DIU and shuffle partitions are actually applied; workers and
+node type are advisory (A17).
+
+### B12.4 Performance Prediction Agent
+
+| Aspect | **With the Performance agent** | **Without** (Resource heuristic duration only) | Evidence |
+|---|---|---|---|
+| Runtime error, history (in-distribution) | **8.8%** (ML path, n = 6) | 61.9% on the same 6 runs | A6.5 |
+| Runtime error, new live runs (out-of-sample) | 51.1% (n = 8); 45.8% (n = 14) | 53.6% (n = 8); 55.2% (n = 14) | B5.3 |
+| Pre-execution abort of risky runs | yes — but aborted **4/12** live runs at P(failure) ≈ 0.5; the same stages completed when grouped in parallel (false aborts) | no aborts; every run executes | B5.4, B7 |
+| "Slower than usual" and a learned deadline for the Cost agent | yes, after 3 comparable runs (none reached it today) | none — Cost agent stays fail-closed | A6.6, B5.6 |
+| Time | part of 0.56 s pre-checks | — | B8 |
+
+Honest reading: on new shapes the ML runtime model is only slightly better than the heuristic,
+and its gate currently costs runs. The clearest value so far is in-distribution accuracy.
+
+### B12.5 Cost Optimization Agent
+
+| Aspect | **With the Cost agent** (+ learned correction) | **Without** (Manager's quick estimate only) | Evidence |
+|---|---|---|---|
+| Cost-estimate error, history | 29.9% (n = 8) | 86.5% (n = 18), under-estimates ~8× | A8.2, A11.2 |
+| Cost-estimate error, new live runs | 27.4% (n = 8); 33.6% (n = 14) | 84.3% (n = 14), under-estimates ~7× | B5.3 |
+| Cheaper configurations applied | 0 in all real runs (fail-closed until a learned deadline exists) | 0 | A7.4, B5.6 |
+| Unsafe recommendations | 0 — 13/13 safety tests; deadline-breaking change now rejected | n/a | A7.2–7.3 |
+
+### B12.6 Learning & Policy Agent
+
+| Aspect | **With learning** | **Without** (correction factors fixed at 1.0) | Evidence |
+|---|---|---|---|
+| Cost-estimate error (paired, same runs) | 29.9% history; 27.4% new runs (n = 8 each) | 50.3%; 51.9% | A8.2, B5.3 |
+| Automatic retrain when error is high | triggered at 27% > 20%, new model deployed with snapshot for rollback | never | B5.5 |
+| Pipelines flagged for human review | 1 (`2stages_low`, 33% failure rate) | none | A8.2 |
+| Automatic rollback of bad changes | history: 1 rollback (reported as correct in the learning README; not re-verified); **both rollbacks today were wrong** — aborted runs counted (bug) | — | A8.2, B5.5 |
+
+### B12.7 Executor safety features
+
+| Aspect | **With** | **Without** | Evidence |
+|---|---|---|---|
+| Retry classification (`retryable: false`) | 1 attempt on deterministic failures | 3 attempts + 40 s back-off (4 history runs failed this way, 48–505 s each) | A10.2 |
+| Injection-safe expression compiler | 200/200 injection strings stopped before the cloud | (pre-fix scan: code injection into notebooks possible) | B3, A10.3 |
+| Resource locks | two runs on the same containers serialised (0.8 s vs 0.4 s, mocked) | runs could overwrite each other's data | A10.1 |
+| Parallel execution groups | 92.4 s | 143.7 s sequential (−35.7%) | B7 |
+
+### B12.8 Monitor Agent
+
+| Aspect | **With the Monitor** | **Without** | Evidence |
+|---|---|---|---|
+| Run history for baselines | 63 real ADF/Databricks runs stored (history) | none — no "slower than usual", no cost-spike baseline | A9.1 |
+| Anomaly events | 8 kinds detected automatically (2 real events in history) | only the run's error string | A9.2 |
+| Failure explanation | LLM root cause for every run (62 analysed; all 4 serverless failures correctly attributed) | read ADF/Databricks logs by hand: ⏱ | A9.3 |
+| Detection accuracy | 🧪 precision/recall not measured | — | A9.2 |
+
+### B12.9 Design choices (same system, two settings)
+
+| Choice | Option A | Option B | Result | Evidence |
+|---|---|---|---|---|
+| Execution groups | sequential 143.7 s | parallel **92.4 s** | −35.7% | B7 |
+| Streaming layout | multi-stage 78.8 s per update | single-stage **46.8 s** | −40.6%, identical output | B6 |
+| Batch vs streaming for new data | batch run ~93 s (1,000 rows, incl. copy) | streaming tick ~47 s (2,000 new rows) | ~half | B5, B6 |
+| Planner backend | fine-tuned local 7B | base 7B | correct 96% vs 4% (with repair) | B1 |

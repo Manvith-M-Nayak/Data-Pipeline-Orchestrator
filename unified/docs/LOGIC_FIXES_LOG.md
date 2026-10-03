@@ -1153,3 +1153,30 @@ No code, model or data file was changed.
 4. Stale test: `resource_agent/examples/run_examples.py` section F (from the first part of this stage).
 
 **Mistakes:** result files first written into `unified/` (moved; scripts fixed); a fault-injection tuple-assignment bug (found, fixed, re-run); planner experiment run alongside live planning overheated the laptop (stopped, finished later in low-heat mode); an opt-in perf-gate bypass switch was blocked by the environment's safety policy and reverted — `manager.py` unchanged (`git diff` empty).
+
+### Stage 18, review pass — results checked against the code and data (2026-10-03)
+
+**Commit message:** `docs: correct paper results after code review; add per-agent side-by-side tables`
+
+**Why:** the user asked for side-by-side "with vs without" tables for every agent and an error-free document (Codex reviews it). Every claim in `PAPER_RESULTS.md` was re-checked against the code, the saved run states and the logs.
+
+**Corrections (each was wrong before this pass):**
+
+| Where | Was | Now | How found |
+|---|---|---|---|
+| B2 Resource with/without | 24.8% of plans over limits; "half the workers" | **18.6%** (all xlarge, via DIU); Resource Agent gives *more* workers (1.14 → 2.07) | Baseline used training targets; the planner's repair layer already caps workers by size (`RECOMMENDED_SETTINGS`, size cap). Re-run with the repaired plan as baseline. |
+| B3 gate with/without | skipped Manager Phase-1 validation; assumed the executor rejects unknown stage types | real `validate_plan` included; unknown stage types are **silently skipped** and unsupported aggregations **silently dropped** → 400 of 600 faults give wrong output | Read `executor._execute_pipeline` (filters stages by type) and `notebook_builder._build_agg_expr` (returns "" for unknown ops). Re-run. |
+| B5.5 learning | only the duration rollback was attributed to the bug | the **cost** rollback was also wrong: 195.6% reproduced exactly from 5 records incl. 1 aborted run; 18.5% without it | Reconstructed with `FeedbackCollector` + the review filter |
+| B1 self-check | "fixed by the re-plan" without caveats; "checked by hand"; "≈ 1,000+ tokens" | final `s_agg` plan correct but still marked not verified; base-model verifier false accepts 5/12; unmeasured claims removed | Results file fields `*_full_attempts/verified` |
+| A9.2 | 9 anomaly kinds | 8 | `anomaly_detector.py` `_add(...)` calls |
+| A10.2 / B12.7 | retried failures 347–505 s | 48.3, 347.5, 485.5, 505.4 s | `manager_feedback.jsonl` |
+| B4 | real plans n = 14, pre-checks 2–7 s | n = 24 (incl. Part B), pre-checks 0.56 s median | re-run; phase timestamps |
+| B8 / B8.1 | total 2.5–4.5 min incl. a guessed 1 min of user time; "1.5–8 min per failed attempt"; "100% of faults caught by the gate" | 2–3.5 min + unmeasured user time; 48–505 s per failed run incl. retries; gate + earlier layers stop all, gate alone 3 classes | arithmetic re-checked |
+| B6 / B7 | quoted a merged filter text not in the data; start-up cost "40–60 s" assumed | wording from the logs; 2-stage notebook phase median 43.8 s (measured) | backend log; run states |
+| Part A | stale (repair layer, self-check, parallel groups marked TO RUN; 8.8% as headline; C1 claim of replacing a cloud LLM) | point to Part B results; 8.8% labelled in-distribution; C1 reworded (no cloud comparison run) | — |
+
+**Added:** §B12 side-by-side tables for every agent (Planner, Assurance, Resource, Performance, Cost, Learning, Executor features, Monitor, design choices); B5.3 figures over all 14 completed live runs; Manager quick-estimate error on today's runs (84.3%); default-plan time (0.008 ms, measured); README rows for `live_benchmark.py` and the low-heat options.
+
+**Data:** `data/paper_eval/offline_results.json` now holds the corrected B2/B3/B4 run (the first, wrong run was replaced).
+
+**Verification:** all scripts compile; `ablation_offline.py` re-run end to end; every changed number traced to a file or a command in the table above.

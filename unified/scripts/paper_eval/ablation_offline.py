@@ -1,9 +1,11 @@
 """Offline with/without experiments (no LLM, no Azure).
 
-R  — with vs without Resource Agent: planner settings vs Resource Agent settings
-     against the student-tier hard limits, on planner-format configs.
+R  — with vs without Resource Agent: the settings the planner hands over (model
+     output, and after the planner's own repair layer) vs the Resource Agent's,
+     against the student-tier hard limits.
 A  — with vs without the Assurance structural gate: inject faults into valid
-     plans; where is each fault caught (gate / executor pre-checks / not until cloud)?
+     plans and pass them through the real layers in run order (Manager Phase-1
+     validation, gate, executor pre-cloud checks); classify where each stops.
 S  — with vs without the system: what a person would author by hand for the
      same pipelines (notebook lines, ADF objects, settings decisions).
 """
@@ -29,47 +31,104 @@ sample = random.sample(rows, 1000)
 out = {}
 
 # ── R: Resource Agent ────────────────────────────────────────────────────────
-ra = ResourceAgent()
-viol_without = viol_with = infeasible = 0
-w_plan, w_res, d_plan, d_res, m_res = [], [], [], [], []
-by_size = {}
-for rec in sample:
-    cfg, schema = rec["config"], rec["schema"]
-    size = schema["size_hint"].split()[0]
-    stages = cfg["stages"]
-    over = any((s["type"] == "notebook" and s.get("num_workers", 0) > MAX_WORKERS) or
-               (s["type"] == "copy" and s.get("diu", 0) > MAX_DIU) for s in stages)
-    viol_without += over
-    by_size.setdefault(size, [0, 0])
-    by_size[size][0] += 1
-    by_size[size][1] += over
-    for s in stages:
-        (w_plan if s["type"] == "notebook" else d_plan).append(s.get("num_workers" if s["type"] == "notebook" else "diu", 0))
-    with redirect_stdout(io.StringIO()):
-        rp = ra.analyze(cfg, csv_size_bytes=int(schema["row_count"] * 140), schema=schema)
-    infeasible += not rp.get("feasible", True)
-    over2 = any((a["stage_type"] == "notebook" and a["workers"] > MAX_WORKERS) or
-                (a["stage_type"] == "copy" and a["diu"] > MAX_DIU) for a in rp.get("allocations", []))
-    viol_with += over2
-    for a in rp.get("allocations", []):
-        (w_res if a["stage_type"] == "notebook" else d_res).append(a["workers"] if a["stage_type"] == "notebook" else a["diu"])
-        if a["stage_type"] == "notebook":
-            m_res.append(a["memory_gb"])
-out["R"] = {
-    "plans": len(sample),
-    "exceed_limits_without_resource": viol_without,
-    "exceed_limits_with_resource": viol_with,
-    "flagged_infeasible_with_resource": infeasible,
-    "exceed_by_size_without": {k: f"{v[1]}/{v[0]}" for k, v in by_size.items()},
-    "mean_workers_per_notebook_stage": [round(st.mean(w_plan), 2), round(st.mean(w_res), 2)],
-    "max_workers": [max(w_plan), max(w_res)],
-    "mean_diu_per_copy_stage": [round(st.mean(d_plan), 2), round(st.mean(d_res), 2)],
-    "max_diu": [max(d_plan), max(d_res)],
-}
+# "Without the Resource Agent" = the settings the planner itself hands over.
+# The planner's repair layer (_structural_validate) already caps notebook
+# workers by data size, so the fair baseline is the repaired plan, not the raw
+# training target. The raw target is reported too, as the model's own output.
+from planner_agent.planner_common import _structural_validate
+from executor_agent.notebook_builder import _AGG_FUNCS
 
-# ── A: Assurance structural gate ─────────────────────────────────────────────
-def first_notebook(cfg):
-    return next(s for s in cfg["stages"] if s["type"] == "notebook")
+ra = ResourceAgent()
+
+def over_limits_plan(stages):
+    return any((s.get("type") == "notebook" and (s.get("num_workers") or 0) > MAX_WORKERS) or
+               (s.get("type") == "copy" and (s.get("diu") or 0) > MAX_DIU) for s in stages)
+
+def settings(stages):
+    w = [s.get("num_workers") or 0 for s in stages if s.get("type") == "notebook"]
+    d = [s.get("diu") or 0 for s in stages if s.get("type") == "copy"]
+    return w, d
+
+R = {"plans": len(sample), "limits": {"MAX_WORKERS": MAX_WORKERS, "MAX_DIU": MAX_DIU}}
+acc = {k: {"over": 0, "w": [], "d": [], "by_size": {}} for k in ("model_raw", "planner_repaired", "resource_agent")}
+infeasible = 0
+for rec in sample:
+    schema = rec["schema"]
+    size = schema["size_hint"].split()[0]
+    raw = copy.deepcopy(rec["config"])
+    with redirect_stdout(io.StringIO()):
+        repaired = _structural_validate(copy.deepcopy(rec["config"]), schema)
+        rp = ra.analyze(repaired, csv_size_bytes=int(schema["row_count"] * 140), schema=schema)
+    infeasible += not rp.get("feasible", True)
+    allocs = [{"type": a["stage_type"], "num_workers": a["workers"], "diu": a["diu"]}
+              for a in rp.get("allocations", [])]
+    for key, stages in (("model_raw", raw["stages"]), ("planner_repaired", repaired["stages"]),
+                        ("resource_agent", allocs)):
+        o = over_limits_plan(stages)
+        acc[key]["over"] += o
+        bs = acc[key]["by_size"].setdefault(size, [0, 0])
+        bs[0] += 1
+        bs[1] += o
+        w, d = settings(stages)
+        acc[key]["w"] += w
+        acc[key]["d"] += d
+for key, v in acc.items():
+    R[key] = {"plans_over_limits": v["over"],
+              "over_by_size": {k: f"{x[1]}/{x[0]}" for k, x in v["by_size"].items()},
+              "mean_workers_per_notebook_stage": round(st.mean(v["w"]), 2), "max_workers": max(v["w"]),
+              "mean_diu_per_copy_stage": round(st.mean(v["d"]), 2), "max_diu": max(v["d"])}
+R["resource_agent"]["plans_flagged_infeasible"] = infeasible
+out["R"] = R
+
+# ── A: Assurance structural gate (fault injection through the real layers) ──
+# Layers in run order (central_manager_agent/manager.py execute_run):
+#   1. Manager Phase-1 validation   — real CentralManager.validate_plan
+#   2. Assurance structural gate    — real AssuranceAgent, run_semantic=False
+#   3. Executor pre-cloud checks    — same checks as executor._execute_pipeline
+#      before any cloud call: plan_safety_issues, containers_to_create, copy
+#      dataset refs, compute container refs, and building every notebook.
+# A plan that passes all checks it meets reaches Databricks. What happens
+# there is classified from the code: the executor ignores stages whose type
+# it does not know, and the notebook builder drops aggregation ops it does
+# not support — both run "successfully" with wrong output. Anything else that
+# the gate would have rejected (e.g. an unknown column) is expected to fail
+# inside the Spark job; that last step was not executed.
+from central_manager_agent.manager import CentralManager, RunState
+
+def phase1_blocks(cfg):
+    st_ = RunState(run_id="offline-eval", plan=copy.deepcopy(cfg))
+    with redirect_stdout(io.StringIO()):
+        return not CentralManager().validate_plan(st_)["ok"]
+
+def gate_blocks(cfg, schema):
+    return agent.assure("", cfg, schema, run_semantic=False).overall_status == "fail"
+
+def executor_blocks(cfg):
+    if plan_safety_issues(cfg) or not cfg.get("containers_to_create"):
+        return True
+    stages = cfg.get("stages", [])
+    for s in stages:
+        if s.get("type") == "copy" and (not s.get("source_dataset") or not s.get("sink_dataset")):
+            return True
+        if s.get("type") in ("notebook", "stream") and (not s.get("source_container") or not s.get("sink_container")):
+            return True
+    try:
+        for s in stages:
+            if s.get("type") in ("notebook", "stream"):
+                build_notebook_source(s, "acct")
+    except Exception:
+        return True
+    return False
+
+def cloud_outcome(cfg):
+    stages = cfg.get("stages", [])
+    if any(s.get("type") not in ("copy", "notebook", "stream") for s in stages):
+        return "runs, stage silently skipped"
+    for s in stages:
+        for a in ((s.get("aggregation") or {}).get("aggregations") or []):
+            if str(a.get("op", "")).lower() not in _AGG_FUNCS:
+                return "runs, aggregation silently dropped"
+    return "fails inside Spark (expected, not executed)"
 
 def f_unknown_col(cfg):
     first_notebook(cfg)["filter_condition"] = "discount_code = 'X'"
@@ -88,62 +147,40 @@ def f_injection(cfg):
 def f_bad_type(cfg):
     cfg["stages"][1]["type"] = "spark_sql"
 
+def first_notebook(cfg):
+    return next(s for s in cfg["stages"] if s["type"] == "notebook")
+
 FAULTS = {"unknown column": f_unknown_col, "unsupported aggregation": f_bad_agg,
           "stage order inverted": f_order, "missing required key": f_missing_key,
           "unsafe container name": f_bad_name, "code-injection filter": f_injection,
           "unknown stage type": f_bad_type}
 
-def executor_catches(cfg):
-    """What the executor checks before any cloud call (no assurance gate)."""
-    if plan_safety_issues(cfg):
-        return True
-    try:
-        for s in cfg["stages"]:
-            if s.get("type") in ("notebook", "stream"):
-                build_notebook_source(s, "acct")
-            elif s.get("type") != "copy":
-                return True  # executor refuses unknown types
-    except Exception:
-        return True
-    return False
-
 agent = AssuranceAgent()
-A = {}
 # fault-inject only into plans the gate accepts when clean (cast plans are
 # falsely rejected — reported separately as a gate false-positive rate)
-clean_pool = [r for r in rows if agent.assure("", r["config"], r["schema"], run_semantic=False).overall_status == "pass"]
+clean_pool = [r for r in rows if not gate_blocks(r["config"], r["schema"])]
 cast_false_rejects = len(rows) - len(clean_pool)
 base = random.sample(clean_pool, 200)
+A = {}
 for fname, fn in FAULTS.items():
-    gate = execu = cloud = 0
+    c = {"n": len(base), "without_gate": {}, "with_gate": {}}
     for rec in base:
         cfg = copy.deepcopy(rec["config"])
         cfg["_c0"] = rec["schema"]["columns"][1]
         fn(cfg)
         cfg.pop("_c0")
-        g = agent.assure("", cfg, rec["schema"], run_semantic=False).overall_status == "fail"
-        e = executor_catches(cfg)
-        gate += g
-        if not g:
-            pass
-        execu += e
-        cloud += (not e)
-    A[fname] = {"n": len(base), "caught_by_gate": gate, "caught_by_executor_only_path": execu,
-                "reaches_cloud_without_gate": cloud, "reaches_cloud_with_gate": sum(
-                    0 for _ in [0])}
-# with the gate, a plan reaches the cloud only if BOTH miss it
-for fname, fn in FAULTS.items():
-    both = 0
-    for rec in base:
-        cfg = copy.deepcopy(rec["config"])
-        cfg["_c0"] = rec["schema"]["columns"][1]
-        fn(cfg)
-        cfg.pop("_c0")
-        g = agent.assure("", cfg, rec["schema"], run_semantic=False).overall_status == "fail"
-        both += (not g) and (not executor_catches(cfg))
-    A[fname]["reaches_cloud_with_gate"] = both
-clean_fp = sum(agent.assure("", r["config"], r["schema"], run_semantic=False).overall_status == "fail" for r in base)
-out["A"] = {"faults": A, "false_rejects_on_clean_plans": f"{cast_false_rejects}/{len(rows)}"}
+        p1, g, ex = phase1_blocks(cfg), gate_blocks(cfg, rec["schema"]), executor_blocks(cfg)
+        # without the gate: Phase-1 -> executor
+        wo = ("stopped: manager validation" if p1 else
+              "stopped: executor pre-cloud check" if ex else cloud_outcome(cfg))
+        # with the gate: Phase-1 -> gate -> executor
+        wi = ("stopped: manager validation" if p1 else
+              "stopped: assurance gate" if g else
+              "stopped: executor pre-cloud check" if ex else cloud_outcome(cfg))
+        c["without_gate"][wo] = c["without_gate"].get(wo, 0) + 1
+        c["with_gate"][wi] = c["with_gate"].get(wi, 0) + 1
+    A[fname] = c
+out["A"] = {"faults": A, "gate_false_rejects_on_valid_plans": f"{cast_false_rejects}/{len(rows)}"}
 
 # ── S: with vs without the system (manual authoring proxy) ───────────────────
 def manual_effort(cfg):
