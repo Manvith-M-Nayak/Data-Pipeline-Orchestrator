@@ -7,6 +7,11 @@ learning loop, so later runs see corrections learned from earlier ones.
     uvicorn main:app --host 127.0.0.1 --port 8000      # backend (starts Ollama)
     python scripts/paper_eval/live_benchmark.py batch    out_dir
     python scripts/paper_eval/live_benchmark.py parallel out_dir
+    PAPER_EVAL_REPEATS=4 python scripts/paper_eval/live_benchmark.py batch out_dir
+    python scripts/paper_eval/live_benchmark.py pinned   out_dir
+
+Every completed batch / pinned run's output is downloaded and compared with a
+reference computed locally from the same CSV (row count and values).
 
 Writes out_dir/<experiment>.jsonl (one line per run) and the generated CSVs.
 Costs real (small) Azure money: about $0.02-0.10 per run by the cost formula.
@@ -85,6 +90,70 @@ def run(path, config, schema, prompt, timeout_s=2400):
     return st
 
 
+def reference(path, shape):
+    """What a correct pipeline must output, computed locally from the same CSV."""
+    with open(path, newline="") as f:
+        rows = list(csv.DictReader(f))
+    if shape == "filter2":
+        kept = [r for r in rows if r["region"] == "EU" and int(r["quantity"]) > 5]
+        return {"rows": len(kept), "sum_quantity": sum(int(r["quantity"]) for r in kept)}
+    if shape == "agg3":
+        groups = {}
+        for r in rows:
+            if int(r["quantity"]) > 5:
+                g = groups.setdefault(r["region"], [0, 0.0])
+                g[0] += 1
+                g[1] += float(r["unit_price"])
+        return {"rows": len(groups),
+                "per_region": {k: {"count": n, "avg_unit_price": t / n} for k, (n, t) in groups.items()}}
+    return None
+
+
+def verify(state, path, shape):
+    """Download the run's output and compare it with reference(). Values, not just counts."""
+    ref = reference(path, shape)
+    ex = state.get("executor_result") or {}
+    sink = ex.get("sink_container") or ((state.get("plan") or {}).get("containers_to_create") or [None])[-1]
+    if not ref or not sink or state.get("status") != "completed":
+        return {"checked": False}
+    r = requests.get(f"{API}/executor/download/{sink}", timeout=300)
+    if r.status_code != 200:
+        return {"checked": False, "error": f"download {r.status_code}"}
+    if STATE_DIR:   # keep the downloaded output as evidence
+        odir = os.path.join(os.path.dirname(STATE_DIR), "outputs")
+        os.makedirs(odir, exist_ok=True)
+        with open(os.path.join(odir, f"{state.get('run_id')}.csv"), "w") as f:
+            f.write(r.text)
+    out = list(csv.DictReader(r.text.splitlines()))
+    res = {"checked": True, "expected_rows": ref["rows"], "output_rows": len(out)}
+    if shape == "filter2":
+        try:
+            got = sum(int(float(o["quantity"])) for o in out)
+        except (KeyError, ValueError):
+            got = None
+        res["expected_sum_quantity"] = ref["sum_quantity"]
+        res["output_sum_quantity"] = got
+        res["correct"] = len(out) == ref["rows"] and got == ref["sum_quantity"]
+    else:
+        # The planner names the output columns; find the count and the average
+        # by value: a column matches if every region's value agrees with the
+        # reference (count exactly, average within 1e-6 relative).
+        exp = ref["per_region"]
+        by_region = {o.get("region"): o for o in out}
+        def matches(col, key, tol):
+            try:
+                return all(abs(float(by_region[g][col]) - v[key]) <= tol * max(1.0, abs(v[key]))
+                           for g, v in exp.items())
+            except (KeyError, ValueError, TypeError):
+                return False
+        cols = [c for c in (out[0].keys() if out else []) if c != "region"]
+        res["count_column"] = next((c for c in cols if matches(c, "count", 0)), None)
+        res["avg_column"] = next((c for c in cols if matches(c, "avg_unit_price", 1e-6)), None)
+        res["correct"] = (set(by_region) == set(exp) and res["count_column"] is not None
+                          and res["avg_column"] is not None)
+    return res
+
+
 def record(state, extra):
     pp = state.get("performance_prediction") or {}
     rp = state.get("resource_plan") or {}
@@ -117,7 +186,8 @@ def record(state, extra):
     }
 
 
-def batch(out, repeats=2):
+def batch(out, repeats=None):
+    repeats = repeats or int(os.getenv("PAPER_EVAL_REPEATS", "2"))
     log = open(os.path.join(out, "batch.jsonl"), "a")
     plans = {}
     for size, n in SIZES.items():
@@ -135,6 +205,7 @@ def batch(out, repeats=2):
             row = record(st, {"experiment": "batch", "size": size, "rows": SIZES[size],
                               "bytes": os.path.getsize(path), "shape": shape, "rep": rep,
                               **(pinfo if rep == 0 else {})})
+            row["output_check"] = verify(st, path, shape)
             log.write(json.dumps(row) + "\n")
             log.flush()
             print(size, shape, rep, row["status"], row["execution_s"], row["perf_predicted_total_s"],
@@ -239,12 +310,63 @@ def streaming(out, drops=3, rows_per_drop=2_000):
         requests.post(f"{API}/manager/stream/{sid}/stop")
 
 
+def pinned(out, repeats=2):
+    """Same plan, alternately with the Resource Agent's settings applied and
+    with the planner's own DIU / shuffle pinned (the Manager then leaves them
+    alone, _execution_plan) — i.e. without the Resource Agent's settings."""
+    log = open(os.path.join(out, "pinned.jsonl"), "a")
+    prompt = SHAPES["filter2"]
+    for size, n in SIZES.items():
+        path = os.path.join(out, f"sales_{size}.csv")
+        if not os.path.exists(path):
+            make_csv(path, n)
+        schema = detect(path)
+        cfg, pinfo = plan(schema, prompt)
+        print(f"planned {size}: {pinfo}", flush=True)
+        for rep in range(repeats):
+            for mode in ("resource_agent", "planner_pinned"):
+                c = json.loads(json.dumps(cfg))
+                if mode == "planner_pinned":
+                    for st_ in c.get("stages", []):
+                        st_["pinned_settings"] = sorted(set(st_.get("pinned_settings") or []) |
+                                                        {"diu", "shuffle_partitions"})
+                st = run(path, c, schema, prompt)
+                row = record(st, {"experiment": "pinned", "mode": mode, "size": size,
+                                  "rows": n, "rep": rep, **(pinfo if rep == 0 else {})})
+                row["planner_settings"] = {s_.get("name"): {"diu": s_.get("diu"),
+                                                            "shuffle": s_.get("shuffle_partitions")}
+                                           for s_ in cfg.get("stages", [])}
+                row["output_check"] = verify(st, path, "filter2")
+                log.write(json.dumps(row) + "\n")
+                log.flush()
+                print(size, mode, rep, row["status"], row["execution_s"], row["execution_settings"],
+                      row["output_check"].get("correct"), flush=True)
+
+
+def recheck(out, size="xs", shape="agg3", repeats=1):
+    """Plan and run one (size, shape) again and keep its downloaded output."""
+    log = open(os.path.join(out, "recheck.jsonl"), "a")
+    path = os.path.join(out, f"sales_{size}.csv")
+    if not os.path.exists(path):
+        make_csv(path, SIZES[size])
+    schema = detect(path)
+    cfg, pinfo = plan(schema, SHAPES[shape])
+    for rep in range(repeats):
+        st = run(path, cfg, schema, SHAPES[shape])
+        row = record(st, {"experiment": "recheck", "size": size, "shape": shape, "rep": rep, **pinfo})
+        row["output_check"] = verify(st, path, shape)
+        log.write(json.dumps(row) + "\n")
+        log.flush()
+        print(size, shape, rep, row["status"], row["output_check"], flush=True)
+
+
 if __name__ == "__main__":
     which, out = sys.argv[1], sys.argv[2]
     os.makedirs(out, exist_ok=True)
     STATE_DIR = os.path.join(out, "states")
     os.makedirs(STATE_DIR, exist_ok=True)
-    fn = {"batch": batch, "parallel": parallel, "streaming": streaming}[which]
+    fn = {"batch": batch, "parallel": parallel, "streaming": streaming, "pinned": pinned,
+          "recheck": recheck}[which]
     if which == "parallel" and len(sys.argv) > 3:
         fn(out, size=sys.argv[3])      # e.g. xs: the 3 MB fan-out plan is aborted by the perf gate
     else:

@@ -13,6 +13,9 @@ before importing the detector, and deletes that directory when it finishes.
 | `real_run_metrics.py` | Every number computed from real runs: success rate, runtime-prediction error per predictor, cost error with vs without the learned correction, per-stage error with vs without the Resource correction, monitor history (demo rows excluded), local LLM latency | the logs in `data/` | seconds |
 | `ablation_offline.py` | With vs without the **Resource Agent** (tier-limit violations and settings: model output vs planner after repair vs Resource Agent), the **Assurance gate** (fault injection through the real Manager validation → gate → executor pre-cloud checks; where each fault stops or what it would do in Databricks), and the **whole system** (what a person would write by hand) | nothing | ~2–4 min |
 | `live_benchmark.py` | Live Azure runs through the running backend: `batch` (3 sizes × 2 shapes × 2 repeats), `parallel [size]` (sequential vs parallel execution groups), `streaming` (single vs multi-stage, 3 data drops). Saves every run's full state | backend running (`uvicorn main:app`), Azure credentials in `.env`; **costs real Azure money** (≈ $0.02–0.08 per run by the cost formula) | batch ~45 min, parallel ~15 min, streaming ~10 min |
+| `offline_more.py` | Retry replay, fixed limit vs learned usual duration, live re-sizing replay, Learning-agent simulation (learning rates, regime change, aborted runs) — real agent code, temp files only | nothing | ~2 min |
+| `perf_no_baseline.py` | Runtime model with vs without the `baseline_s` features: retrains in a temp folder (production models untouched) and scores both on saved live run states | saved states in `data/paper_eval/live*/states/` | ~4 min CPU |
+| `groq_bare_eval.py` | Groq planner raw reply vs shipped (repaired), paired, N repeats; strict and fair (function-style aware) scoring; saves replies | `GROQ_API_KEY`; ~70,000 tokens per repeat (free tier: 200,000/day) | ~8–10 min per repeat |
 | `ablation_planner.py` | Planner with vs without **fine-tuning**, the **repair layer**, **self-check**, and the **LLM** itself (deterministic default) on 24 prompts × 3 schemas | Ollama running with `planner-agent` and `qwen2.5:7b-instruct` | Apple M5: ~75–90 s per case without the self-check conditions (~15 min for 12 cases); 2–4 min per case with them. Heavy local load — don't run it alongside live planning |
 | `offline_remainder.py` | Performance-gate thresholds on the synthetic held-out fold (needs the saved classifier pickle; records `not_run` and does not retrain when it is missing), anomaly precision/recall on a temporary database, filter-compiler fuzz, Resource ML vs heuristic on 1,000 dataset plans | the validated planner dataset on disk (`planner_agent/training/datasets/planner_config_dataset.jsonl`); the outcome-classifier pickle only for the threshold section. No Azure | ~15 min. The resource comparison is the slow part (~13 min). Set `PAPER_EVAL_ONLY` to `filter_fuzz`, `resource_ml`, `anomalies`, or `perf_gate` to run one section |
 | `groq_planner_eval.py` | Shipped Groq planner on the same 24 prompts and intent regexes as `ablation_planner.py` | `GROQ_API_KEY` in `.env`. No Azure, no Ollama. Retries a free-tier 429 | ~8 min on the free tier |
@@ -33,6 +36,12 @@ PAPER_EVAL_START=12 PAPER_EVAL_SKIP_FULL=1 python scripts/paper_eval/ablation_pl
 python scripts/paper_eval/live_benchmark.py batch     /tmp/live
 python scripts/paper_eval/live_benchmark.py parallel  /tmp/live_xs xs
 python scripts/paper_eval/live_benchmark.py streaming /tmp/live
+PAPER_EVAL_REPEATS=4 python scripts/paper_eval/live_benchmark.py batch /tmp/live   # with output checks
+python scripts/paper_eval/live_benchmark.py pinned  /tmp/live    # Resource Agent settings vs planner's pinned
+python scripts/paper_eval/live_benchmark.py recheck /tmp/live    # one (size, shape) again, output saved
+python scripts/paper_eval/offline_more.py      /tmp/offline_more.json
+python scripts/paper_eval/perf_no_baseline.py  /tmp/perf_no_baseline.json
+python scripts/paper_eval/groq_bare_eval.py    /tmp/groq.json 1
 ```
 
 The results used in `docs/PAPER_RESULTS.md` Part B are kept in `data/paper_eval/` (git-ignored).

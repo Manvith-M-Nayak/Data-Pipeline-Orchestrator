@@ -141,6 +141,14 @@ cooperating agents, each owning exactly one decision (`docs/RESPONSIBILITIES.md`
 | H30 | Live serverless batch, Groq plans | **12/12** completed, 0 retries, post-assurance passed — **but the 6 filter runs kept ~90% of rows where the request keeps ~15%: completed ≠ correct** (§B13.2). Formula prediction MAPE **60.2%** high (median 53.8%) before the duration fix | 12 | ⚠️ 2026-10-05, output not correct | B13.2 |
 | H31 | Same 12 executions rescored after the Resource duration fix — **in-sample (factors learned from these runs); do not cite as prediction accuracy** | resource estimate MAPE 8.3% (median 7.4%, bias +1.9%); formula card 17.8% low; cost agent 14.3% low; manager quick estimate 83.3% low | 12 | ⚠️ in-sample fit | B14 |
 | H32 | Performance-gate abort rule on the synthetic held-out fold (21,000 rows, 1,473 failures) | current rule (top class = failure): precision **53.9%**, recall **68.3%**; P(failure) ≥ 0.7: **73.2% / 45.5%**; ≥ 0.9: **93.2% / 14.8%** | 21,000 | ✅ 2026-10-05 | B10.1 |
+| H33 | Automatic retries on logged failures | **0 / 4** retried runs recovered (all deterministic) | 4 | ✅ 2026-10-05 | B15.1 |
+| H34 | Fixed 900 s limit vs learned usual duration (simulated, 4 pipeline sizes, injected 2× slowdowns) | recall **25% vs 58%**, precision **11% vs 64%** | 108 judged runs | ✅ 2026-10-05 | B15.2 |
+| H35 | Learning agent, simulated true bias 0.6, production settings | duration MAPE **67.9% → 7.2%** in ~35 runs; 0 false rollbacks with aborts mixed in; after a regime change the first 3 correct moves were rolled back (~30-run delay) | 80–120 sim runs | ✅ 2026-10-05 | B15.4 |
+| H36 | Runtime model without the "circular" `baseline_s` features, out-of-sample live runs | MAPE **36.5% (with) vs 142.1% (without)**; same abort verdicts | 8 executed | ✅ 2026-10-05 | B15.5 |
+| H37 | Live batch after the duration fix (24 runs, outputs verified against a local reference) | 20 completed, **16 / 20 outputs correct** — all 4 wrong ones from one plan hit by a repair-layer bug; 3 gate aborts, 1 upload timeout | 24 | ✅ 2026-10-05 | B16.1–B16.2 |
+| H38 | Out-of-sample estimates after the duration fix | Resource **14.4%**, Performance ML **18.4%** MAPE (were 53.6% / 51.1%); cost agent 17.9% without vs 24.5% with the stale learned factor | 19–20 | ✅ 2026-10-05 | B16.3 |
+| H39 | Resource Agent settings vs planner's own, live | no gain at 1,000 / 50,000 rows; 25 MB: **135 s vs 104 s** (its DIU 2 slower) | 12 | ✅ 2026-10-05 | B16.7 |
+| H40 | Groq gpt-oss-120b, 3 repeats, raw vs repaired (strict scoring) | correct **50.0% ± 3.4 → 52.8% ± 3.9** (52.1% → 55.0% excluding 3 API-error fallbacks); a lower bound — see fair re-score | 72 calls | ✅ 2026-10-05 | B16.6 |
 
 ---
 
@@ -568,7 +576,9 @@ In the v1 model, the single strongest feature was `baseline_s` — the Resource 
 duration formula — with importance **0.908**. The "ML" runtime was mostly a rescaled
 heuristic. This motivated the single-owner rule (`docs/RESPONSIBILITIES.md`): Resource owns
 *settings*, Performance owns *runtime*. Good paper material for C3; the clean fix (drop
-`baseline_s`/`resource_estimate_s` from features) is still 🧪 open — run it and compare.
+`baseline_s`/`resource_estimate_s` from features) **was measured in §B15.5 and is a bad fix**:
+without them the runtime error on out-of-sample live runs goes from 36.5% to 142.1%. Replace the
+feature with the Resource Agent's settings instead of deleting it.
 
 ### 6.5 Runtime prediction on real runs 🧮 (key real-world result)
 
@@ -698,7 +708,7 @@ Four silent failures, each invalidated a factor without any error: field-name mi
 instead of 0.5–1.15, factor driven to the 2.0 ceiling), filtering on a field removed by
 normalization, and a cost stub that never moved.
 
-### 8.5 🧪 To run
+### 8.5 Simulation ✅ (§B15.4) — remaining items below are done there
 
 - Same paired analysis for duration once ≥ 10 ML-path runs exist.
 - Simulation: replay a synthetic stream with a known bias (e.g. true ratio 0.6) and plot
@@ -857,17 +867,17 @@ logged paired data; the rest need runs. Two kinds of runs:
 | A5 | No self-check / re-plan | correct | ✅ §B1 | 11/12 vs 12/12 (sales prompts) |
 | A6 | No intent guards (Guard 1/2) | intent-check accuracy, false flags | 🧪 offline | progression 15/18 → 27/27 (§4.2) |
 | A7 | No structural assurance gate | faulty plans reaching Databricks | ✅ §B3 | 600/1,400 (43%) vs 0; 400 of them silently wrong |
-| A8 | No Resource Agent (planner's settings used) | plans over tier limits | ✅ §B2 (offline) | 18.6% vs 0%; live runtime/cost 🧪 |
+| A8 | No Resource Agent (planner's settings used) | plans over tier limits; live runtime and cost | ✅ §B2 offline, §B16.7 live | 18.6% vs 0% over limits; live (12 runs): no gain at 1,000 / 50,000 rows; at 25 MB the Resource Agent's DIU 2 was slower than the planner's DIU 4 (135 s vs 104 s) |
 | A9 | Resource heuristic only (no ML) | settings agreement, runtime | ✅ settings §5.5 / 🧪 runtime | original dataset: notebook workers agree on 43.3% of 2,185 stages (mean abs. diff 0.93); copy DIU on 47.9% of 1,000 (mean abs. diff 1.58). Heuristic memory over 64 GB on 186/1,000 plans; ML on 0 (regenerated dataset: 44.2%, 48.2%, 190) |
 | A10 | No Resource correction factor | per-stage MAPE | 🧮 | 151%/224% vs 60%/62% (§5.4) |
 | A11 | Performance formula only (no ML) | runtime MAPE | 🧮 | 81.3% vs 8.8% (§6.5) |
 | A12 | No Performance gate (never abort on predicted failure) | runs aborted that would have run | ✅ partial §B5.4/B7 | gate aborted 4/12 live runs at P ≈ 0.5; same stages completed when grouped in parallel |
-| A13 | No Cost Optimization | formula cost, runtime | 🧪 live | currently identical (fail-closed, no change applied) |
+| A13 | No Cost Optimization | formula cost, runtime | ✅ §B16.4 | identical — 0 changes in 20 live runs even with a learned deadline: its own runtime check rejects every cheaper candidate at +20% budget |
 | A14 | No Learning agent (factors = 1.0) | cost MAPE | 🧮 | 50.3% vs 29.9% (§8.2) |
-| A15 | No retries | success rate, time | 🧪 replay | 4 of 34 runs retried twice; all still failed (deterministic causes) |
+| A15 | No retries | success rate, time | ✅ §B15.1 | 4 of 54 runs retried twice; **0 recovered** (deterministic causes); each cost 2 extra runs + 40 s |
 | A16 | No `retryable:false` classification | wasted time on deterministic failures | ✅ | 3 attempts → 1, −40 s backoff (§10.2) |
 | A17 | Sequential vs parallel execution groups | execution time | ✅ §B7 | 143.7 s vs 92.4 s (−35.7%) |
-| A18 | No Monitor feedback to `dynamic_reallocate` | reaction to slow stages | 🧪 simulation | — |
+| A18 | No Monitor feedback to `dynamic_reallocate` | reaction to slow stages | ✅ §B15.3 | not wired today (API only); on 14 live runs it would say 32 ok, 4 reclaim, 0 scale-up |
 
 ### 12.2 Cumulative "agent stack" table (adding agents one at a time)
 
@@ -876,9 +886,9 @@ agents" table:
 
 | Stack | Agents on | Plan valid % | Intent % | Run success % | Runtime pred. MAPE | Cost est. MAPE | Avg formula cost | Wasted cloud s |
 |---|---|---|---|---|---|---|---|---|
-| S1 | Planner (raw LLM) + Executor | 🧪 | 🧪 | 🧪 | n/a | n/a | 🧪 | 🧪 |
-| S2 | + repair layer | 🧪 | 🧪 | 🧪 | n/a | n/a | 🧪 | 🧪 |
-| S3 | + Assurance (self-check + gate) | 🧪 | 🧪 | 🧪 | n/a | n/a | 🧪 | 🧪 |
+| S1 | Planner (raw LLM) + Executor | **33%** (§B1) | **96%** | 🧪 | n/a | n/a | 🧪 | 🧪 |
+| S2 | + repair layer | **100%** | **96%** | 🧪 | n/a | n/a | 🧪 | 🧪 |
+| S3 | + Assurance (self-check + gate) | **100%** (gate stops all 1,400 injected faults, §B3) | **100%** (n = 12) | 🧪 | n/a | n/a | 🧪 | 🧪 |
 | S4 | + Resource | 🧪 | 🧪 | 🧪 | 🧪 (heuristic) | n/a | 🧪 | 🧪 |
 | S5 | + Performance | 🧪 | 🧪 | 🧪 | 🧪 | n/a | 🧪 | 🧪 |
 | S6 | + Cost | 🧪 | 🧪 | 🧪 | 🧪 | 🧪 | 🧪 | 🧪 |
@@ -917,10 +927,10 @@ results can be grouped.
 |---|---|---|
 | Manual authoring (ADF UI + notebook by hand) | time-to-pipeline, errors; 3–5 users, 3 tasks | 🧪 small user study |
 | Single general LLM (GPT-class / Groq) writing the whole config, no agents | plan validity, intent, executability | 🧪 offline |
-| Rule-based template (the deterministic default) | intent coverage | 🧪 offline |
+| Rule-based template (the deterministic default) | intent coverage | ✅ §B15.6: 0% correct on 24 prompts (always executable) |
 | Base Qwen2.5-7B (no fine-tune) | 8 checks | ✅ §3.3–3.4 |
 | Heuristic resource sizing | settings, runtime | 🧮 §5.4, 🧪 live |
-| Fixed SLA vs learned usual duration | false "slow" alarms across file sizes | 🧪 replay |
+| Fixed SLA vs learned usual duration | false "slow" alarms across file sizes | ✅ §B15.2 (simulated): fixed 900 s 25% recall / 11% precision vs learned 58% / 64% |
 
 ---
 
@@ -988,6 +998,11 @@ results can be grouped.
   tested on runs it did not learn from.
 - The duration fix substitutes a median raw estimate for older feedback rows that were pinned
   to the 120 s cold-start floor (`_run_ratios`); a heuristic imputation, disclosed in §B14.
+- Repair-layer bug (§B16.2): a duplicated container name is de-duplicated by name, so a stage can
+  read and write the same container; the run completes with wrong output and passes every check.
+- The notebook builder does not compile every function-style filter the Groq prompt teaches
+  (e.g. `greater(toDouble(x), n)`), §B16.6.
+- After the duration fix, the previously learned cost factor over-corrects until relearned (§B16.3).
 - Since the cast fix, a column literally named like a SQL type (`date`, `string`,
   `timestamp`, `int`, …) is no longer checked by the gate's column-reference rule (none in the
   current data).
@@ -1713,15 +1728,27 @@ will ask for the measurement.
    pickles are still absent). Each pipeline was repeated only twice, so the cost agent's
    learned deadline (3 comparable runs) did not start, and it applied 0 cheaper settings.
    The duration and cost errors were rescored after the Resource duration fix (§B14), but
-   in-sample. 🧪 **Next:** a fresh batch after the fix (same six pipelines, three repeats) to
+   in-sample. **Done on 2026-10-05 (§B16):** a fresh 24-run batch after the fix gives the
+   out-of-sample errors (Resource 14.4%, Performance 18.4%) and arms the cost deadline (still 0
+   savings, §B16.4). The text below is the plan that was followed. 🧪 (Original next step:) a fresh batch after the fix (same six pipelines, three repeats) to
    measure the fix out-of-sample, and arm the cost agent's deadline; check each filter
    output against the expected row counts (§B13.2) before calling a run correct.
 6. **Groq planner — done** on the same 24 prompts (§B13). Correct 58.3% versus 96% for the
    local fine-tuned model plus repair. The October 3 B1 table is unchanged.
 7. **Anomaly detector P/R — done** as a constructed-signal check (§9.2, §B12.8). Eight kinds,
    5 positives + 20 normals each, precision 100%, recall 100%, normal false-positive rate 0%.
-8. **Retrain performance model without `baseline_s`** (circular feature) and compare on B5 runs.
+8. **Retrain performance model without `baseline_s` — done (§B15.5):** worse on live runs
+   (36.5% → 142.1% MAPE); keep the feature or replace it with settings features.
    🧪 still to run.
+
+**Remaining after 2026-10-05 (everything else in this list is done, see §B15–§B16):**
+- ⏱ Timed human study (§B8.2) — needs people.
+- 🧪 Groq fair re-score (§B16.6) — blocked by the free tier's daily token limit; 1 repeat ≈ 70,000 tokens.
+- 🧪 §B1 ×3 repeats and the self-check on zoo/IoT — local model; run when the laptop can take the load.
+- 🧪 The aborted plans with the gate off — the authors' decision (or adopt a threshold, §B10.1).
+- 🧪 Fix the repair-layer bug (§B16.2) and recalibrate ADF throughput per DIU (§B16.7), then re-run.
+- 🧪 GPU-only items: validation loss, v1 vs v2 dataset fine-tune, in-distribution n (Part A §3).
+- 🧪 Human labels for LLM root-cause accuracy (Part A §9.3).
 
 ### B10.1 Performance-gate threshold sweep ✅ (run 2026-10-05 on the original machine)
 
@@ -1915,9 +1942,10 @@ runs. The cost agent's learned factor 0.8475 and the formula card's history adju
 (0.80–0.81) are learned from the same log. The booking run below was in the same session.
 **Also disclosed:** older feedback rows whose duration was pinned to the 120 s cold-start
 floor do not carry the formula's raw value; `_run_ratios` substitutes the median raw of the
-unpinned rows of that stage type for them (an imputation). 🧪 **To make this a result:** run a
-new batch after the fix (files and shapes not used to learn the factors, or a time split:
-learn on the first runs, score the later ones) and report that error.
+unpinned rows of that stage type for them (an imputation). **Out-of-sample result now
+available (§B16.3):** on a fresh 2026-10-05 batch, each estimate made before its run, the
+corrected Resource estimate has **14.4%** MAPE (n = 19; 18.3% including one 976 s Databricks
+delay). Cite that, not the 8.3% above.
 
 **Resource estimate** (the agent's own critical-path seconds):
 
@@ -2087,7 +2115,8 @@ executability 33% → 100%; the self-check fixes the remaining lost-intent case 
 | Per-stage duration estimate error (its own feedback loop) | 60% (copy), 62% (notebook) | 151% / 224% raw heuristic | A5.4 |
 | Duration estimate on the 2026-10-05 runs, before the fix | formula card 60.2% high | — | B13.2 |
 | Duration estimate on those same executions, after the fix | resource estimate 8.3% (median 7.4%, bias +1.9%); formula card 17.8% low — **in-sample fit, not prediction** | — | B14 |
-| Live with/without runtime and cost (planner settings pinned) | ⏱/🧪 not measured | — | B2, §5.5 |
+| Live with/without runtime and cost (planner settings pinned) | 1,000 / 50,000 rows: 83 vs 91 s, 93 vs 89 s (no difference beyond noise); 25 MB: **135 s with vs 104 s without** (its DIU 2 copy was slower) | planner's own DIU / shuffle | B16.7 |
+| Duration estimate after the fix, **out-of-sample** | **14.4%** MAPE (n = 19) | — | B16.3 |
 
 Note: on serverless Databricks only DIU and shuffle partitions are actually applied; workers and
 node type are advisory (A17).
@@ -2152,3 +2181,294 @@ and its gate currently costs runs. The clearest value so far is in-distribution 
 | Streaming layout | multi-stage 78.8 s per update | single-stage **46.8 s** | −40.6%, identical output | B6 |
 | Batch vs streaming for new data | batch run ~93 s (1,000 rows, incl. copy) | streaming tick ~47 s (2,000 new rows) | ~half | B5, B6 |
 | Planner backend | fine-tuned local 7B | base 7B | correct 96% vs 4% (with repair) | B1 |
+
+---
+
+## B15. Offline results run on 2026-10-05 ✅ (no cloud, no LLM)
+
+**How:** `scripts/paper_eval/offline_more.py` (retry replay, fixed-limit replay, re-sizing
+replay, learning simulation) and `scripts/paper_eval/perf_no_baseline.py` (runtime model
+without the Resource-estimate features). Both drive the real agent code. Simulations use
+temporary policy/feedback files; history is only read; the production model files were not
+touched (checked: unchanged timestamps; the feedback logs and policy files have the same md5
+before and after). Results: `data/paper_eval/offline_20261005/`.
+
+### B15.1 Automatic retries — with vs without (A15)
+
+| | Value |
+|---|---|
+| Managed runs in the log | 54 |
+| Runs that used automatic retries | 4 (all with 2 retries) |
+| **Retried runs that then succeeded** | **0 / 4** |
+| Cost of each fully retried run | 2 extra executions + 40 s back-off (logged totals 48–505 s) |
+
+**Why:** all 4 failures were deterministic (e.g. the uncompilable `predator IS TRUE` filter),
+and a retry repeats the same deterministic error. **Meaning:** in this history, retries
+recovered nothing and only added time — which is why deterministic failures are now
+classified `retryable: false` (§10.2). Retries remain useful for transient cloud errors, none
+of which occurred in the logs, so their benefit is untested here.
+
+### B15.2 Fixed time limit vs learned "usual duration" (§13 baseline)
+
+**How:** simulated pipelines of 1 MB, 50 MB, 500 MB and 2 GB (typical runtimes 95, 140, 420 and
+1,150 s, ±10% noise), 30 runs each; every 10th run is a genuine 2× slowdown. Each run is judged
+by (a) the old fixed 900 s limit and (b) the real `_expected_duration` rule (p95 of the pipeline's
+own last ≤ 20 comparable completed runs, ≥ 3 needed). Slow runs stay in the history (no cleaning).
+Scored on the 108 runs both rules could judge (12 slow).
+
+| Rule | Caught slow runs (recall) | Alarms that were real (precision) | False alarms |
+|---|---|---|---|
+| Fixed 900 s limit | 3 / 12 (**25.0%**) | 3 / 27 (**11.1%**) | 24 — every normal run of the 2 GB pipeline |
+| **Learned usual duration** | 7 / 12 (**58.3%**) | 7 / 11 (**63.6%**) | 4 |
+
+**Why:** a fixed limit never fires on small pipelines (a 95 s job that takes 190 s is still
+under 900 s) and always fires on large ones. The learned rule compares each pipeline with its
+own history. Its recall is limited because a slow run, once in the history, raises the p95.
+**Meaning:** supports the design change in Part A §6.6 with a measured comparison (simulated data).
+
+### B15.3 Live re-sizing from Monitor data (A18)
+
+`ResourceAgent.dynamic_reallocate` is **not called during runs** — only through
+`POST /api/resource/reallocate`. So "without Monitor feedback to re-sizing" is how the system
+runs today. Replayed on the 14 completed live runs (actual time split across stages by
+predicted share): **32 "ok", 4 "reclaim" (finished in < 0.4× the prediction), 0 "scale up"**.
+**Meaning:** on these runs, wiring it in would only have suggested giving resources back,
+never adding; there is no measured benefit to claim yet.
+
+### B15.4 Learning & Policy agent — simulation (§8.5)
+
+**How:** simulated managed runs through the agent's real code path (`FeedbackCollector.normalize`
+→ `ErrorAnalyzer.analyze` → `PolicyEngine.evaluate_and_apply`, including the rollback review), one
+learning cycle per 5 runs, temporary policy files, a simulated clock. Each run: raw ML prediction
+~100 s and raw cost ~$0.05; the current factors are applied as the Manager does; actual =
+raw × true ratio × lognormal noise (sd 10%). True ratio 0.6 (the system over-estimates).
+
+| Learning rate | Final duration factor (truth 0.6) | Duration MAPE first 10 → last 10 runs | Cost MAPE first 10 → last 10 | Updates / confirmed / rolled back |
+|---|---|---|---|---|
+| 0.1 | 0.687 | 67.9% → 15.1% | 71.3% → 16.4% | 30 / 28 / 0 |
+| **0.3 (production)** | **0.641** | **67.9% → 7.2%** | **71.3% → 8.0%** | 12 / 12 / 0 |
+| 0.5 | 0.619 | 67.9% → 6.6% | 71.3% → 6.1% | 8 / 8 / 0 |
+
+Production trace (duration factor every 5 runs): 1.0, 1.0, 0.880, 0.796, 0.734, 0.692, 0.662,
+0.641, then constant. It stops ~0.04 above the truth because an update needs the observed ratio
+to differ from the factor by more than 0.05 (a dead-band in `evaluate_and_apply`).
+
+| Scenario | Result |
+|---|---|
+| **Aborted runs every 4th run** (0.1 s "duration") | converges the same way (0.630), **0 false rollbacks** — the 2026-10-05 filter fix works |
+| **Regime change** at run 60 (true ratio 0.6 → 1.2) | the first 3 corrections toward the new truth (runs 69, 79, 89) were **rolled back**, each with duration and cost (6 rollback events); adaptation only stuck from run 99; factor 1.095 by run 119 |
+
+**Why the regime-change rollbacks happen:** the review compares error *after* a change with error
+*before* it. Before the shift the old factor was accurate; after the shift every factor near the
+old one is badly wrong, so a correct partial move still shows a higher error than the pre-shift
+period and is reverted. **Meaning:** the rollback safety net protects against bad updates in a
+stable environment, but it delays adaptation by ~30 runs when the environment itself changes —
+a limitation worth stating (a fix would be to compare against the old factor's error on the
+*same* post-change runs).
+
+### B15.5 Runtime model without the "circular" Resource-estimate features (§6.4)
+
+**How:** `perf_no_baseline.py` retrains the Performance model with the same script and data but
+without `baseline_s` and `resource_estimate_s`, in a temporary folder, then scores both models on
+the 20 saved live run states with the exact inputs the Manager used (plan + schema + file size).
+Check: the production model's recomputed verdicts match the logged ones in **20 / 20** runs.
+
+| | With the two features (production) | Without |
+|---|---|---|
+| Synthetic test set: duration MAE / R² | 224.0 s / 0.871 | 244.0 s / 0.855 |
+| Synthetic outcome balanced accuracy | 0.716 | 0.718 |
+| **Live runs, out-of-sample for both** (8 executed of 12) — duration MAPE | **36.5%** | **142.1%** |
+| All 20 live runs (14 executed) — duration MAPE | 45.3% | 126.6% |
+| "Failure" verdicts on the 12 out-of-sample runs | 4 | 4 (same runs) |
+
+(Raw model outputs, without the learned correction factor, so the 36.5% is not the same number as
+§B5.3.) **Why:** the Resource estimate is the only input that carries a per-stage time model; the
+synthetic target is built from it, and without it the model falls back on size and stage counts,
+which predict serverless runs badly (they are dominated by start-up time). **Meaning:** the
+"circular" feature is informative — dropping it makes real predictions ~4× worse and does not
+change a single abort. The cleaner fix is to *replace* it with the Resource Agent's settings
+(workers, DIU, node, memory), not to delete it; until then, keep it.
+
+### B15.6 Rule-based template baseline (§13)
+
+The deterministic default plan (`build_default_config`) is the rule-based baseline: on the 24
+§B1 prompts it is always executable and **0% correct** (it never applies the requested filter or
+aggregation), at 0.008 ms per plan. Recorded in §13.
+
+---
+
+## B16. Live batch, Resource with/without, and Groq repeats — 2026-10-05 (original machine) ✅
+
+**Setup:** the same backend and Azure for Students subscription as §B5, after the teammate's
+fixes in `9aa21b6` (Resource duration fix, rollback filter, cast fix). Planner = the local
+fine-tuned model. Before the runs, the feedback logs, monitor DB, learning state and the
+Performance model files were backed up to `data/paper_eval/state_backup_before_live_20261005/`.
+Data: `data/paper_eval/live_20261005_mac/`. Script: `live_benchmark.py batch` with
+`PAPER_EVAL_REPEATS=4` (the Cost agent's learned deadline needs 3 earlier comparable runs).
+**New in this batch:** every completed run's output is downloaded and compared with a reference
+computed locally from the same seeded CSV — for the filter, row count and the sum of `quantity`;
+for the aggregation, each region's count and average `unit_price` (matched by value, whatever the
+planner named the columns).
+
+### B16.1 Outcomes (24 runs = 6 pipelines × 4 repeats)
+
+| Pipeline | Run 1 | Run 2 | Run 3 | Run 4 |
+|---|---|---|---|---|
+| 1,000-row filter | ✅ 117.8 s | ✅ **976.1 s** (Databricks delay) | ✅ 83.6 s | ✅ 94.5 s |
+| 1,000-row aggregation | ❌ wrong output 150.6 s | ❌ wrong output 136.6 s | ❌ wrong output 150.3 s | ❌ wrong output 130.2 s |
+| 50,000-row filter | ✅ 140.9 s | ✅ 83.2 s | ✅ 105.1 s | ✅ 85.7 s |
+| 50,000-row aggregation | ✅ 186.0 s | ✅ 142.5 s | ✅ 152.0 s | ✅ 158.0 s |
+| 400,000-row filter | ⚠️ upload timed out ×3 | ✅ 133.7 s | ✅ 119.2 s | ✅ 120.4 s |
+| 400,000-row aggregation | ⛔ gate abort (P 0.48) | ✅ 167.8 s, correct | ⛔ gate abort (P 0.47) | ⛔ gate abort (P 0.47) |
+
+✅ = completed and output verified correct; ❌ = completed but output wrong; ⛔ = aborted before
+running by the Performance gate.
+
+**Totals:** 20 / 24 completed; **16 / 20 completed runs had correct output**; 3 gate aborts;
+1 failure (upload). All 6 plans were verified by the planner's self-check on the first attempt
+(42–56 s each).
+
+### B16.2 Bug found: the repair layer can make a stage read and write the same container ❌
+
+All 4 wrong outputs come from one plan. Its first notebook stage reads and writes `transform-2`,
+so the aggregation stage reads `transform-2` holding **both the copied raw rows and the filtered
+rows**, and aggregates over both: 5 regions, plausible numbers, wrong counts and averages. A
+re-check run with a fresh plan for the same request hit the same flaw in a different form (the
+copy wrote to `transform-2`, the notebook read the empty `transform`, the run failed 3×).
+
+**Root cause, reproduced offline:** the model emitted the container name `transform` twice.
+`_normalize_container_names` makes the duplicate unique (`transform-2`) but remaps every
+reference **by name**, so references meant for the first `transform` are rewritten to the second
+one as well, and the dataset list ends up with `DS_Transform` twice. `plan_safety_issues` and the
+structural gate both pass the result.
+**Suggested fix (not applied):** de-duplicate by position (stage *i* reads container *i*, writes
+*i + 1*), and add a gate rule: no stage may read and write the same container, dataset names
+must be unique, and each stage's source must be the previous stage's sink.
+**Paper value:** a concrete case where a run "completes", passes post-run assurance, and is
+wrong — found only because outputs were checked against a reference. 1 of 6 plans in this batch.
+
+### B16.3 Prediction accuracy after the duration fix — out of sample ✅
+
+Every estimate was made before its run, from earlier runs only. 20 completed runs; one row
+excludes the 976 s run, whose delay was inside Databricks.
+
+| Estimate | n | MAPE | Median | Bias | 2026-10-03 (before the fix, §B5.3) |
+|---|---|---|---|---|---|
+| **Resource duration** | 19 | **14.4%** | 10.9% | −3.8% | 53.6% |
+| Resource duration, all runs | 20 | 18.3% | 11.5% | −8.2% | — |
+| **Performance ML** | 19 | **18.4%** | 15.6% | +4.2% | 51.1% |
+| Performance ML, all runs | 20 | 22.0% | 16.4% | −0.5% | — |
+| Cost agent **with** learned correction (×0.795) | 20 | 24.5% | 16.5% | −21.1% | 27.4% |
+| Cost agent **without** learned correction | 20 | **17.9%** | 11.2% | −8.1% | 51.9% |
+| Manager quick estimate | 20 | 88.2% | 89.5% | −88.2% | 84.3% |
+
+**Why:** the duration fix removed the 120 s floor that stopped the learned factor from having any
+effect, so the Resource estimate now tracks serverless runs; the Performance model improves with
+it because its strongest input is that estimate (§B15.5). **This is the out-of-sample check §B14
+needed: 14.4%, not the in-sample 8.3%.**
+**New interaction:** the learned cost factor (0.795) was learned while the old duration estimates
+were too high. With the fix, estimates are no longer inflated, so the old factor now over-corrects
+(estimates 21% too low) and *with* learning is worse than *without* (24.5% vs 17.9%) until the
+learning agent relearns. Fixing one agent shifted another agent's learned correction.
+**And it did relearn, live (§B16.8):** over all 32 completed runs of the evening (batch + §B16.7),
+cost error with vs without the learned factor was 36.1% vs 29.0% on the first 10 runs and
+**9.5% vs 8.6%** on the last 10, as the factor moved 0.795 → 1.106.
+
+### B16.4 Cost agent: deadline armed, still no savings — why ✅
+
+From run 3 of each pipeline the learned "usual duration" existed, so the Cost agent got a deadline
+(max +20% over the prediction). It still made **0 recommendations in all 20 runs**. Traced on the
+saved runs: its model's cheaper configurations were rejected by its own runtime check — the
+projected runtime (prediction × worst stage slowdown) exceeded the deadline — and once by the
+memory check. **Meaning:** with a +20% runtime budget, the fail-closed design accepts no saving on
+these pipelines, so with and without the Cost agent the runs and the cost are identical.
+
+### B16.5 Other live observations
+
+- **Performance gate:** aborted 3 of 4 runs of the 400,000-row aggregation (P(failure)
+  0.47–0.48); the one run it let through **completed with correct output** — direct evidence that
+  the aborts were false (see §B10.1 for the threshold sweep).
+- **Learned usual duration is sensitive to one outlier:** after the 976 s run, the 1,000-row
+  filter's "usual" jumped from 117.8 s to 976.1 s for the next two runs (with few comparable runs,
+  the p95 is simply the maximum), so "slower than usual" could not fire for that pipeline until
+  enough normal runs push the outlier out (window: last 20 runs).
+- **First transient failure:** the 25 MB upload to Blob storage timed out on all 3 attempts (same
+  file uploaded fine on 2026-10-03). Retries were the right response but did not recover it.
+- **Anomaly detector, real events (field check):** 4 events raised automatically —
+  `slow_runtime` on the 976 s run ("6.9× this pipeline's p95") ✅, `retry_storm` on the upload
+  failure ✅, `timeout` on the upload failure ⚠️ (mislabelled: the run ended; the message contained
+  "timed out"), `failure` on a gate abort ⚠️ (the run never executed). 2 / 4 labels clearly correct.
+
+### B16.6 Groq planner, 3 repeats, raw vs repaired (paired) ✅ / fair re-scoring 🧪
+
+`groq_bare_eval.py`, 24 prompts × 3 repeats, the raw reply captured before repair (same sample).
+$0.074 for all 72 calls; median 19.7 s per plan; 3 fallbacks — all three were API errors
+(no tokens returned, rate-limit retries exhausted), not model failures. Excluding them:
+**raw 52.1%, shipped 55.0% correct** (mean of the 3 repeats).
+
+| Groq gpt-oss-120b (strict scoring, as §B1) | Executable | Intent | **Correct** |
+|---|---|---|---|
+| Raw reply, no repair | 75.0% ± 3.4 | 63.9% ± 4.0 | **50.0% ± 3.4** |
+| With the repair layer (shipped) | 80.6% ± 1.9 | 66.7% ± 3.4 | **52.8% ± 3.9** |
+| (local fine-tuned, §B1, for reference) | 33% → 100% | 96% | 33% → **96%** |
+
+**Why repair barely helps Groq:** the large model already follows the contract (it is given the
+full rule book in its prompt), so there is little to repair; its weakness is intent.
+**Scoring caveat found while checking misses:** the Groq prompt teaches *function-style* filters
+(`equals(region,'EU')`, `greater(toInteger(quantity), 9)`), which are correct and compile, but the
+§B1 intent regexes expect SQL style, so some Groq "misses" are scoring artefacts. A fair re-score
+(function style translated to SQL; `> 9` ≡ `>= 10` on integer columns only; implemented in
+`groq_bare_eval.py`, which now also saves every reply) was started but **stopped**: the free
+tier's 200,000 tokens/day limit was reached (the 3 repeats used ~214,000), and every further call
+fell back to the default plan. 🧪 Re-run once the rolling 24 h window frees up
+(`groq_bare_eval.py out.json 1` needs ~70,000 tokens). Until then, read Groq's intent and correct
+rates as **lower bounds**.
+Also found: `greater(toDouble(temperature), 30)` does **not** compile — the notebook builder does
+not fully support the function style that the Groq prompt teaches (a real gap, independent of
+scoring).
+
+### B16.7 With vs without the Resource Agent's settings — live ✅
+
+**How:** `live_benchmark.py pinned`. One plan per file size for the filter request; each run
+twice with the Resource Agent's settings applied (normal) and twice with the planner's own DIU and
+shuffle pinned (`pinned_settings`, so `_execution_plan` leaves them alone) — alternating, same
+plan, same file. Everything else (gates, predictions, executor) is identical. 12 runs, **12/12
+completed with verified-correct output**. Phase times from each run's decision log.
+
+| File | Settings that differ | With Resource Agent | Without (planner pinned) | Upload + ADF copy phase, with / without |
+|---|---|---|---|---|
+| 1,000 rows | shuffle 8 vs 4 | 83.0 s (83.3, 82.8) | 91.2 s (101.4, 81.1) | 49.7 / 47.8 s |
+| 50,000 rows | shuffle 8 vs 4 | 93.0 s (93.0, 93.0) | 89.1 s (84.7, 93.5) | 49.4 / 50.8 s |
+| **25 MB** | **copy DIU 2 vs 4** | **135.2 s** (145.3, 125.1) | **103.5 s** (103.9, 103.0) | **81.1 / 60.0 s** |
+
+Formula cost per run (at measured runtime): 1,000 rows $0.0236 vs $0.0259; 50,000 rows $0.0264 vs
+$0.0253; 25 MB **$0.0387 vs $0.0299**.
+
+**Why:** on these sizes Spark shuffle partitions make no measurable difference (the notebook
+phase is dominated by serverless start-up). On the 25 MB file the Resource Agent chose 2 DIU
+instead of the planner's 4 — its sizing (calibrated to a ~55 s copy at 5 MB/s per DIU) expected 2 DIU to be enough —
+but the real copy phase took 81 s at 2 DIU vs 60 s at 4 DIU (both repeats), so its cheaper setting
+made the run ~31% slower and, because the formula cost is duration-driven, not cheaper.
+**Meaning (honest):** live, the Resource Agent's settings did **not** improve runtime or cost at
+these sizes; on the one setting that mattered (copy DIU at 25 MB) it was worse. Its measured value
+is enforcing the tier limits (§B2) and the duration estimate (§B16.3), not faster runs. Its ADF
+throughput assumption (5 MB/s per DIU, `ADF_MB_PER_DIU_PER_S`) should be recalibrated from these
+copy times. n = 2 per cell.
+
+### B16.8 Learning & Policy agent during the live runs ✅
+
+From `learning_policy_agent/data/learning_log.jsonl`, 15:43–16:59 UTC on 2026-10-05 (6 learning
+cycles, one per 5 runs; aborted and failed runs mixed in):
+
+| What happened | Detail |
+|---|---|
+| Cost factor relearned | 0.795 → 0.858 → 0.916 → 0.985 → 1.051 → 1.106 (estimates had become too low after the duration fix) |
+| Duration factor (ML path) | 1.0 → 0.962 → 1.024 → 1.055 → 1.076 → 1.097 |
+| **Rollback reviews** | **9 / 9 confirmed, 0 rolled back** — post-change errors 6.5–36.5% vs 25.4–52.0% before. The filter fix works live: the 3 gate aborts and the upload failure in the same window did not trigger a false rollback (contrast §B5.5). |
+| Automatic retrain | triggered at 15:43 (ML duration MAPE 32% > 20%); new model deployed at 16:01 UTC with 45 real runs blended (was 29); synthetic MAE 223.9 s, balanced accuracy 0.716. Runs after 16:01 were predicted by the new model (still before each run, so still out-of-sample). `performance_prediction_agent/models/metrics.json` changed in git because of this; the previous model files are in `state_backup_before_live_20261005/perf_models/`. |
+| Flagged for review | signature `2stages_low` "runs ~1.4–1.5× longer than predicted"; Resource Agent drift flags: its own copy / notebook factors at 1.56 / 1.59 after 45 / 71 records |
+
+**Meaning:** the loop adapts within ~30 runs to a shift caused by another agent's change, and the
+rollback safety net no longer misfires on aborted runs. The drift flags show the Resource
+Agent's own per-stage factors now sit *above* 1.0 (estimates too short) — the duration fix
+removed the old over-estimate and slightly overshot; worth watching.

@@ -1205,3 +1205,33 @@ No code, model or data file was changed.
 | 12 | Cast-fix side effect not stated | one line in limitations | `allowed_operations.json` |
 
 **Not fixed (needs the teammate's data or a decision):** which filter the Groq plans actually ran (their saved states are on the second checkout); an out-of-sample batch for the duration fix; the test fixture label in `test_rollback_filter.py` (code, left as is).
+
+## Stage 20 — Remaining results: offline group A, live Azure group D, Groq group C (2026-10-05)
+
+**Commit message:** `docs: add offline, live and Groq results for 2026-10-05; new eval scripts`
+
+**Run (user approved A, C, D; B deferred until asked):**
+- A — `offline_more.py` (retry replay, fixed limit vs learned usual, re-sizing replay, learning simulation) and `perf_no_baseline.py` (temp retrain without `baseline_s`). → §B15, H33–H36.
+- D — 24-run batch with downloaded-output checks, 1 re-check run, 12 pinned runs (Resource Agent settings vs planner's). → §B16, H37–H39.
+- C — `groq_bare_eval.py`, 3 repeats, raw vs repaired paired. → §B16.6, H40.
+
+**Safety:** feedback logs, monitor DB, learning state and Performance model files backed up to `data/paper_eval/state_backup_before_live_20261005/` before the live runs. Offline scripts only read history; md5 of the real logs/policies unchanged after them; production model files untouched by `perf_no_baseline.py`. Backend and Ollama stopped afterwards.
+
+**Changed by the system itself during the live runs:** 6 learning cycles (cost factor 0.795 → 1.106, duration factor → 1.097, all 9 reviews confirmed) and an automatic Performance-model retrain at 16:01 UTC → `performance_prediction_agent/models/metrics.json` and the `.pkl` files changed (previous copies in the backup folder).
+
+**Findings (not fixed — reported in the notes):**
+1. Repair-layer bug: duplicated container names are de-duplicated by name, so a stage can read and write the same container; 4 runs completed with wrong output and passed every check (§B16.2). Reproduced offline.
+2. Notebook builder does not compile `greater(toDouble(x), n)` — function style taught by the Groq prompt (§B16.6).
+3. The intent regexes undercount Groq (function-style filters); fair scorer written, re-score blocked by Groq's 200,000 tokens/day limit.
+4. Resource Agent's DIU choice at 25 MB slowed the copy (81 s at 2 DIU vs 60 s at 4) (§B16.7).
+5. `dynamic_reallocate` is not called during runs (§B15.3).
+6. Removing `baseline_s` makes live runtime error 36.5% → 142.1% (§B15.5) — keep or replace it.
+7. Rollback review delays adaptation after a regime change (simulation, §B15.4).
+
+**Mistakes during this stage:**
+- Learning simulation first used record timestamps on a different timeline from the policy clock, so no review ever ran; found from the flat trace, fixed, re-run.
+- First perf comparison passed the plan without schema/file size (the Manager passes both); found when recomputed verdicts did not match the logged ones; fixed (20/20 match).
+- A queued follow-up job waited on `pgrep -f "live_benchmark.py batch"`, which matched its own command line, so it never started; killed and run directly.
+- A hash snapshot was first written to `/tmp`; removed.
+- Earlier summary said 19 completed / 4 gate aborts; correct figures are 20 completed, 3 gate aborts + 1 upload failure.
+- The Groq fair re-run was started without checking the daily token budget; it hit the limit and was stopped (its log is labelled ABORTED).
