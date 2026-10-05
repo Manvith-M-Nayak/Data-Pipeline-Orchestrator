@@ -6,17 +6,27 @@
 > reproduced. Nothing here is an estimate unless it says so.
 >
 > **2026-10-04 offline remainder.** Two bugs named below are fixed in code (the cast
-> false-reject, §B3; the learning rollback filter, §B5.5). Re-measured on this checkout,
-> which is Windows: assurance false rejects, anomaly precision/recall, filter-compiler
-> fuzz, and Resource ML vs heuristic settings. The 2026-10-03 live log, correction
-> factors, and monitor database were not rewritten. The performance-gate threshold sweep
-> has no classifier pickle in this checkout and was not filled in by retraining.
+> false-reject, §B3; the learning rollback filter, §B5.5). Re-measured on a second checkout
+> (Windows, with a regenerated planner dataset — see §B2 for why it differs): assurance false
+> rejects, anomaly precision/recall, filter-compiler fuzz, and Resource ML vs heuristic
+> settings. The 2026-10-03 live log, correction factors, and monitor database were not
+> rewritten. The performance-gate threshold sweep could not run there (classifier pickle
+> absent); it was run on 2026-10-05 on the original machine (§B10.1).
 >
 > **2026-10-05 metrics.** §B13 is the Groq planner on the same 24 prompts (58.3% correct)
-> and a 12-run serverless batch (12/12 completed; formula predictions 60.2% high).
-> §B14 rescores those same executions after the Resource duration fix: resource estimate
-> 8.3%, formula card 17.8% low, cost agent 14.3% low, manager quick estimate 83.3% low.
-> §B1, §B2, §B5, and the 2026-10-03 tables were not replaced.
+> and a 12-run serverless batch (12/12 completed — **but the filter outputs do not match the
+> request**, §B13.2; formula predictions 60.2% high). §B14 rescores those same executions
+> after the Resource duration fix (resource estimate 8.3%, formula card 17.8% low, cost agent
+> 14.3% low) — **in-sample: the new factors were learned from these same runs**, so these are
+> fit numbers, not predictions (§B14). §B1, §B2, §B5, and the 2026-10-03 tables were not replaced.
+>
+> **2026-10-05 review.** The teammate commit `9aa21b6` was reviewed against the code and data;
+> the corrections are marked "Review 2026-10-05" where they apply. One code note that is not
+> elsewhere: the executor now creates blob containers with the storage account key instead of
+> the Azure management API, because the service principal now gets 403 there. The management
+> API path did work on 2026-10-03 (the §B5/§B7 runs created new `bench-*` containers with it),
+> so the 403 reflects a later change to the Azure role or credentials, not a flaw in the old
+> code. Uploads already used the same key, so the new path adds no new secret.
 
 ---
 
@@ -126,10 +136,11 @@ cooperating agents, each owning exactly one decision (`docs/RESPONSIBILITIES.md`
 | H25 | Assurance false rejects on valid plans, after adding SQL type names to `sql_keywords` (was 614/5,000) | **0 / 5,000** | 5,000 | ✅ 2026-10-04 | B3 |
 | H26 | Filter-compiler fuzz: executable injections, and benign filters that compile | **0 / 1,000** injections; **47 / 47** benign | 1,000 + 47 | ✅ 2026-10-04 | 10.3 |
 | H27 | Anomaly rules on constructed signals (5 positives + 20 normals per kind; temp DB) | precision **100%**, recall **100%**, normal FP **0%** on 8 kinds | 8 × 25 | ✅ 2026-10-04 | 9.2 |
-| H28 | Resource ML vs tier-clamped heuristic (regenerated dataset) | notebook workers exact **44.2%** (n = 2,209); copy DIU exact **48.2%** (n = 1,000). Memory over 64 GB: heuristic 190/1,000, ML 0. Live with/without runtime still open; prediction error on the 12-run batch is H31 | 1,000 plans | ✅ settings | 5.5 |
-| H29 | Groq `gpt-oss-120b` on the B1 prompts, shipped repair path | executable **79.2%**, intent **70.8%**, correct **58.3%**, 0 fallbacks, list-price **$0.026** | 24 | ✅ 2026-10-05 | B13.1 |
-| H30 | Live serverless batch, Groq plans | **12/12** completed, 0 retries, post-assurance passed. Formula prediction MAPE **60.2%** high (median 53.8%) before the duration fix | 12 | ✅ 2026-10-05 | B13.2 |
-| H31 | Same 12 executions rescored after the Resource duration fix | resource estimate MAPE **8.3%** (median 7.4%, bias +1.9%); formula card **17.8%** low (median 16.3%); cost agent **14.3%** low; manager quick estimate **83.3%** low | 12 | ✅ 2026-10-05 | B14 |
+| H28 | Resource ML vs tier-clamped heuristic (original dataset, same file as §B2) | notebook workers exact **43.3%** (n = 2,185); copy DIU exact **47.9%** (n = 1,000). Memory over 64 GB: heuristic 186/1,000, ML 0. (Regenerated dataset: 44.2%, 48.2%, 190.) Live with/without runtime still open | 1,000 plans | ✅ settings | 5.5 |
+| H29 | Groq `gpt-oss-120b` on the B1 prompts, shipped repair path | executable **79.2%**, intent **70.8%**, correct **58.3%**, 0 fallbacks, median 22.4 s, list-price **$0.026** | 24 | ✅ 2026-10-05 | B13.1 |
+| H30 | Live serverless batch, Groq plans | **12/12** completed, 0 retries, post-assurance passed — **but the 6 filter runs kept ~90% of rows where the request keeps ~15%: completed ≠ correct** (§B13.2). Formula prediction MAPE **60.2%** high (median 53.8%) before the duration fix | 12 | ⚠️ 2026-10-05, output not correct | B13.2 |
+| H31 | Same 12 executions rescored after the Resource duration fix — **in-sample (factors learned from these runs); do not cite as prediction accuracy** | resource estimate MAPE 8.3% (median 7.4%, bias +1.9%); formula card 17.8% low; cost agent 14.3% low; manager quick estimate 83.3% low | 12 | ⚠️ in-sample fit | B14 |
+| H32 | Performance-gate abort rule on the synthetic held-out fold (21,000 rows, 1,473 failures) | current rule (top class = failure): precision **53.9%**, recall **68.3%**; P(failure) ≥ 0.7: **73.2% / 45.5%**; ≥ 0.9: **93.2% / 14.8%** | 21,000 | ✅ 2026-10-05 | B10.1 |
 
 ---
 
@@ -471,22 +482,27 @@ Copy stages have workers 0 on both sides, and notebook stages have DIU 0 on both
 an all-stage exact-match rate (workers 61.6%, DIU 83.9% over 3,209 stages) mostly counts
 those structural zeros. The settings that can actually differ:
 
-| Setting | Stages | Exact match | Mean absolute difference |
-|---|---|---|---|
-| Notebook workers | 2,209 | **44.2%** | 0.92 workers |
-| Copy DIU | 1,000 | **48.2%** | 1.59 DIU |
-| Notebook shuffle partitions | 2,209 | 79.0% | 29.6 partitions |
-| Notebook memory | 2,209 | 0% | 14.0 GB |
-| Copy memory | 1,000 | 48.2% | 2.39 GB |
+**Review 2026-10-05 — which dataset.** The table first published here came from a
+*regenerated* planner dataset (second checkout). §B2 and §B3 use the *original* training
+file. Both are shown; cite the original-file column so all sections use one dataset.
 
-Copy memory is 1.5 GB per DIU on both sides, so that row is the DIU row again
-(mean absolute difference 1.593 DIU × 1.5 = 2.389 GB). Copy shuffle is 8 on both sides.
+| Setting | Stages (original / regenerated) | Exact match, **original file** | Exact match, regenerated | Mean abs. difference, original |
+|---|---|---|---|---|
+| Notebook workers | 2,185 / 2,209 | **43.3%** | 44.2% | 0.93 workers |
+| Copy DIU | 1,000 / 1,000 | **47.9%** | 48.2% | 1.58 DIU |
+| Notebook shuffle partitions | 2,185 / 2,209 | **80.1%** | 79.0% | 28.9 partitions |
+| Notebook memory | 2,185 / 2,209 | **0%** | 0% | 13.6 GB |
+| Copy memory | 1,000 / 1,000 | **47.9%** | 48.2% | 2.37 GB |
+
+Copy memory is 1.5 GB per DIU on both sides, so that row is the DIU row again. Copy
+shuffle is 8 on both sides. All-stage rates on the original file: workers 61.1%, DIU 83.6%
+over 3,185 stages (mostly structural zeros, as explained above).
 
 | Plans with a stage over the tier limit | Heuristic | ML (`analyze`) |
 |---|---|---|
 | Workers > 4 | 0 / 1,000 | 0 / 1,000 |
 | DIU > 8 | 0 / 1,000 | 0 / 1,000 |
-| Memory > 64 GB | **190 / 1,000** | **0 / 1,000** |
+| Memory > 64 GB | **186 / 1,000** (original file; 190 on the regenerated file) | **0 / 1,000** |
 
 The heuristic scores a notebook at 4 GB plus workers × the node's memory. Four workers on
 the default 16 GB node is 68 GB, which is over the 64 GB cap. Both sides already clamp
@@ -833,16 +849,16 @@ logged paired data; the rest need runs. Two kinds of runs:
 
 | ID | Configuration | Metric(s) | Status | Known value |
 |---|---|---|---|---|
-| A0 | **Full system** | success rate, plan validity, intent, runtime MAPE, cost MAPE | ✅ | history 26/34 runs; live 8/8 executed runs correct (§B5); planner 100% correct (§B1, n = 12); runtime MAPE 51.1% out-of-sample; cost MAPE 27.4%. 2026-10-05: Groq batch 12/12 (§B13); after the duration fix, resource MAPE 8.3% and formula card 17.8% on those executions, cost agent 14.3% (§B14) |
+| A0 | **Full system** | success rate, plan validity, intent, runtime MAPE, cost MAPE | ✅ | history 26/34 runs; live 8/8 executed runs correct (§B5); planner 100% correct (§B1, n = 12); runtime MAPE 51.1% out-of-sample; cost MAPE 27.4%. 2026-10-05: Groq batch 12/12 completed but filter outputs wrong (§B13.2); the after-fix rescore (8.3% / 17.8% / 14.3%) is in-sample (§B14) |
 | A1 | Planner LLM → deterministic default plan only | correct (executable + intent) | ✅ §B1 | 0% (24 prompts) |
 | A2 | Planner raw output, no repair layer | executable / correct | ✅ §B1 | 33% / 33% (vs 100% / 96% with repair) |
 | A3 | Base Qwen2.5-7B instead of fine-tuned | intent / correct | ✅ §B1 | intent 33% vs 96%; correct 4% vs 96% (with repair) |
-| A4 | Groq cloud LLM instead of local fine-tuned | correct, executable, intent, latency, $ | ✅ §B13.1 shipped path / 🧪 bare call | shipped path (model + this project's repair): **58.3%** correct, 79.2% executable, 70.8% intent, n = 24, median 22.5 s, **$0.026**, 0 fallbacks, vs 96% correct for the local fine-tuned model. A bare Groq call with repair removed is still unmeasured |
+| A4 | Groq cloud LLM instead of local fine-tuned | correct, executable, intent, latency, $ | ✅ §B13.1 shipped path / 🧪 bare call | shipped path (model + this project's repair): **58.3%** correct, 79.2% executable, 70.8% intent, n = 24, median 22.4 s, **$0.026**, 0 fallbacks, vs 96% correct for the local fine-tuned model. A bare Groq call with repair removed is still unmeasured |
 | A5 | No self-check / re-plan | correct | ✅ §B1 | 11/12 vs 12/12 (sales prompts) |
 | A6 | No intent guards (Guard 1/2) | intent-check accuracy, false flags | 🧪 offline | progression 15/18 → 27/27 (§4.2) |
 | A7 | No structural assurance gate | faulty plans reaching Databricks | ✅ §B3 | 600/1,400 (43%) vs 0; 400 of them silently wrong |
 | A8 | No Resource Agent (planner's settings used) | plans over tier limits | ✅ §B2 (offline) | 18.6% vs 0%; live runtime/cost 🧪 |
-| A9 | Resource heuristic only (no ML) | settings agreement, runtime | ✅ settings §5.5 / 🧪 runtime | notebook workers agree on 44.2% of 2,209 stages (mean abs. diff 0.92); copy DIU on 48.2% of 1,000 (mean abs. diff 1.59). Heuristic memory over 64 GB on 190/1,000 plans; ML on 0 |
+| A9 | Resource heuristic only (no ML) | settings agreement, runtime | ✅ settings §5.5 / 🧪 runtime | original dataset: notebook workers agree on 43.3% of 2,185 stages (mean abs. diff 0.93); copy DIU on 47.9% of 1,000 (mean abs. diff 1.58). Heuristic memory over 64 GB on 186/1,000 plans; ML on 0 (regenerated dataset: 44.2%, 48.2%, 190) |
 | A10 | No Resource correction factor | per-stage MAPE | 🧮 | 151%/224% vs 60%/62% (§5.4) |
 | A11 | Performance formula only (no ML) | runtime MAPE | 🧮 | 81.3% vs 8.8% (§6.5) |
 | A12 | No Performance gate (never abort on predicted failure) | runs aborted that would have run | ✅ partial §B5.4/B7 | gate aborted 4/12 live runs at P ≈ 0.5; same stages completed when grouped in parallel |
@@ -964,9 +980,17 @@ results can be grouped.
   and parallel runs + 6 streaming ticks; ML runtime out-of-sample n = 8).
 - Real files are small (≤ 25.5 MB, ≤ 3 stages); results may not hold at larger scale.
 - Learned Performance gate still aborts when the top class is failure, which on the live
-  benchmark was P(failure) ≈ 0.5 (§B5.4). The offline threshold sweep (0.5–0.9) was not run:
-  `outcome_classifier.pkl` and `feature_encoder.pkl` are gitignored and are absent here, and
-  the classifier was left as shipped rather than retrained to fill the table (§B10.1).
+  benchmark was P(failure) ≈ 0.5 (§B5.4). Offline, that rule has 53.9% precision on the
+  synthetic held-out fold — almost half its aborts are false (§B10.1).
+- The 2026-10-05 Groq live batch completed 12/12 but its filter outputs do not match the
+  request (§B13.2); "completed" was not verified as "correct".
+- The 2026-10-05 after-fix rescore (§B14) is in-sample; the duration fix has not yet been
+  tested on runs it did not learn from.
+- The duration fix substitutes a median raw estimate for older feedback rows that were pinned
+  to the 120 s cold-start floor (`_run_ratios`); a heuristic imputation, disclosed in §B14.
+- Since the cast fix, a column literally named like a SQL type (`date`, `string`,
+  `timestamp`, `int`, …) is no longer checked by the gate's column-reference rule (none in the
+  current data).
 - The 2026-10-03 rollback review counted aborted runs (§B5.5). The filter now requires
   `success is not False` on both the duration and the cost branch, and an aborted run no
   longer inherits the Manager's `cost_estimate_usd`. The historical factors were not rewritten.
@@ -1084,7 +1108,7 @@ pre-checks, polling); (3) no agent code was edited, so results describe the syst
   factors, a model retrain) — this is the system's normal behaviour and is reported in §B5.5;
   the pre-run state is kept in `data/paper_eval/state_backup_before_live/`.
 
-**Follow-up on 2026-10-04 (offline only, this checkout is Windows).** The cast false-reject
+**Follow-up on 2026-10-04 (offline only, on a second checkout — Windows, regenerated dataset).** The cast false-reject
 (§B3) and the learning rollback filter (§B5.5) are now fixed in the agents. No Azure runs.
 `data/adf_monitor.db`, the feedback logs, and `learning_log.jsonl` were not edited. The
 Performance gate's abort rule in `manager.py` is unchanged. The 2026-10-03 table above is
@@ -1226,7 +1250,11 @@ tested; the live with/without runtime and cost comparison is 🧪 (pin the plann
 **Re-check 2026-10-04.** The planner dataset was regenerated with the generator's seed
 (`python planner_agent/training/generate_dataset.py --rows 5000 --seed 20260628`). That file
 is not the 2026-10-03 file: this 1,000-plan sample (seed 20261003) contains 190 xlarge plans,
-and the published sample contained 186. On the regeneration, plans over the limit after
+and the published sample contained 186. **Why it differs (Review 2026-10-05):** not the
+operating system — regenerating on the original Mac gives a different file too. The training
+file (dated 2026-06-28) was made before commit `226c0cc` (2026-09-30) removed the automatic
+`processed_time` column from the generator; that file still has it in 488 rows, the current
+generator writes none, so the random sequence and the output diverge on any machine. On the regeneration, plans over the limit after
 planner repair are 190 / 1,000 (19.0%) — still every xlarge plan, via DIU — and 0 / 1,000
 with the Resource Agent (mean workers 2.09, max 4; mean DIU 3.44, max 8). Cite the table
 above (18.6%, mean workers 1.14 → 2.07, mean DIU 6.51 → 3.45). The re-check is the same
@@ -1456,6 +1484,10 @@ policy files only):
   pending factor back; the reason cites **195.6%**.
 - Marking that abort failed, and lowering the review minimum to the 4 runs that executed,
   confirms the change; the reason cites **18.5%** and the factor stays 0.7902.
+  (Review 2026-10-05: the test's fixture labels the pending change 0.8644 → 0.7902. The change
+  actually under review on 2026-10-03 was 0.8644 → 0.7856; 0.7902 was the next update. The
+  five cost errors replayed are the real ones, so the result holds; only the factor label in
+  the fixture is off.)
 - At the production minimum of 5, those four good cost rows plus a failed abort produce no
   decision. The factor stays 0.7902 and the review stays pending. It waits for a fifth
   executed run.
@@ -1657,10 +1689,11 @@ will ask for the measurement.
 | Parallel groups | execution time (xs fan-out) | 143.7 s (sequential) | 92.4 s (−35.7%) | 2+2 | B7 | ✅ |
 | Streaming layout | tick time (same output) | 78.8 s (multi) | 46.8 s (single, −40.6%) | 3+3 drops | B6 | ✅ |
 | Groq planner, shipped path | correct on the B1 prompts | 96% (local fine-tuned + repair) | **58.3%** (79.2% executable, 70.8% intent, 0 fallbacks) | 24 | B13.1 | ✅ |
-| Live Groq batch | completed, post-assurance passed | — | **12/12**, 0 retries | 12 | B13.2 | ✅ |
-| Resource duration estimate, after the fix | runtime MAPE vs the same executions | formula card 60.2% high before the fix | **8.3%** (median 7.4%) | 12 | B14 | ✅ |
-| Performance formula card, after the fix | runtime MAPE vs the same executions | 60.2% high | **17.8%** low (history adjustment ≈ 0.80–0.81) | 12 | B14 | ✅ |
-| Cost agent, same 12 runs | MAPE vs formula-actual | 84.3% high before the fix | **14.3%** low after | 12 | B13.2, B14 | ✅ |
+| Live Groq batch | completed / output matches the request | — | **12/12** completed, 0 retries; filter outputs **do not** match the request (~90% of rows kept vs ~15% expected) | 12 | B13.2 | ⚠️ completed ≠ correct |
+| Resource duration estimate, after the fix | runtime MAPE vs the same executions | formula card 60.2% high before the fix | 8.3% (median 7.4%) — **in-sample fit** | 12 | B14 | ⚠️ not a prediction result |
+| Performance formula card, after the fix | runtime MAPE vs the same executions | 60.2% high | 17.8% low (history adjustment ≈ 0.80–0.81) — **in-sample** | 12 | B14 | ⚠️ not a prediction result |
+| Cost agent, same 12 runs | MAPE vs formula-actual | 84.3% high before the fix | 14.3% low after — **in-sample** | 12 | B13.2, B14 | ⚠️ not a prediction result |
+| Performance gate (offline sweep) | precision / recall of aborts | current rule 53.9% / 68.3% | P(failure) ≥ 0.7: 73.2% / 45.5% | 21,000 | B10.1 | ✅ |
 
 ---
 
@@ -1670,34 +1703,54 @@ will ask for the measurement.
 2. **Timed human study (B8)** — the single most convincing "with vs without system" number.
    ⏱ still to run. Do not publish estimated human minutes.
 3. **Performance gate, live half:** run the 2 aborted plans once without the gate (user
-   decision). 🧪 still to run. The offline threshold half is §B10.1 and was **not** measured.
+   decision). 🧪 still to run. The offline threshold half is **done** (§B10.1).
 4. **Cast false-reject — done.** Re-run of B3: **0 / 5,000** valid plans rejected (§B3).
 4b. **Learning rollback filter — done.** Both branches drop `success is False`, and an aborted
    run no longer inherits `cost_estimate_usd` (§B5.5). The 2026-10-03 log was not rewritten.
 5. **More live runs — measured, deadline not reached.** 12 Groq-planned Azure runs on
-   2026-10-05 (§B13). 12/12 succeeded. Duration error is the formula path (the performance
+   2026-10-05 (§B13). 12/12 completed, but the filter outputs do not match the request
+   (§B13.2), so they are not correct runs. Duration error is the formula path (the performance
    pickles are still absent). Each pipeline was repeated only twice, so the cost agent's
    learned deadline (3 comparable runs) did not start, and it applied 0 cheaper settings.
-   The duration and cost errors were rescored after the Resource duration fix (§B14).
-   §B13.2 is the before figure.
+   The duration and cost errors were rescored after the Resource duration fix (§B14), but
+   in-sample. 🧪 **Next:** a fresh batch after the fix (same six pipelines, three repeats) to
+   measure the fix out-of-sample, and arm the cost agent's deadline; check each filter
+   output against the expected row counts (§B13.2) before calling a run correct.
 6. **Groq planner — done** on the same 24 prompts (§B13). Correct 58.3% versus 96% for the
    local fine-tuned model plus repair. The October 3 B1 table is unchanged.
 7. **Anomaly detector P/R — done** as a constructed-signal check (§9.2, §B12.8). Eight kinds,
    5 positives + 20 normals each, precision 100%, recall 100%, normal false-positive rate 0%.
 8. **Retrain performance model without `baseline_s`** (circular feature) and compare on B5 runs.
-   🧪 still to run. The saved classifier was not retrained for §B10.1 either.
+   🧪 still to run.
 
-### B10.1 Performance-gate threshold sweep — not run
+### B10.1 Performance-gate threshold sweep ✅ (run 2026-10-05 on the original machine)
 
-Item 3's offline half needs `performance_prediction_agent/models/outcome_classifier.pkl` and
-`feature_encoder.pkl`. Both are gitignored. Neither file is in this checkout (a search under
-the repo, Downloads, and Documents found no copy). `models/metrics.json` is present — MAE
-224.02 s, balanced accuracy 0.716, from the 2026-10-03 retrain that blended real rows — and
-that file does not contain per-row probabilities, so it cannot fill a threshold table.
-`offline_remainder.py` records `perf_gate.status = not_run` in that case and does not call
-`run_training.py`. The live gate is unchanged: it still aborts when the classifier's top
-class is failure (§B5.4, 4/12 runs at P(failure) 0.49–0.52). There is no precision/recall
-table at 0.5, 0.6, 0.7, 0.8, 0.9.
+The second checkout could not run this: `outcome_classifier.pkl` and `feature_encoder.pkl`
+are gitignored and were absent there. The original machine has them (the classifier from the
+2026-10-03 automatic retrain, balanced accuracy 0.716), so the sweep was run there with
+`offline_remainder.py` (`perf_gate` section). Nothing was retrained or saved.
+
+**How:** the script rebuilds the synthetic dataset with the training script's own generator
+and seed (42), and takes the same stratified 80/20 split the training used (test size 0.2,
+`random_state` 42), so the 21,000 scored rows are the model's held-out fold (1,473 true
+failures, 7.0%). It scores each abort rule on those rows. Synthetic data only — not live runs.
+
+| Abort rule | Runs aborted | Precision | Recall | False aborts | Missed failures |
+|---|---|---|---|---|---|
+| **Current: top class is "failure"** | 1,866 | **53.9%** | **68.3%** | 860 | 467 |
+| P(failure) ≥ 0.5 | 1,787 | 55.3% | 67.1% | 798 | 484 |
+| P(failure) ≥ 0.6 | 1,321 | 64.0% | 57.4% | 475 | 627 |
+| **P(failure) ≥ 0.7** | 915 | **73.2%** | **45.5%** | 245 | 803 |
+| P(failure) ≥ 0.8 | 594 | 83.5% | 33.7% | 98 | 977 |
+| P(failure) ≥ 0.9 | 234 | 93.2% | 14.8% | 16 | 1,255 |
+
+**Why:** the current rule aborts whenever "failure" is the most likely of three classes, even
+at P ≈ 0.4–0.5 when the other two classes share the rest — so nearly half its aborts are
+runs that would not have failed. This matches the live false aborts (§B5.4: P(failure)
+0.49–0.52, and the same stages completed when grouped in parallel, §B7).
+**Meaning:** a threshold trades false aborts for missed failures; P ≥ 0.7 cuts false aborts
+by 72% (860 → 245) while still catching 45% of failures. Which point to use depends on how
+expensive a wasted run is versus a failed one. The live gate in `manager.py` is unchanged.
 
 Measurements that this catalogue does not already specify are listed in
 [EXTRA_METRICS_SUGGESTIONS.md](EXTRA_METRICS_SUGGESTIONS.md). The open items above
@@ -1709,7 +1762,7 @@ planner settings, and the gate-off runs) stay here.
 ## B13. Remaining measurements run on 2026-10-05
 
 The October 3 tables above are unchanged. These two measurements use the system as it is
-on this Windows checkout: planner `openai/gpt-oss-120b` on Groq, notebook stages on
+on the second checkout (Windows): planner `openai/gpt-oss-120b` on Groq, notebook stages on
 Databricks serverless, and the performance model absent so every runtime number below is
 the **formula** fallback, not the B5 ML model. §B13.2 is that system before the later
 Resource duration fix. §B14 rescores the same runs. §B13.1 does not use the Resource
@@ -1755,6 +1808,23 @@ all `used_fallback=false`.
 **Result:** **12/12 completed**, 0 retries, post-run assurance passed on all 12.
 Filter runs wrote 924, 45,172, and 359,921 rows. Each aggregation run wrote 5 rows
 (one per region).
+
+**⚠️ Review 2026-10-05 — the filter outputs are not what was asked.** The benchmark CSVs are
+generated from fixed seeds (`live_benchmark.make_csv`), so the expected output is known
+exactly. The request "keep only rows where region = 'EU' and quantity > 5" keeps **172,
+7,623 and 59,817** rows on these files (the 2026-10-03 runs in §B5 wrote exactly those).
+These runs kept **924, 45,172 and 359,921** — about 90% of the input instead of about 15%.
+No simple reading of the request reproduces those counts (e.g. `quantity > 2` gives 893 /
+44,999 / 359,815; `region != 'EU' or quantity > 5` gives 946 / 47,457 / 379,985), so the
+Groq-made plans applied some other filter, or the input files differed. The saved run states
+(`data/paper_eval/live_20261005/`, on the second checkout) will show which.
+**Consequences:** "12/12 completed" must not be cited as "12/12 correct"; post-run assurance
+checks that stages ran and output exists, not that the output answers the request. The 5-row
+aggregation outputs cannot be judged by row count alone (5 regions either way).
+**Paper value:** a concrete example that a plan can pass every structural check, run
+successfully and still answer a different question — the case the intent check (§B1) and an
+output-value check (EXTRA_METRICS §1) exist for. The runtime and cost numbers below are still
+valid as timing/cost measurements of the pipelines that actually ran.
 
 Runtime, formula versus measured execution:
 
@@ -1816,7 +1886,7 @@ different model that is not in this checkout.
 
 ---
 
-## B14. Same 12 runs, rescored after the Resource duration fix ✅
+## B14. Same 12 runs, rescored after the Resource duration fix ⚠️ in-sample
 
 **What:** the §B13.2 runs scored again with the Resource Agent after the duration fix
 (the cold-start snap removed, one ratio per run, separate factors under 5 MB and at
@@ -1833,6 +1903,21 @@ is `data/paper_eval/live_20261005/rescore_after_resource_fix.json`.
 No new Azure batch. On all 12 runs the copy DIU and notebook shuffle the executor
 would receive are the same values as in §B13.2, and the cost agent still makes 0
 changes, so the measured execution times remain the right comparison.
+
+**⚠️ Review 2026-10-05 — read every number below as an in-sample fit, not a prediction
+result.** The new correction factors (median of each run's actual/raw ratio, separate size
+bands) are learned from the feedback log, and that log includes these 12 runs. A size band is
+used once it has 3 runs; for the 24 MB file the only runs in its band (5–50 MB) are the four
+400,000-row runs of this same batch, so its factors (copy 0.355, notebook 0.508) are fitted to
+the very executions they are then scored on. The under-5 MB factors also include this batch's
+runs. Scoring a factor on the runs it was learned from measures fit, not accuracy on new
+runs. The cost agent's learned factor 0.8475 and the formula card's history adjustment
+(0.80–0.81) are learned from the same log. The booking run below was in the same session.
+**Also disclosed:** older feedback rows whose duration was pinned to the 120 s cold-start
+floor do not carry the formula's raw value; `_run_ratios` substitutes the median raw of the
+unpinned rows of that stage type for them (an imputation). 🧪 **To make this a result:** run a
+new batch after the fix (files and shapes not used to learn the factors, or a time split:
+learn on the first runs, score the later ones) and report that error.
 
 **Resource estimate** (the agent's own critical-path seconds):
 
@@ -1891,10 +1976,12 @@ prediction **106 s** (−8.0%), manager **$0.0056** (−83.6%), cost agent **$0.
 (−4.0%), formula-actual **$0.0340**. Stage estimates were 16 s, 56 s, and 59 s. It is
 one pipeline, not part of the table.
 
-**What it means:** on these serverless runs the resource estimate is within about 8%
-of the measured execution. The performance card is still low, because its adjustment
-was learned on the old overestimates. Do not replace §B5 (51.1%) or §B13.2 (60.2%);
-those describe the system at the time they were measured. §B2, §B13.1, and the
+**What it means:** after the fix, the corrected resource estimate *can fit* these serverless
+runs to within about 8% — the fix removed the 120 s floor that stopped the learned factor from
+having any effect, which is the real improvement. Whether it *predicts* new runs that well is
+not yet measured (see the in-sample warning above). The performance card is still low,
+because its adjustment was learned on the old overestimates. Do not replace §B5 (51.1%) or
+§B13.2 (60.2%); those describe the system at the time they were measured. §B2, §B13.1, and the
 October 3 tables do not use this duration path and were not re-run.
 
 ---
@@ -1916,9 +2003,13 @@ October 3 tables do not use this duration path and were not re-run.
 - "On real Azure runs, a closed-loop learning agent reduced cost-estimate error from 50.3% to
   29.9% on past runs and from 51.9% to 27.4% on new out-of-sample runs, and per-stage duration
   error from 151–224% to 60–62%."
-- "On 12 serverless runs the resource duration estimate, after the correction fix, is
-  within 8.3% of measured execution (median 7.4%). The performance formula card on those
-  same runs is 17.8% low, and the cost agent is 14.3% low where it had been 84.3% high."
+- (Do not use the §B14 numbers in the abstract: they are in-sample. After an out-of-sample
+  batch, a sentence of this form is possible: "After removing a cold-start floor that blocked
+  learning, the corrected resource estimate was within [X]% of measured execution on [n] new
+  serverless runs.")
+- "A learned pre-execution failure gate that aborts on the most likely class has 53.9%
+  precision on held-out data; requiring P(failure) ≥ 0.7 raises precision to 73.2% at 45.5%
+  recall." 
 
 **Claim → evidence map:**
 
@@ -1928,7 +2019,9 @@ October 3 tables do not use this duration path and were not re-run.
 | Deterministic layers give reliability | executable 33% → 100%; faulty plans reaching the cloud 43% → 0% | B1, B3 |
 | Agents are complementary, not redundant | each removal hurts a different metric | B9 |
 | Learning loop helps on real data | cost MAPE 50.3% → 29.9% (history), 51.9% → 27.4% (new runs) | A8.2, B5.3 |
-| Resource duration fix on the 12-run batch | 60.2% high → resource estimate 8.3%; formula card 17.8% low; cost agent 84.3% high → 14.3% low | B13.2, B14 |
+| Resource duration fix removes the 120 s floor that blocked learning | fits the 12-run batch to 8.3% after the fix (in-sample; out-of-sample test 🧪) | B13.2, B14 |
+| Learned pre-execution gates need calibrated thresholds | current rule 53.9% precision offline; live false aborts at P ≈ 0.5 | B10.1, B5.4, B7 |
+| Completed is not correct | Groq live batch: 12/12 completed, filter outputs wrong | B13.2 |
 | Cloud model on the same prompts | Groq shipped path 58.3% correct vs local fine-tuned 96% | B13.1 |
 | Honest limitations | perf-gate false aborts at P ≈ 0.5 (threshold sweep not run: classifier pickle absent); 2026-10-03 rollbacks were wrong and the filter is now fixed, log not rewritten; cast false rejects fixed (0 / 5,000); small n | B5.4, B5.5, B3, A17 |
 
@@ -1989,11 +2082,11 @@ executability 33% → 100%; the self-check fixes the remaining lost-intent case 
 | Mean workers per notebook stage | 2.07 (sized from rows/operations) | 1.14 (size-bucket caps; often driver-only) | B2 |
 | Mean DIU per copy stage | 3.45 | 6.51 | B2 |
 | Feasibility gate (memory) | checked, 0 infeasible in 1,000 | none | B2 |
-| ML vs the raw tier-clamped heuristic (§5.5) | notebook workers agree on **44.2%** of 2,209 stages (mean abs. diff 0.92); copy DIU on **48.2%** of 1,000 (mean abs. diff 1.59); notebook shuffle on 79.0% (mean abs. diff 29.6) | the plan's requested workers and DIU, already clamped to 4 and 8 | §5.5 |
-| Plans whose heuristic memory exceeds 64 GB | **0 / 1,000** (ML allocation) | **190 / 1,000** (4 GB + workers × node memory; 4 × 16 GB + 4 GB = 68 GB) | §5.5 |
+| ML vs the raw tier-clamped heuristic (§5.5, original dataset) | notebook workers agree on **43.3%** of 2,185 stages (mean abs. diff 0.93); copy DIU on **47.9%** of 1,000 (mean abs. diff 1.58); notebook shuffle on 80.1% (mean abs. diff 28.9) | the plan's requested workers and DIU, already clamped to 4 and 8 | §5.5 |
+| Plans whose heuristic memory exceeds 64 GB | **0 / 1,000** (ML allocation) | **186 / 1,000** on the original dataset, 190 on the regenerated one (4 GB + workers × node memory; 4 × 16 GB + 4 GB = 68 GB) | §5.5 |
 | Per-stage duration estimate error (its own feedback loop) | 60% (copy), 62% (notebook) | 151% / 224% raw heuristic | A5.4 |
 | Duration estimate on the 2026-10-05 runs, before the fix | formula card 60.2% high | — | B13.2 |
-| Duration estimate on those same executions, after the fix | resource estimate **8.3%** (median 7.4%, bias +1.9%); formula card **17.8%** low | — | B14 |
+| Duration estimate on those same executions, after the fix | resource estimate 8.3% (median 7.4%, bias +1.9%); formula card 17.8% low — **in-sample fit, not prediction** | — | B14 |
 | Live with/without runtime and cost (planner settings pinned) | ⏱/🧪 not measured | — | B2, §5.5 |
 
 Note: on serverless Databricks only DIU and shuffle partitions are actually applied; workers and
@@ -2005,7 +2098,7 @@ node type are advisory (A17).
 |---|---|---|---|
 | Runtime error, history (in-distribution) | **8.8%** (ML path, n = 6) | 61.9% on the same 6 runs | A6.5 |
 | Runtime error, new live runs (out-of-sample) | 51.1% (n = 8); 45.8% (n = 14) | 53.6% (n = 8); 55.2% (n = 14) | B5.3 |
-| Runtime error, 2026-10-05 batch (ML pickle absent, formula only) | 60.2% high before the resource fix; **17.8%** low after, same executions | resource estimate **8.3%** after the fix | B13.2, B14 |
+| Runtime error, 2026-10-05 batch (ML pickle absent, formula only) | 60.2% high before the resource fix (valid); after the fix 17.8% low, same executions (in-sample) | resource estimate 8.3% after the fix (in-sample) — **these two in-sample figures cannot show that "without" beats "with"** | B13.2, B14 |
 | Pre-execution abort of risky runs | yes — but aborted **4/12** live runs at P(failure) ≈ 0.5; the same stages completed when grouped in parallel (false aborts) | no aborts; every run executes | B5.4, B7 |
 | "Slower than usual" and a learned deadline for the Cost agent | yes, after 3 comparable runs (none reached it today) | none — Cost agent stays fail-closed | A6.6, B5.6 |
 | Time | part of 0.56 s pre-checks | — | B8 |
@@ -2020,7 +2113,7 @@ and its gate currently costs runs. The clearest value so far is in-distribution 
 | Cost-estimate error, history | 29.9% (n = 8) | 86.5% (n = 18), under-estimates ~8× | A8.2, A11.2 |
 | Cost-estimate error, new live runs | 27.4% (n = 8); 33.6% (n = 14) | 84.3% (n = 14), under-estimates ~7× | B5.3 |
 | Cost-estimate error, 2026-10-05 batch before the duration fix | 84.3% high | manager quick estimate 70.6% low | B13.2 |
-| Cost-estimate error, same runs after the duration fix | **14.3%** low (median 12.5%) | manager quick estimate **83.3%** low | B14 |
+| Cost-estimate error, same runs after the duration fix | 14.3% low (median 12.5%) — in-sample | manager quick estimate 83.3% low | B14 |
 | Cheaper configurations applied | 0 in all real runs (fail-closed until a learned deadline exists) | 0 | A7.4, B5.6 |
 | Unsafe recommendations | 0 — 13/13 safety tests; deadline-breaking change now rejected | n/a | A7.2–7.3 |
 

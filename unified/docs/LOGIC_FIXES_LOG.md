@@ -1180,3 +1180,28 @@ No code, model or data file was changed.
 **Data:** `data/paper_eval/offline_results.json` now holds the corrected B2/B3/B4 run (the first, wrong run was replaced).
 
 **Verification:** all scripts compile; `ablation_offline.py` re-run end to end; every changed number traced to a file or a command in the table above.
+
+## Stage 19 — Review of teammate commit `9aa21b6` and corrections to the results notes (2026-10-05)
+
+**Commit message:** `docs: correct 2026-10-05 results — wrong filter outputs, in-sample rescore, gate sweep`
+
+**What was reviewed:** every file in `9aa21b6` (Nithin078, 2026-10-05). Code changes are valid; all suites pass on this machine: `learning_policy_agent.test_rollback_filter` 8/8, `resource_agent.examples.run_examples` 0 FAIL, `scripts/integration_test.py`, `test_cost_model_safety` 13/13, assurance examples 6/6. Real data files unchanged by the tests (md5 before/after). No secrets in the commit. The offline numbers were reproduced here with `offline_remainder.py` (fuzz and anomaly check identical; Resource ML vs heuristic same direction on the original dataset).
+
+**Corrections made in `PAPER_RESULTS.md` and `EXTRA_METRICS_SUGGESTIONS.md` (no code changed):**
+
+| # | Problem | Fix in the notes | Evidence |
+|---|---|---|---|
+| 1 | §B13.2 "12/12 completed" read as correct, but filter runs kept 924 / 45,172 / 359,921 rows where the request keeps 172 / 7,623 / 59,817 on the seeded CSVs | warning in §B13.2; H30, A0, B9, top note flagged "completed ≠ correct" | recomputed from `live_benchmark.make_csv`; candidate filters checked |
+| 2 | Suggestions doc said those counts "match" | §1 rewritten | same |
+| 3 | §B14 8.3% / 17.8% / 14.3% scored on the runs the factors were learned from | in-sample warning in §B14; H31, B9, B11, B12 flagged; abstract sentence replaced | size-band rule (≥ 3 runs) + only that batch in the 5–50 MB band |
+| 4 | B12 row implied "without" (8.3%) beats "with" (17.8%) | row states both are in-sample and cannot show that | — |
+| 5 | Dataset difference attributed to the Windows checkout | cause stated: training file predates `226c0cc` (still has `processed_time` in 488 rows); regenerating on the Mac also differs | sha256 and `grep -c processed_time` |
+| 6 | §5.5 / H28 / A9 used the regenerated dataset, §B2/§B3 the original | original-file numbers primary (43.3%, 47.9%, 186), regenerated shown beside | `offline_remainder.py` on this machine |
+| 7 | §B10.1 said the threshold sweep cannot run | sweep measured here: current rule 53.9% precision / 68.3% recall; ≥ 0.7: 73.2% / 45.5%; table + H32 | classifier present on this machine; split matches training |
+| 8 | Groq latency 22.4 s vs 22.5 s | 22.4 s everywhere | §B13.1 source line |
+| 9 | Rollback test fixture labels the 2026-10-03 change 0.7902 (it was 0.8644 → 0.7856) | note in §B5.5 (test file not changed) | `learning_log.jsonl` |
+| 10 | Container-creation change implied the old path was wrong | note: it worked on 2026-10-03; 403 is a later Azure change | `bench-*` containers created on 2026-10-03 |
+| 11 | Imputation of pinned rows not disclosed | disclosed in §B14 and limitations | `_run_ratios` |
+| 12 | Cast-fix side effect not stated | one line in limitations | `allowed_operations.json` |
+
+**Not fixed (needs the teammate's data or a decision):** which filter the Groq plans actually ran (their saved states are on the second checkout); an out-of-sample batch for the duration fix; the test fixture label in `test_rollback_filter.py` (code, left as is).

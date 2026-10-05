@@ -20,9 +20,13 @@ prompts are enough for that. They are too small for a general benchmark.
 
 ### 1. Check that the output values are right, not only the row count
 
-The live tables treat a run as correct when the row count matches (924, 45,172, and
-359,921 for the filters; 5 for the aggregation). A reviewer can ask whether those
-rows are the right rows.
+**Review 2026-10-05: the row counts already fail this check.** The benchmark CSVs come
+from fixed seeds, so the expected filter output is known exactly: "region = 'EU' and
+quantity > 5" keeps **172, 7,623 and 59,817** rows (the 2026-10-03 runs wrote exactly those).
+The 2026-10-05 runs wrote **924, 45,172 and 359,921** — about 90% of the input instead of
+about 15% — so the row counts do *not* match the request (PAPER_RESULTS §B13.2). Those runs
+completed but are not correct. First inspect their saved plans to find which filter ran.
+Then, for any run, check both the count and the values:
 
 On the saved outputs, or on one fresh run of each shape, compare a reference query
 computed locally from the same CSV: the sum of `quantity` after each filter, and the
@@ -34,7 +38,8 @@ until this is done.
 
 The resource factor is learned from one run total, split across stages in proportion
 to the prediction. Copy and notebook errors are therefore not independent, and the
-8.3% figure in §B14 is a total, not a per-stage error.
+8.3% figure in §B14 is a total, not a per-stage error — and it is in-sample (the factors
+were learned from those same runs), so per-stage times should be taken on a new batch.
 
 For one run of each of the three file sizes, record the ADF activity duration and
 the Databricks job duration from the run history. Compare each to that stage's
@@ -44,7 +49,8 @@ copy error and a notebook error of opposite sign.
 ### 3. Put the formula cost next to the Azure bill
 
 `actual_cost_usd` is the cost agent's formula with the measured duration substituted
-in. It is not the invoice. §B14's 14.3% and 83.3% are errors against that formula.
+in. It is not the invoice. §B14's 14.3% and 83.3% are errors against that formula (and
+§B14 is in-sample).
 
 From Cost Management, export the resource-group charges for the day of the 12-run
 batch and for one later single run whose start and end you know. Report the invoice
@@ -137,9 +143,9 @@ No new cloud runs.
 - **Interval on the planner.** From the existing 24 paired outcomes, report a
   confidence interval or a paired test for fine-tuned versus base, and for Groq
   versus the fine-tuned model. The point estimates 96% and 58.3% stay as they are.
-- **Interval on the 12 duration errors.** Bootstrap the paired absolute percentage
-  errors in `data/paper_eval/live_20261005/rescore_after_resource_fix.json` and
-  report an interval beside the 8.3% and the 17.8%.
+- **Interval on the 12 duration errors.** Only after an out-of-sample batch: the 8.3% and
+  17.8% in `rescore_after_resource_fix.json` are in-sample fits (§B14), so an interval on
+  them would still describe fit, not prediction. Bootstrap the errors of the new batch.
 - **Scaling sentence.** From the same 12 executions, state the slope of execution
   time against row count. The measured times are already flat (means 155 s, 135 s,
   and 162 s). The sentence belongs next to §B14 so a reader does not infer that the
