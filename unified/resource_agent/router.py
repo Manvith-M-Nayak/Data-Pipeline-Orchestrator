@@ -37,6 +37,7 @@ class FeedbackRequest(BaseModel):
     actual_duration_s:    float
     predicted_workers:    int   = 0
     actual_workers:       int   = 0
+    size_mb:              Optional[float] = None
 
 
 class ReallocateRequest(BaseModel):
@@ -96,6 +97,7 @@ def record_feedback(req: FeedbackRequest):
         predicted_workers=req.predicted_workers,
         actual_workers=req.actual_workers,
         run_id=req.run_id,
+        size_mb=req.size_mb,
     )
     return {"status": "recorded"}
 

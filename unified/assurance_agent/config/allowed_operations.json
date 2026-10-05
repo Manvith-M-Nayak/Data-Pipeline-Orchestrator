@@ -13,6 +13,7 @@
 
   "sql_keywords": [
     "and", "or", "not", "null", "is", "in", "like", "between",
-    "true", "false", "as", "asc", "desc", "case", "then", "else", "end"
+    "true", "false", "as", "asc", "desc", "case", "then", "else", "end",
+    "double", "integer", "int", "string", "long", "float", "boolean", "date", "timestamp"
   ]
 }

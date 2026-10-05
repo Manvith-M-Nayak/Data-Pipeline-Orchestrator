@@ -276,12 +276,18 @@ class PolicyEngine:
                 # Only ml_model records logged AFTER the change reflect its
                 # real effect (the corrected value is what's actually
                 # logged as predicted_duration_s once applied).
+                # success is False for aborts and failed runs. Their duration is
+                # backoff or a near-zero abort time, not execution, and counting
+                # them (as the 2026-10-03 review did) rolls back a good factor.
+                # None means the outcome was not recorded — keep those, matching
+                # error_analyzer._run_failed.
                 post_change = [
                     r for r in records
                     if r.get("prediction_source") == "ml_model"
                     and (r.get("timestamp") or 0) > changed_at
                     and r.get("actual_duration_s")
                     and r.get("predicted_duration_s")
+                    and r.get("success") is not False
                 ]
                 if len(post_change) < review_min:
                     still_pending[policy_name] = review  # not enough evidence yet
@@ -324,11 +330,15 @@ class PolicyEngine:
                 # has one formula regardless of which path produced the
                 # optimizer's recommendations, so every record with both
                 # fields present is valid evidence.
+                # Same exclusion as the duration review: an aborted run has no
+                # executed cost. success is None on older records whose outcome
+                # was not recorded; those stay in the review.
                 post_change = [
                     r for r in records
                     if (r.get("timestamp") or 0) > changed_at
                     and r.get("actual_cost_usd")
                     and r.get("estimated_cost_usd")
+                    and r.get("success") is not False
                 ]
                 if len(post_change) < review_min:
                     still_pending[policy_name] = review  # not enough evidence yet

@@ -102,22 +102,6 @@ class FeedbackCollector:
         # makes the factor converge to sqrt(true ratio) instead of the ratio.
         raw_perf_s = _to_float(raw.get("perf_uncorrected_total_s")) or perf_predicted_s
 
-        # estimated_cost_usd (Cost Optimization Agent's own pre-execution
-        # estimate) MUST take priority — it's computed with the same
-        # _estimate_cost() formula as actual_cost_usd, making them a valid
-        # before/after pair. cost_estimate_usd (Manager's separate, cheaper
-        # Phase 2b formula) is only a fallback for older records that
-        # predate estimated_cost_usd being logged at all. Getting this
-        # order backwards silently corrupts cost_correction_factor: since
-        # cost_estimate_usd is always present, `cost_estimate_usd or
-        # estimated_cost_usd` would always pick it, comparing actual_cost_usd
-        # against the wrong, unrelated formula on every single record.
-        est_cost = _to_float(
-            raw.get("estimated_cost_usd") or raw.get("cost_estimate_usd")
-        )
-        actual_cost = _to_float(raw.get("actual_cost_usd"))
-        raw_est_cost = _to_float(raw.get("cost_uncorrected_estimated_usd")) or est_cost
-
         status = str(
             raw.get("final_status") or raw.get("status") or raw.get("outcome") or ""
         ).lower()
@@ -130,6 +114,25 @@ class FeedbackCollector:
             success = False
         else:
             success = raw.get("success") if isinstance(raw.get("success"), bool) else None
+
+        # estimated_cost_usd (Cost Optimization Agent's own pre-execution
+        # estimate) MUST take priority — it's computed with the same
+        # _estimate_cost() formula as actual_cost_usd, making them a valid
+        # before/after pair. cost_estimate_usd (Manager's separate, cheaper
+        # Phase 2b formula) is only a fallback for older records that
+        # predate estimated_cost_usd being logged at all. Getting this
+        # order backwards silently corrupts cost_correction_factor: since
+        # cost_estimate_usd is always present, `cost_estimate_usd or
+        # estimated_cost_usd` would always pick it, comparing actual_cost_usd
+        # against the wrong, unrelated formula on every single record.
+        # A failed or aborted run never executed, so the Manager's quick
+        # estimate must not stand in for the Cost agent's estimate — that
+        # substitution is what made an aborted run look 904% wrong.
+        est_cost = _to_float(raw.get("estimated_cost_usd"))
+        if est_cost is None and success is not False:
+            est_cost = _to_float(raw.get("cost_estimate_usd"))
+        actual_cost = _to_float(raw.get("actual_cost_usd"))
+        raw_est_cost = _to_float(raw.get("cost_uncorrected_estimated_usd")) or est_cost
 
         stage_count = raw.get("stage_count")
         complexity = raw.get("complexity") or "unknown"

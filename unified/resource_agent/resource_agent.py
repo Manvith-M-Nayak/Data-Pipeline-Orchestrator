@@ -83,6 +83,26 @@ DBX_ROWS_PER_S         = 50_000 # rows/s the SDK read/write achieves on student 
 DBX_TRANSFORM_S        = 3      # seconds per PySpark column transformation
 DBX_AGG_S              = 10     # seconds per groupBy aggregation
 
+# A size band is used for the duration correction only when it already has
+# this many completed runs. Otherwise the factor falls back to every size.
+_MIN_BAND_RUNS = 3
+
+
+def _size_band(size_mb: float) -> str:
+    """Same cuts as ml/feature_spec.size_hint_to_ord: <5, <50, else."""
+    if size_mb < 5:
+        return "small"
+    if size_mb < 50:
+        return "medium"
+    return "large"
+
+
+def _startup_floor_s(stage_type: str) -> float:
+    """Cold-start constant _scale_duration used to paste back onto a shortened estimate."""
+    if stage_type == "copy":
+        return float(ADF_STARTUP_S)
+    return float(DBX_COLD_START_S + DBX_PIP_INSTALL_S)
+
 
 # ── Data classes ─────────────────────────────────────────────────────────────
 @dataclass
@@ -164,8 +184,9 @@ class ResourceAgent:
         Fallback path: the transparent heuristic below, used when the model is
                        missing or inference fails (mirrors the Planner/Perf agents).
 
-        `correction_factor` (from historical feedback, function 9) still damps the
-        internal sizing estimate used by the heuristic fallback.
+        `correction_factor` (from historical feedback, function 9) scales the
+        internal sizing estimate. It is applied here and must survive the
+        later worker / DIU rescale.
         """
         name  = stage.get("name", "unknown")
         stype = stage.get("type", "notebook")
@@ -224,7 +245,7 @@ class ResourceAgent:
         requested_diu = int(stage.get("diu", 4))
         diu  = min(requested_diu, MAX_DIU)
         raw_s = ADF_STARTUP_S + max(20, int(mb / max(diu * ADF_MB_PER_DIU_PER_S, 0.1)))
-        dur_s = max(30, int(raw_s * cf))
+        dur_s = max(10, int(round(raw_s * cf)))
         cpu   = float(diu)        # ADF DIU ≈ 1 vCPU each
         mem   = diu * 1.5         # ~1.5 GB per DIU for shuffle buffers
 
@@ -235,7 +256,11 @@ class ResourceAgent:
             estimated_cpu=cpu, estimated_mem_gb=round(mem, 2),
             estimated_workers=0, estimated_diu=diu,
             estimated_duration_s=dur_s, confidence=conf,
-            rationale=f"ADF copy: {diu} DIU{clamp_note} × {ADF_MB_PER_DIU_PER_S} MB/s, {mb:.1f} MB input → ~{dur_s}s",
+            rationale=(
+                f"ADF copy: {diu} DIU{clamp_note} × {ADF_MB_PER_DIU_PER_S} MB/s, "
+                f"{mb:.1f} MB input → ~{dur_s}s"
+                + (f" × {cf:.2f} learned" if abs(cf - 1.0) > 0.001 else "")
+            ),
             requested_workers=0, requested_diu=requested_diu,
         )
 
@@ -265,7 +290,7 @@ class ResourceAgent:
         write_s      = max(10, int(rows / DBX_ROWS_PER_S)) if rows else 15
 
         raw_s  = startup_s + data_load_s + transform_s + filter_s + write_s
-        dur_s  = max(60, int(raw_s * cf))
+        dur_s  = max(10, int(round(raw_s * cf)))
 
         # Memory: driver (~4 GB overhead) + workers
         cpu    = spec["cpu"] * max(workers, 1)
@@ -277,6 +302,7 @@ class ResourceAgent:
             f"{transform_count} transforms, {agg_count} aggs, "
             f"~{rows} rows → startup {startup_s}s + data {data_load_s}s "
             f"+ ops {transform_s+filter_s}s + write {write_s}s = {dur_s}s"
+            + (f" × {cf:.2f} learned" if abs(cf - 1.0) > 0.001 else "")
         )
         return StageRequirements(
             stage_name=name, stage_type="notebook",
@@ -293,23 +319,25 @@ class ResourceAgent:
         """
         Re-estimate wall-clock time when parallelism changes.
 
-        Only the *variable* portion of the run scales with parallelism — the
-        fixed startup / cold-start floor does not (spinning up a cluster or
-        triggering an ADF pipeline costs the same regardless of DIU/worker
-        count). Scaling the whole duration (as the old inline formulas did)
-        over-penalized down-sizing; here the floor is held constant and only
-        the work above it scales inversely with parallelism.
+        Only the variable portion of the run scales with parallelism. The
+        startup floor is the part of *this* estimate that does not shrink
+        with more workers or DIU. It must not be a fresh 120s (or 30s) pasted
+        on top: once the correction factor had shortened a notebook below the
+        cold-start constant, that paste pinned every notebook at 120s and the
+        learned factor stopped affecting the duration the rest of the
+        pipeline uses.
         """
         if stype == "copy":
-            floor, min_s = float(ADF_STARTUP_S), 30
+            nominal = float(ADF_STARTUP_S)
         else:
-            floor, min_s = float(DBX_COLD_START_S + DBX_PIP_INSTALL_S), 60
+            nominal = float(DBX_COLD_START_S + DBX_PIP_INSTALL_S)
 
-        variable = max(0.0, base_s - floor)
+        floor = min(nominal, float(base_s))
+        variable = max(0.0, float(base_s) - floor)
         bu = max(base_units, 1)          # driver-only / 0-DIU → treat as 1 unit
         nu = max(new_units, 1)
         scaled = floor + variable * (bu / nu)
-        return max(min_s, int(round(scaled)))
+        return max(10, int(round(scaled)))
 
     def estimate_stage_duration(
         self,
@@ -740,55 +768,140 @@ class ResourceAgent:
             if stage_type is None or r.get("stage_type") == stage_type
         ]
 
-    # Bounds on the learned multiplier — a handful of odd runs must never
-    # make the agent predict 10x too long or too short.
+    # A few odd runs must not shrink a prediction below a third of the
+    # formula, or stretch it past 3x.
     CORRECTION_BOUNDS = (0.33, 3.0)
 
     @staticmethod
-    def _failed_run_ids() -> set:
-        """run_ids the Manager logged as failed. Their per-stage "actuals" are
-        abort time or retry backoff, not real stage runtime — legacy rows from
-        them are ignored (new ones are no longer written)."""
+    def _manager_feedback_index() -> Tuple[set, Dict[str, float]]:
+        """Failed run ids, and file size (MB) by run_id, from the manager log.
+
+        Failed runs' per-stage "actuals" are abort time or retry backoff.
+        Size is joined from here because older resource rows did not store it.
+        """
         from jsonl_log import read_jsonl
 
         try:
             recs = read_jsonl(os.path.join(_DATA_DIR, "manager_feedback.jsonl"))
         except Exception:
-            return set()
-        return {r.get("run_id") for r in recs if r.get("final_status") == "failed"}
+            return set(), {}
+        failed = {r.get("run_id") for r in recs if r.get("final_status") == "failed"}
+        sizes: Dict[str, float] = {}
+        for r in recs:
+            rid = r.get("run_id")
+            mb = r.get("file_size_mb")
+            if rid and mb:
+                sizes[rid] = float(mb)
+        return failed, sizes
 
-    def get_correction_factor(self, stage_type: str) -> float:
+    @staticmethod
+    def _stored_raw_s(row: dict) -> float:
+        raw = row.get("raw_predicted_duration_s")
+        if raw:
+            return float(raw)
+        pred = row.get("predicted_duration_s") or 0
+        cf = row.get("correction_factor") or 1.0
+        return float(pred / cf) if cf else float(pred)
+
+    @classmethod
+    def _floor_pinned(cls, row: dict) -> bool:
+        """True when the recorded duration was snapped back to the cold-start floor.
+
+        The fingerprint is a prediction sitting on that floor while the
+        stored raw is floor/factor — several times the real formula. Those
+        rows are not usable as raw ratios.
+        """
+        cf = row.get("correction_factor") or 1.0
+        pred = row.get("predicted_duration_s") or 0
+        if cf >= 0.999 or pred <= 0:
+            return False
+        floor = _startup_floor_s(row.get("stage_type") or "notebook")
+        return pred <= floor + 0.5 and cls._stored_raw_s(row) > floor * 1.5
+
+    def _run_ratios(self, stage_type: str) -> List[Tuple[Optional[float], float]]:
+        """One (size_mb, actual/raw) per completed run, in log order.
+
+        Stages that share a run_id are one observation: the manager splits
+        a single execution time across them by predicted share, so counting
+        each stage would weigh a wide plan more than a narrow one. Rows
+        with no run_id (direct feedback calls) each stand alone.
+
+        A duration that was pinned to the cold-start floor does not carry
+        the formula's raw value (it was stored as floor/factor). When this
+        stage type has at least two real raws, that pinned row uses their
+        median instead, so the old rows still teach the factor.
+        """
+        failed, sizes = self._manager_feedback_index()
+        rows = [
+            r for r in self._load_feedback(stage_type)
+            if r.get("run_id") not in failed and r.get("success") is not False
+        ]
+        clean_raws = [
+            self._stored_raw_s(r) for r in rows
+            if not self._floor_pinned(r) and self._stored_raw_s(r) > 0
+        ]
+        typical_raw = _median(clean_raws) if len(clean_raws) >= 2 else None
+
+        groups: Dict[str, List[dict]] = {}
+        order: List[str] = []
+        for i, r in enumerate(rows):
+            rid = r.get("run_id") or ""
+            key = rid if rid else f"__row_{i}"
+            if key not in groups:
+                order.append(key)
+                groups[key] = []
+            groups[key].append(r)
+
+        out: List[Tuple[Optional[float], float]] = []
+        for key in order:
+            stages = groups[key]
+            actual_s = 0.0
+            raw_s = 0.0
+            size_mb = None
+            for r in stages:
+                actual = r.get("actual_duration_s") or 0
+                raw = self._stored_raw_s(r)
+                if self._floor_pinned(r) and typical_raw and raw > 1.6 * typical_raw:
+                    raw = typical_raw
+                if actual > 0 and raw > 0:
+                    actual_s += actual
+                    raw_s += raw
+                if size_mb is None and r.get("size_mb"):
+                    size_mb = float(r["size_mb"])
+            if raw_s <= 0 or actual_s <= 0:
+                continue
+            if size_mb is None:
+                rid = stages[0].get("run_id") or ""
+                if rid and rid in sizes:
+                    size_mb = sizes[rid]
+            out.append((size_mb, actual_s / raw_s))
+        return out
+
+    def get_correction_factor(self, stage_type: str, size_mb: Optional[float] = None) -> float:
         """
         Multiplier for the raw heuristic duration, learned from feedback.
         1.0  = predictions are accurate.
         >1.0 = predictions were consistently too short (actual > predicted).
         <1.0 = predictions were consistently too long.
 
-        The ratio is taken against the RAW (uncorrected) prediction: the
-        recorded predicted_duration_s already had the then-current factor
-        applied, and comparing against that makes the factor settle halfway
-        (true 0.5 → 0.81). The median of the last 10 raw ratios is used
-        directly — it is recomputed on every call, so a fixed damping factor
-        would never converge, only permanently under-correct.
+        The ratio is actual / raw prediction. The median of the last 10 runs
+        is used directly — a fixed damping factor would never converge.
+        When `size_mb` is given and that size band has at least 3 runs, only
+        those runs are used. Small files and larger files do not share one
+        factor. Fewer than 3 runs in the band, or no size, uses every run.
         """
-        failed = self._failed_run_ids()
-        ratios = []
-        for r in self._load_feedback(stage_type):
-            if r.get("run_id") in failed or r.get("success") is False:
-                continue
-            pred = r.get("raw_predicted_duration_s") or (
-                (r.get("predicted_duration_s") or 0) / (r.get("correction_factor") or 1.0)
-            )
-            actual = r.get("actual_duration_s") or 0
-            if pred > 0 and actual > 0:
-                ratios.append(actual / pred)
-        if len(ratios) < 3:
+        points = self._run_ratios(stage_type)
+        if size_mb:
+            band = _size_band(size_mb)
+            banded = [ratio for sz, ratio in points if sz is not None and _size_band(sz) == band]
+            if len(banded) >= _MIN_BAND_RUNS:
+                points = [(size_mb, ratio) for ratio in banded]
+        ratios = [ratio for _, ratio in points]
+        if len(ratios) < _MIN_BAND_RUNS:
             return 1.0
         recent = sorted(ratios[-10:])
-        mid = len(recent) // 2
-        median = recent[mid] if len(recent) % 2 else (recent[mid - 1] + recent[mid]) / 2
         lo, hi = self.CORRECTION_BOUNDS
-        return round(min(hi, max(lo, median)), 3)
+        return round(min(hi, max(lo, _median(recent))), 3)
 
     def record_actual(
         self,
@@ -800,11 +913,14 @@ class ResourceAgent:
         actual_workers: int,
         run_id: str = "",
         correction_factor: float = 1.0,
+        size_mb: Optional[float] = None,
     ):
         """Record actual vs predicted for this stage (function 9).
 
         correction_factor: the multiplier already applied to
         predicted_duration_s, so learning can recover the raw prediction.
+        size_mb: input file size, so a later factor can be chosen by size
+        band without joining the manager log.
         Only call this for runs that actually executed successfully."""
         try:
             os.makedirs(_DATA_DIR, exist_ok=True)
@@ -822,6 +938,8 @@ class ResourceAgent:
                 "predicted_workers":    predicted_workers,
                 "actual_workers":       actual_workers,
             }
+            if size_mb and size_mb > 0:
+                record["size_mb"] = round(float(size_mb), 6)
             from jsonl_log import append_jsonl
 
             with _FEEDBACK_LOCK:
@@ -880,10 +998,13 @@ class ResourceAgent:
         if execution_groups is None:
             execution_groups = [[s["name"]] for s in stages]
 
-        # 9 — Load correction factors before predicting
-        corr_copy     = self.get_correction_factor("copy")
-        corr_notebook = self.get_correction_factor("notebook")
+        # 9 — Load correction factors before predicting. Size bands keep a
+        # small file from inheriting the factor learned on a much larger one.
+        size_mb = (csv_size_bytes / (1024 * 1024)) if csv_size_bytes else None
+        corr_copy     = self.get_correction_factor("copy", size_mb)
+        corr_notebook = self.get_correction_factor("notebook", size_mb)
         correction_factors = {"copy": corr_copy, "notebook": corr_notebook}
+        band = _size_band(size_mb) if size_mb else "all"
 
         # Log the Resource Agent's own self-correction state. Unlike the
         # Learning & Policy Update Agent's duration_correction_factor /
@@ -895,10 +1016,12 @@ class ResourceAgent:
         # PERF PREDICT / COST OPTIMIZATION log style.
         copy_n = len(self._load_feedback("copy"))
         notebook_n = len(self._load_feedback("notebook"))
+        size_note = f"{size_mb:.2f} MB {band}" if size_mb else "size unknown"
         print(
             f"[Learning Agent] Resource Agent — "
             f"copy factor={corr_copy:.3f} ({copy_n} record(s)) · "
-            f"notebook factor={corr_notebook:.3f} ({notebook_n} record(s))"
+            f"notebook factor={corr_notebook:.3f} ({notebook_n} record(s)) · "
+            f"{size_note}"
         )
 
         # 1 + 2 — Predict per stage (ML recommender first, heuristic fallback)
@@ -968,10 +1091,19 @@ class ResourceAgent:
         # the Performance agent's prediction_source). Not a dataclass field to
         # keep the ResourcePlan contract backward-compatible.
         out["sizing_source"] = "ml_model" if any(a.ml_sized for a in allocations) else "heuristic"
+        out["correction_size_band"] = band
         return out
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+def _median(values: List[float]) -> float:
+    ordered = sorted(values)
+    mid = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[mid]
+    return (ordered[mid - 1] + ordered[mid]) / 2
+
+
 def _ts() -> str:
     import datetime
     return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")

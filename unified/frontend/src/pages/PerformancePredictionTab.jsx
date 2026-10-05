@@ -3,6 +3,7 @@ import {
   Activity, AlertTriangle, BarChart3, CheckCircle2, Clock, Gauge, RefreshCw, Target, TrendingUp, Zap,
 } from "lucide-react";
 import { perfPrediction, manager } from "../api.js";
+import { formatWhen } from "../formatTime.js";
 import { Alert, Badge, Button, Card, Empty, KV, PageHeader, Stat } from "../ui/components.jsx";
 
 const OUTCOME = {
@@ -91,7 +92,7 @@ function History({ history }) {
             return (
               <tr key={r.run_id || i}>
                 <td className="mono" style={{ color: "var(--text)" }}>{r.run_id ? r.run_id.slice(0, 8) : `#${i + 1}`}</td>
-                <td className="muted">{r.ts ? r.ts.slice(0, 16).replace("T", " ") : "—"}</td>
+                <td className="muted" style={{ whiteSpace: "nowrap" }}>{r.ts ? formatWhen(r.ts) : "—"}</td>
                 <td className="muted">{r.complexity || "—"} · {r.stage_count || "?"} stage(s)</td>
                 <td>{fmtSeconds(r.actual_duration_s)}</td>
                 <td>{fmtSeconds(r.predicted_duration_s)}</td>

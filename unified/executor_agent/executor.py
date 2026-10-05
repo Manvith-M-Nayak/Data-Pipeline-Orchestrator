@@ -86,27 +86,17 @@ def _blob_service_client():
 
 
 def create_blob_container(token: str, container_name: str):
-    url = (
-        f"https://management.azure.com/subscriptions/{AZURE_SUBSCRIPTION_ID}"
-        f"/resourceGroups/{AZURE_RESOURCE_GROUP}"
-        f"/providers/Microsoft.Storage/storageAccounts/{AZURE_STORAGE_ACCOUNT}"
-        f"/blobServices/default/containers/{container_name}?api-version=2021-09-01"
-    )
-    r = requests.put(
-        url,
-        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-        json={"properties": {"publicAccess": "None"}},
-        timeout=30,
-    )
-    if r.status_code in (200, 201):
+    # The service principal can sign in, but it is not allowed to create
+    # containers through the management API (403 AuthorizationFailed). The
+    # storage account key can, and the later upload uses that same key.
+    del token
+    from azure.core.exceptions import ResourceExistsError
+
+    try:
+        _blob_service_client().create_container(container_name)
         print(f"   Container '{container_name}' created")
-    elif r.status_code == 409:
+    except ResourceExistsError:
         print(f"   Container '{container_name}' already exists")
-    else:
-        # Fail here with the real reason instead of a vaguer upload error later.
-        raise RuntimeError(
-            f"Creating container '{container_name}' failed: {r.status_code} {r.text[:200]}"
-        )
 
 
 def purge_container(container_name: str):

@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { executor } from "../api.js";
 import { useAppContext, isLive } from "../AppContext.jsx";
+import { formatWhen } from "../formatTime.js";
 import StreamingConsole from "./StreamingConsole.jsx";
 import AgentFlow from "../flows/AgentFlow.jsx";
 import PipelineFlow from "../flows/PipelineFlow.jsx";
@@ -25,7 +26,7 @@ function DecisionLog({ decisions }) {
       <div className="list">
         {decisions.map((d, i) => (
           <div key={i} className="list-row" style={{ alignItems: "flex-start", gap: 10, padding: "8px 0" }}>
-            <span className="mono faint" style={{ fontSize: 11.5, width: 58, flexShrink: 0, paddingTop: 2 }}>{d.ts?.slice(11, 19)}</span>
+            <span className="mono faint" style={{ fontSize: 11.5, flexShrink: 0, paddingTop: 2, whiteSpace: "nowrap" }}>{formatWhen(d.ts)}</span>
             <Badge tone={SEV_TONE[d.severity] || "neutral"} style={{ flexShrink: 0 }}>{d.severity}</Badge>
             <div style={{ minWidth: 0 }}>
               <div style={{ color: "var(--text)", fontWeight: 500, fontSize: 12.5 }}>{d.action}</div>
@@ -442,7 +443,7 @@ export default function ManagerTab() {
                     <td><Badge tone={RUN_TONE(r.status)}>{r.status?.replace("_", " ")}</Badge></td>
                     <td className="muted" style={{ maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.step}</td>
                     <td>{r.stage_count}</td>
-                    <td className="muted mono" style={{ fontSize: 12 }}>{(r.started_at || "").slice(5, 16).replace("T", " ")}</td>
+                    <td className="muted mono" style={{ fontSize: 12, whiteSpace: "nowrap" }}>{formatWhen(r.started_at) || "—"}</td>
                   </tr>
                 ))}
               </tbody>

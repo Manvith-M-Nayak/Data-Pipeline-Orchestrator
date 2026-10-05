@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import { useAppContext, isLive } from "../AppContext.jsx";
 import { manager, executor } from "../api.js";
+import { formatWhen } from "../formatTime.js";
 import AgentFlow from "../flows/AgentFlow.jsx";
 import PipelineFlow from "../flows/PipelineFlow.jsx";
 import { Alert, Badge, Button, Card, Empty, KV, PageHeader, Spinner, Stat } from "../ui/components.jsx";
@@ -22,13 +23,6 @@ function usualDuration(p) {
   return p.slower_than_usual
     ? { label: `slower (usually ≤${Math.round(p.expected_duration_s)}s)`, ok: false }
     : { label: `within usual (≤${Math.round(p.expected_duration_s)}s)`, ok: true };
-}
-
-// ISO timestamp → local, readable ("30 Sept 2026, 15:01:23").
-function fmtWhen(iso) {
-  if (!iso) return "";
-  const d = new Date(iso);
-  return isNaN(d) ? iso : d.toLocaleString(undefined, { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
 function metricValue(k, v) {
@@ -56,7 +50,7 @@ function DecisionLog({ decisions }) {
       <div className="list">
         {shown.map((d, i) => (
           <div key={i} className="list-row" style={{ alignItems: "flex-start", padding: "8px 0" }}>
-            <span className="mono faint" style={{ fontSize: 11.5, width: 58, flexShrink: 0, paddingTop: 2 }}>{d.ts?.slice(11, 19)}</span>
+            <span className="mono faint" style={{ fontSize: 11.5, flexShrink: 0, paddingTop: 2, whiteSpace: "nowrap" }}>{formatWhen(d.ts)}</span>
             <Badge tone={SEV_TONE[d.severity] || "neutral"} style={{ flexShrink: 0 }}>{d.severity}</Badge>
             <div style={{ minWidth: 0 }}>
               <div style={{ color: "var(--text)", fontWeight: 500, fontSize: 12.5 }}>{d.action}</div>
@@ -119,7 +113,7 @@ function RunDetail({ runId, onBack }) {
       <PageHeader
         eyebrow="Run insights" icon={BarChart3}
         title={<>Run <span className="mono">{runId.slice(0, 8)}</span> <Badge tone={RUN_TONE(data.status)} dot style={{ verticalAlign: 4, marginLeft: 6 }}>{data.status}</Badge></>}
-        description={`${fmtWhen(data.started_at)}${data.completed_at ? ` → ${fmtWhen(data.completed_at)}` : ""}${data.started_at && data.completed_at ? ` · ${Math.round((new Date(data.completed_at) - new Date(data.started_at)) / 1000)}s` : ""}`}
+        description={`${formatWhen(data.started_at)}${data.completed_at ? ` → ${formatWhen(data.completed_at)}` : ""}${data.started_at && data.completed_at ? ` · ${Math.round((new Date(data.completed_at) - new Date(data.started_at)) / 1000)}s` : ""}`}
         actions={sink ? (
           <Button variant="primary" icon={Download} onClick={() => {
             setDownloadError("");
@@ -389,7 +383,7 @@ export default function RunInsights() {
                     <td>{r.actual_cost_usd != null ? `$${r.actual_cost_usd}` : "—"}</td>
                     <td>{r.assurance_passed != null ? <Badge tone={r.assurance_passed ? "ok" : "bad"}>{r.assurance_passed ? "passed" : "failed"}</Badge> : <span className="faint">—</span>}</td>
                     <td className="muted">{r.prediction_source || "—"}</td>
-                    <td className="muted mono" style={{ fontSize: 12 }}>{(r.started_at || "").slice(5, 16).replace("T", " ")}</td>
+                    <td className="muted mono" style={{ fontSize: 12, whiteSpace: "nowrap" }}>{formatWhen(r.started_at) || "—"}</td>
                   </tr>
                 ))}
               </tbody>

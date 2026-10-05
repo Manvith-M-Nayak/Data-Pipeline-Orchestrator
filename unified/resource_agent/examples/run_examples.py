@@ -215,26 +215,83 @@ def section_reallocate(agent):
     _assert(recs[0]["recommended_workers"] == 3, "scale_up bumps workers by one within the cap")
 
 
-def section_feedback():
-    _hr("F. Feedback loop — record_actual() drives a damped correction factor")
-    # Redirect the feedback log to a temp file so the demo never touches real data.
+def _temp_agent():
+    """ResourceAgent whose feedback log is a fresh temp file."""
     tmp = tempfile.mkdtemp(prefix="resource_demo_")
-    orig_dir, orig_log = ra._DATA_DIR, ra._FEEDBACK_LOG
     ra._DATA_DIR = tmp
     ra._FEEDBACK_LOG = os.path.join(tmp, "resource_feedback.jsonl")
+    return ResourceAgent()
+
+
+def section_feedback():
+    _hr("F. Feedback loop — one ratio per run, by file size, and it actually shortens the estimate")
+    # Redirect the feedback log to a temp file so the demo never touches real data.
+    orig_dir, orig_log = ra._DATA_DIR, ra._FEEDBACK_LOG
     try:
-        agent = ResourceAgent()
-        # Five notebook runs that each took 1.6x the predicted time.
+        agent = _temp_agent()
+        # Five notebook calls with no run_id: each stands alone. They took 1.6x.
         for i in range(5):
             agent.record_actual(f"nb{i}", "notebook", predicted_duration_s=100,
                                 actual_duration_s=160, predicted_workers=2, actual_workers=2)
         cf = agent.get_correction_factor("notebook")
         report = agent.get_accuracy_report()
-        print(f"  5 runs @ 1.6x -> correction_factor={cf}  "
+        print(f"  5 calls @ 1.6x -> correction_factor={cf}  "
               f"accuracy={report['by_type']['notebook']['accuracy_pct']}%")
-        # mean ratio 1.6, damped 50% -> 1.0 + 0.6*0.5 = 1.3
-        _assert(abs(cf - 1.3) < 1e-6, "correction factor is damped halfway toward the observed 1.6x")
+        _assert(abs(cf - 1.6) < 1e-6, "correction factor is the median raw ratio 1.6, not a damped halfway step")
         _assert(report["total_records"] == 5, "accuracy report counts every recorded run")
+
+        # Stages that share a run_id are one execution split by the manager,
+        # so they must count once. Two stages at 2.0x plus two runs at 1.0x
+        # -> median 1.0. Counting the duplicated stage would pull it to 1.5.
+        agent = _temp_agent()
+        agent.record_actual("a", "notebook", 100, 200, 1, 1, run_id="run-a")
+        agent.record_actual("b", "notebook", 100, 200, 1, 1, run_id="run-a")
+        agent.record_actual("c", "notebook", 100, 100, 1, 1, run_id="run-b")
+        agent.record_actual("d", "notebook", 100, 100, 1, 1, run_id="run-c")
+        collapsed = agent.get_correction_factor("notebook")
+        print(f"  one run recorded twice + two 1.0x runs -> {collapsed}")
+        _assert(abs(collapsed - 1.0) < 1e-6, "stages that share a run_id count as one ratio")
+
+        # Small files and larger files keep separate factors once each band
+        # has 3 runs. An unseen size falls back to the overall median.
+        agent = _temp_agent()
+        for i in range(4):
+            agent.record_actual(f"s{i}", "notebook", 100, 40, 1, 1, run_id=f"small-{i}", size_mb=1.0)
+            agent.record_actual(f"m{i}", "notebook", 100, 80, 1, 1, run_id=f"med-{i}", size_mb=20.0)
+        small = agent.get_correction_factor("notebook", size_mb=0.5)
+        medium = agent.get_correction_factor("notebook", size_mb=24.0)
+        huge = agent.get_correction_factor("notebook", size_mb=200.0)
+        print(f"  size bands -> small={small} medium={medium} unseen={huge}")
+        _assert(abs(small - 0.4) < 1e-6, "files under 5 MB use the small-file factor")
+        _assert(abs(medium - 0.8) < 1e-6, "files from 5 to 50 MB use the medium-file factor")
+        _assert(abs(huge - 0.6) < 1e-6, "a size band with no history falls back to the overall median")
+
+        # Predictions that were snapped to the 120s cold start stored
+        # raw = 120/factor, which is not the formula. They must not drag the
+        # factor down onto the 0.33 floor when real raws are known.
+        agent = _temp_agent()
+        for i in range(3):
+            agent.record_actual(f"clean{i}", "notebook", 140, 70, 1, 1,
+                                run_id=f"clean-{i}", correction_factor=1.0)
+        for i in range(5):
+            agent.record_actual(f"pin{i}", "notebook", 120, 60, 1, 1,
+                                run_id=f"pin-{i}", correction_factor=0.33)
+        pinned = agent.get_correction_factor("notebook")
+        print(f"  3 real raws + 5 cold-start snaps -> {pinned}")
+        _assert(abs(pinned - 0.429) < 0.01, "snapped rows are read against the real raw, not floor/factor")
+
+        # The learned factor has to change the duration that gets allocated.
+        # A 0.4 factor on a ~2 minute notebook used to come back out as 120s.
+        bare = {"name": "nb", "type": "notebook"}
+        req = agent.predict_stage(
+            bare, csv_size_bytes=1024, schema={"row_count": 100}, correction_factor=0.4,
+        )
+        alloc = agent.right_size(req, rec_workers=1, rec_diu=4)
+        print(f"  notebook × 0.4 -> requirement {req.estimated_duration_s}s, "
+              f"allocation {alloc.duration_s}s")
+        _assert(req.estimated_duration_s < 100, "the requirement itself is shortened")
+        _assert(alloc.duration_s < 100, "worker rescale does not restore the 120s cold start")
+        _assert(alloc.duration_s > 20, "the correction does not wipe the estimate")
     finally:
         ra._DATA_DIR, ra._FEEDBACK_LOG = orig_dir, orig_log
 

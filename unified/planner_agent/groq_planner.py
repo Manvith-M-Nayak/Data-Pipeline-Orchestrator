@@ -8,6 +8,8 @@ planner_common; this module only owns the Groq API call and its prompt.
 """
 
 import json
+import re
+import time
 import requests
 from urllib3.exceptions import ProtocolError, HTTPError as HTTPErrorFromUrllib3
 import settings
@@ -209,15 +211,23 @@ Design the complete unified ADF+Databricks pipeline configuration JSON:
     print("Groq LLaMA 3.3 70B is designing your unified ADF+Databricks pipeline...")
 
     try:
-        response = requests.post(
-            GROQ_URL,
-            headers={
-                "Content-Type":  "application/json",
-                "Authorization": f"Bearer {GROQ_API_KEY}",
-            },
-            json=payload,
-            timeout=30,
-        )
+        response = None
+        for attempt in range(5):
+            response = requests.post(
+                GROQ_URL,
+                headers={
+                    "Content-Type":  "application/json",
+                    "Authorization": f"Bearer {GROQ_API_KEY}",
+                },
+                json=payload,
+                timeout=60,
+            )
+            if response.status_code != 429 or attempt == 4:
+                break
+            match = re.search(r"try again in ([0-9.]+)s", response.text)
+            wait = float(match.group(1)) + 1 if match else 20
+            print(f"   Groq rate limit, waiting {wait:.0f}s (attempt {attempt + 1}/5)")
+            time.sleep(min(wait, 60))
 
         if response.status_code != 200:
             raise requests.exceptions.HTTPError(

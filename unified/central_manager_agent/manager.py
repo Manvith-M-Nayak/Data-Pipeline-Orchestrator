@@ -1309,6 +1309,11 @@ class CentralManager:
             factors = rp.get("correction_factors") or {}
             allocs = rp.get("allocations", [])
             total_predicted = sum(a.get("duration_s", 0) for a in allocs) or 1
+            size_mb = None
+            if state.csv_size_bytes:
+                size_mb = state.csv_size_bytes / (1024 * 1024)
+            elif state.predictions:
+                size_mb = state.predictions.get("file_size_mb") or None
             agent = ResourceAgent()
             for alloc in allocs:
                 pred_s = alloc.get("duration_s", 0)
@@ -1328,6 +1333,7 @@ class CentralManager:
                     correction_factor=factors.get(
                         "copy" if alloc.get("stage_type") == "copy" else "notebook", 1.0
                     ),
+                    size_mb=size_mb,
                 )
         except Exception as exc:
             print(f"[Manager] resource feedback non-fatal: {exc}")
