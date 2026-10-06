@@ -226,7 +226,7 @@ full contract 0% → 100%.
 **Caveat:** the number of held-out rows was not recorded in the doc. 🧪 Re-run on a
 fixed 250-row held-out split and report *n*.
 
-### 3.4 Exam B — out-of-distribution live test ✅ (older revision) / 🧪 re-run
+### 3.4 Exam B — out-of-distribution live test ✅ (older scoring script) — superseded by §B1
 
 Source: same doc §7.1; script `planner_agent/training/eval_live_planner.py` (8 free-form
 prompts: canonical filter, "drop the cheap stuff", "only EU region rows please", derived
@@ -358,9 +358,15 @@ time to generate a plan; a full plan generation takes ~41 s, §B1):
 Hardware: Apple M5, 16 GB unified memory, Ollama, Q4 base + LoRA.
 
 End-to-end `/api/planner/plan` with self-check: **29–53 s** in the live tests above.
-$ cost per plan: **0** (local). 🧪 For the paper: time 30 planner calls separately from
-intent calls and compare with the Groq backend (`PLANNER_BACKEND=groq`) on the same
-prompts — gives a latency/cost/quality table: *local 7B fine-tuned vs cloud large LLM*.
+$ cost per plan: **0** (local). **Local vs cloud (measured 2026-10-05, same 24 prompts):**
+
+| Planner | Time per plan | $ per plan | Correct (§B1 / §B16.6, strict scoring) |
+|---|---|---|---|
+| Local fine-tuned 7B (Apple M5) | ~41 s one generation (39–48 s); 42–56 s with self-check in the live batch | 0 | 96% (with repair) |
+| Groq gpt-oss-120b (free tier) | median 19.7 s (includes free-tier pauses) | ≈ $0.001 ($0.074 / 72 calls) | 52.8% ± 3.9 (with repair; lower bound) |
+
+The cloud model is about 2× faster per plan and costs about a tenth of a cent; the local model is
+far more often correct on this contract and keeps the data on the machine.
 
 ### 3.9 Fallback rate in production 🧮
 
@@ -660,10 +666,10 @@ history runs that log it, and in all Part B runs, §B5.6) — by design it is **
 deadline (needs 3 comparable runs). Integration test: 0 recommendations, source
 "heuristic" (no safe candidate).
 
-🧪 **To make cost results publishable:** run each test pipeline ≥ 3 times (to unlock the
-learned deadline), then measure % of runs with an accepted recommendation, formula-cost
-saving, and runtime change vs prediction. Ideally reconcile against Azure Cost Management
-for a few days.
+**Done on 2026-10-05 (§B16.4):** each pipeline ran 4 times, so the learned deadline was armed
+from run 3; the Cost agent still accepted **0** recommendations in 20 runs (its own runtime check
+rejects every cheaper candidate at a +20% budget). Still open: reconciling the formula cost
+against the Azure invoice (Cost Management).
 
 ---
 
@@ -863,7 +869,7 @@ logged paired data; the rest need runs. Two kinds of runs:
 | A1 | Planner LLM → deterministic default plan only | correct (executable + intent) | ✅ §B1 | 0% (24 prompts) |
 | A2 | Planner raw output, no repair layer | executable / correct | ✅ §B1 | 33% / 33% (vs 100% / 96% with repair) |
 | A3 | Base Qwen2.5-7B instead of fine-tuned | intent / correct | ✅ §B1 | intent 33% vs 96%; correct 4% vs 96% (with repair) |
-| A4 | Groq cloud LLM instead of local fine-tuned | correct, executable, intent, latency, $ | ✅ §B13.1 shipped path / 🧪 bare call | shipped path (model + this project's repair): **58.3%** correct, 79.2% executable, 70.8% intent, n = 24, median 22.4 s, **$0.026**, 0 fallbacks, vs 96% correct for the local fine-tuned model. A bare Groq call with repair removed is still unmeasured |
+| A4 | Groq cloud LLM instead of local fine-tuned | correct, executable, intent, latency, $ | ✅ §B13.1, §B16.6 | single run (second checkout): 58.3% correct, n = 24, median 22.4 s, $0.026. **3 repeats, paired (§B16.6): bare call (no repair) 50.0% ± 3.4, shipped 52.8% ± 3.9** (52.1% / 55.0% excluding API-error fallbacks), median 19.7 s, $0.074 for 72 calls — vs 96% for the local fine-tuned model. Strict scoring; a fair re-score is pending (Groq daily limit) |
 | A5 | No self-check / re-plan | correct | ✅ §B1 | 11/12 vs 12/12 (sales prompts) |
 | A6 | No intent guards (Guard 1/2) | intent-check accuracy, false flags | 🧪 offline | progression 15/18 → 27/27 (§4.2) |
 | A7 | No structural assurance gate | faulty plans reaching Databricks | ✅ §B3 | 600/1,400 (43%) vs 0; 400 of them silently wrong |
@@ -893,7 +899,7 @@ agents" table:
 | S5 | + Performance | 🧪 | 🧪 | 🧪 | 🧪 | n/a | 🧪 | 🧪 |
 | S6 | + Cost | 🧪 | 🧪 | 🧪 | 🧪 | 🧪 | 🧪 | 🧪 |
 | S7 | + Learning (full) | 🧪 | 🧪 | 🧪 | 🧪 | 🧪 | 🧪 | 🧪 |
-| S8 | + Monitor/anomaly | (same) | (same) | 🧪 | 🧪 | 🧪 | 🧪 | live stack 🧪; constructed rule check 100% P/R (§9.2) |
+| **S8 — full system, live 2026-10-05 (§B16)** | + Monitor/anomaly | 6/6 plans verified | outputs correct **16 / 20** completed runs | **20 / 24** completed (3 gate aborts, 1 upload failure) | **18.4%** (Perf ML, out-of-sample) | 24.5% (with the then-stale learned factor; 17.9% without) | $0.051 per completed run (formula) | 567.7 s on wrong-output runs + 553.7 s on the failed upload; anomaly labels 2/4 clearly right (§B16.5); constructed rule check 100% P/R (§9.2) |
 
 "Wasted cloud s" = cloud seconds spent on runs that failed or produced zero rows.
 
@@ -926,10 +932,10 @@ results can be grouped.
 | Baseline | What to compare | Status |
 |---|---|---|
 | Manual authoring (ADF UI + notebook by hand) | time-to-pipeline, errors; 3–5 users, 3 tasks | 🧪 small user study |
-| Single general LLM (GPT-class / Groq) writing the whole config, no agents | plan validity, intent, executability | 🧪 offline |
+| Single general LLM (GPT-class / Groq) writing the whole config, no agents | plan validity, intent, executability | ✅ §B16.6: Groq raw reply, no repair — valid JSON 95.8%, executable 75.0%, intent 63.9%, correct **50.0% ± 3.4** (3 × 24 prompts; strict scoring, lower bound) |
 | Rule-based template (the deterministic default) | intent coverage | ✅ §B15.6: 0% correct on 24 prompts (always executable) |
 | Base Qwen2.5-7B (no fine-tune) | 8 checks | ✅ §3.3–3.4 |
-| Heuristic resource sizing | settings, runtime | 🧮 §5.4, 🧪 live |
+| Heuristic resource sizing | settings, runtime | 🧮 §5.4; settings vs ML ✅ §5.5; live: planner's own settings vs Resource Agent ✅ §B16.7; heuristic-vs-ML *live runtime* still 🧪 |
 | Fixed SLA vs learned usual duration | false "slow" alarms across file sizes | ✅ §B15.2 (simulated): fixed 900 s 25% recall / 11% precision vs learned 58% / 64% |
 
 ---
@@ -980,7 +986,7 @@ results can be grouped.
 | Fig 13 | Confusion matrix, outcome classifier | metrics.json report | ✅ data |
 | Fig 14 | Feature importance (shows `baseline_s` = 0.908) | perf notebook | ✅ data |
 | Table | Agent stack ablation (§12.2) | — | 🧪 |
-| Table | Latency: local 7B vs cloud | ollama.log + Groq run | 🧮/🧪 |
+| Table | Latency: local 7B vs cloud | §3.8 table (B1 + B16.6) | ✅ data |
 
 ---
 
@@ -1220,7 +1226,8 @@ reliably correct.
 **Caveats:** one sample per prompt (repeat ×3 for mean ± std); self-check conditions on 12
 prompts; intent is scored by regexes written before the run (listed in
 `ablation_planner.py`), which can miss a correct but differently-phrased plan; raw outputs were
-not saved, so failures cannot be inspected afterwards (🧪 save them in the next run).
+not saved, so failures cannot be inspected afterwards (the Groq evaluation, §B16.6, now saves
+every reply; 🧪 add the same to `ablation_planner.py` before the next §B1 run).
 
 ---
 
@@ -1259,8 +1266,9 @@ Each is compared with the project's configured student-tier limits (`resource_ag
 **Meaning:** the Resource Agent is the component that enforces the subscription's limits
 (18.6% → 0%) and right-sizes in both directions — not just a cost cutter.
 **Caveats:** offline, on dataset plans; what Azure itself does with an over-limit request was not
-tested; the live with/without runtime and cost comparison is 🧪 (pin the planner's settings via
-`custom_settings` on identical runs).
+tested. **Live with/without runtime and cost: done in §B16.7** (planner's settings pinned on
+identical runs): no gain at 1,000 / 50,000 rows; at 25 MB the Resource Agent's DIU 2 made the copy
+slower (135 s vs 104 s per run).
 
 **Re-check 2026-10-04.** The planner dataset was regenerated with the generator's seed
 (`python planner_agent/training/generate_dataset.py --rows 5000 --seed 20260628`). That file
@@ -1432,7 +1440,8 @@ headline for generalisation; 8.8% is "in-distribution".
 
 **Why the retrain barely moved the metrics:** the retrain is evaluated on the synthetic
 held-out set (21,008 rows), where 9 more real rows change little. Its effect has to be
-judged on new real runs — 🧪 the next live batch.
+judged on new real runs — done in §B16.3 (Performance ML 18.4% out-of-sample after the
+2026-10-05 duration fix; a second automatic retrain happened during that batch, §B16.8).
 
 **Why the cost correction works out-of-sample:** the cost formula's bias is mostly a constant
 factor (it over-estimates duration-driven compute), so a single learned multiplier (0.79–0.86)
@@ -1696,7 +1705,7 @@ will ask for the measurement.
 | Resource self-correction | per-stage runtime MAPE | 151% / 224% | 60% / 62% | 5 / 6 | Part A §5.4 | ✅ |
 | Performance agent (ML vs formula) | runtime MAPE, history (in-distribution) | 81.3% (formula) | 8.8% (ML) | 13 / 6 | Part A §6.5 | ✅ |
 | Performance agent on new shapes (out-of-sample) | runtime MAPE | — | 51.1% (resource heuristic 53.6%) | 8 | B5.3 | ✅ |
-| Performance gate | runs aborted pre-execution | 0 | 4/12 runs (+ fan-out plan), all at P(failure) 0.49–0.52 | 12 | B5.4 | ✅ (outcome without gate 🧪) |
+| Performance gate | runs aborted pre-execution | 0 | 2026-10-03: 4/12 runs (+ fan-out plan) at P(failure) 0.49–0.52; 2026-10-05: 3/24 at 0.47–0.48. Offline precision of the rule 53.9% (§B10.1) | 12 / 24 | B5.4, B16.5, B10.1 | ✅ — evidence of false aborts: the same stages completed when grouped in parallel (§B7) and the same plan completed correctly when let through (§B16.5); a gate-off run is still the authors' call |
 | Learning agent | cost-estimate MAPE (history) | 50.3% | 29.9% | 8 | Part A §8.2 | ✅ |
 | Learning agent | cost-estimate MAPE (new live runs, out-of-sample) | 51.9% | 27.4% | 8 | B5.3 | ✅ |
 | Learning agent rollback | correct changes kept | — | 0 of 2 on 2026-10-03 (both rolled back on aborted runs). Filter now drops `success is False`; those factors were not rewritten | 2 | B5.5 | ✅ historical / ✅ filter |
@@ -1730,16 +1739,17 @@ will ask for the measurement.
    The duration and cost errors were rescored after the Resource duration fix (§B14), but
    in-sample. **Done on 2026-10-05 (§B16):** a fresh 24-run batch after the fix gives the
    out-of-sample errors (Resource 14.4%, Performance 18.4%) and arms the cost deadline (still 0
-   savings, §B16.4). The text below is the plan that was followed. 🧪 (Original next step:) a fresh batch after the fix (same six pipelines, three repeats) to
-   measure the fix out-of-sample, and arm the cost agent's deadline; check each filter
-   output against the expected row counts (§B13.2) before calling a run correct.
-6. **Groq planner — done** on the same 24 prompts (§B13). Correct 58.3% versus 96% for the
-   local fine-tuned model plus repair. The October 3 B1 table is unchanged.
+   savings, §B16.4), with every output checked against a local reference (16 / 20 correct,
+   §B16.1).
+6. **Groq planner — done** on the same 24 prompts (§B13; 3 paired repeats with and without
+   repair in §B16.6: 52.8% ± 3.9 shipped vs 96% for the local fine-tuned model plus repair).
+   Fair re-score pending (daily token limit).
 7. **Anomaly detector P/R — done** as a constructed-signal check (§9.2, §B12.8). Eight kinds,
    5 positives + 20 normals each, precision 100%, recall 100%, normal false-positive rate 0%.
+   Field check on real events: 2 of 4 labels clearly right (§B16.5).
 8. **Retrain performance model without `baseline_s` — done (§B15.5):** worse on live runs
-   (36.5% → 142.1% MAPE); keep the feature or replace it with settings features.
-   🧪 still to run.
+   (36.5% → 142.1% MAPE); keep the feature or replace it with settings features. 🧪 Still open:
+   the *replacement* (settings features instead of the estimate) has not been tried.
 
 **Remaining after 2026-10-05 (everything else in this list is done, see §B15–§B16):**
 - ⏱ Timed human study (§B8.2) — needs people.

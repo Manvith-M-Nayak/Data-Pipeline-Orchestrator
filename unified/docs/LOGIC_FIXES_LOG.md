@@ -1235,3 +1235,9 @@ No code, model or data file was changed.
 - A hash snapshot was first written to `/tmp`; removed.
 - Earlier summary said 19 completed / 4 gate aborts; correct figures are 20 completed, 3 gate aborts + 1 upload failure.
 - The Groq fair re-run was started without checking the daily token budget; it hit the limit and was stopped (its log is labelled ABORTED).
+
+### Stage 20, clean-up — stale "to run" markers (2026-10-06)
+
+**Commit message:** `docs: mark completed results and remove stale to-run markers`
+
+Notes only, no runs. Items already measured but still marked open were updated to point at their results: local vs cloud latency table (§3.8, from §B1 + §B16.6), cost results with an armed deadline (§7.4 → §B16.4), Groq bare call / single-LLM baseline (A4, §13 → §B16.6), live Resource with/without (§B2 caveat, §13 → §B16.7), retrain effect on new runs (§B5.3 → §B16.3), full-system row S8 of the agent-stack table (from the §B16 batch: 20/24 completed, 16/20 correct, Perf ML 18.4%, cost 24.5% / 17.9%, $0.051 per run, 567.7 s on wrong-output runs + 553.7 s on the failed upload), the Performance-gate summary row (adds the 2026-10-05 aborts and the false-abort evidence), §3.4 marked superseded by §B1, and the B10 list. Remaining 🧪/⏱ markers are all genuinely open.
