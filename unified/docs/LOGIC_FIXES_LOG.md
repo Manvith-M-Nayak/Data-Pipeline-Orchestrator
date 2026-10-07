@@ -1241,3 +1241,28 @@ No code, model or data file was changed.
 **Commit message:** `docs: mark completed results and remove stale to-run markers`
 
 Notes only, no runs. Items already measured but still marked open were updated to point at their results: local vs cloud latency table (§3.8, from §B1 + §B16.6), cost results with an armed deadline (§7.4 → §B16.4), Groq bare call / single-LLM baseline (A4, §13 → §B16.6), live Resource with/without (§B2 caveat, §13 → §B16.7), retrain effect on new runs (§B5.3 → §B16.3), full-system row S8 of the agent-stack table (from the §B16 batch: 20/24 completed, 16/20 correct, Perf ML 18.4%, cost 24.5% / 17.9%, $0.051 per run, 567.7 s on wrong-output runs + 553.7 s on the failed upload), the Performance-gate summary row (adds the 2026-10-05 aborts and the false-abort evidence), §3.4 marked superseded by §B1, and the B10 list. Remaining 🧪/⏱ markers are all genuinely open.
+
+## Stage 21 — Paper draft in Springer LNCS format (2026-10-07)
+
+**Commit message:** `docs: add Springer LNCS paper draft with results, figures and build setup`
+
+| File | Change |
+|---|---|
+| `docs/paper/paper.tex` *(new)* | 10-page LNCS paper: design, methods, setup, results (planner ablation, fault injection, live Azure, learning loop, negative results), limitations. Charts drawn in pgfplots/TikZ (no image files). Every number traced to `docs/PAPER_RESULTS.md`. Author names and institution are placeholders. |
+| `docs/paper/paper.pdf` *(new)* | Built with Tectonic. |
+| `.vscode/settings.json` *(new, repo root)* | LaTeX Workshop builds with Tectonic on save and previews the PDF in a tab. |
+
+**Installed on the machine:** `tectonic` and `poppler` (Homebrew), VS Code extension `james-yu.latex-workshop`.
+
+**Accuracy checks before building:** compared like with like (96% vs 52.8% on the same 24 requests; the 100% self-check result stated with its n = 12); the 14.4% duration error states its excluded outlier (18.3% with it); operation types 10, not 11; "snapped back" applies to notebook estimates only. **Layout checks:** rendered every page; fixed a title break, an arrow over a label, and three tables wider than the text block (up to 105 pt); one 1.3 pt overflow in Fig. 1 remains (invisible).
+
+### Stage 21, continued — paper rewritten: plainer prose, more charts (2026-10-07)
+
+**Commit message:** `docs: humanize paper and add charts for all key results`
+
+| File | Change |
+|---|---|
+| `docs/paper/paper.tex` | Prose rewritten in plain first-person style and shortened; tables replaced by charts. Now 9 figures (architecture + 8 two-panel charts): fine-tuning loss and template-rule violations; planner ablation (8 configurations); fate of 1,400 injected faults and over-limit plans by size; duration estimate vs actual before/after the fix and MAPE bars; time breakdown per run and runtime vs input size; parallel vs sequential and streaming chained vs merged; simulated correction-factor trace and cost MAPE with/without learning; abort-rule precision/recall vs threshold and fixed vs learned slow-run detection. Results added: `baseline_s` drop test (36.5% → 142.1%), time breakdown, input-size scaling, streaming per-drop times, abort threshold sweep, slow-run detection. Still 10 pages, no overfull boxes. All numbers taken from `docs/PAPER_RESULTS.md`. |
+| `docs/paper/paper.pdf` | Rebuilt. |
+
+**Layout checks:** rendered all pages; fixed overlapping legends/labels (Figs. 5a, 7b, 8a, 8b), raised headroom on bar charts, rotated crowded value labels, and made every bar value print with one decimal.

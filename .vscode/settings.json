@@ -1,0 +1,17 @@
+{
+  // LaTeX Workshop: build with Tectonic (brew install tectonic) and preview the PDF in a VS Code tab.
+  "latex-workshop.latex.tools": [
+    {
+      "name": "tectonic",
+      "command": "tectonic",
+      "args": ["--synctex", "--keep-logs", "%DOCFILE%.tex"],
+      "env": {}
+    }
+  ],
+  "latex-workshop.latex.recipes": [
+    { "name": "tectonic", "tools": ["tectonic"] }
+  ],
+  "latex-workshop.latex.recipe.default": "tectonic",
+  "latex-workshop.latex.autoBuild.run": "onSave",
+  "latex-workshop.view.pdf.viewer": "tab"
+}
