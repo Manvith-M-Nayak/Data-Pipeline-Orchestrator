@@ -148,7 +148,7 @@ cooperating agents, each owning exactly one decision (`docs/RESPONSIBILITIES.md`
 | H37 | Live batch after the duration fix (24 runs, outputs verified against a local reference) | 20 completed, **16 / 20 outputs correct** — all 4 wrong ones from one plan hit by a repair-layer bug; 3 gate aborts, 1 upload timeout | 24 | ✅ 2026-10-05 | B16.1–B16.2 |
 | H38 | Out-of-sample estimates after the duration fix | Resource **14.4%**, Performance ML **18.4%** MAPE (were 53.6% / 51.1%); cost agent 17.9% without vs 24.5% with the stale learned factor | 19–20 | ✅ 2026-10-05 | B16.3 |
 | H39 | Resource Agent settings vs planner's own, live | no gain at 1,000 / 50,000 rows; 25 MB: **135 s vs 104 s** (its DIU 2 slower) | 12 | ✅ 2026-10-05 | B16.7 |
-| H40 | Groq gpt-oss-120b, 3 repeats, raw vs repaired (strict scoring) | correct **50.0% ± 3.4 → 52.8% ± 3.9** (52.1% → 55.0% excluding 3 API-error fallbacks); a lower bound — see fair re-score | 72 calls | ✅ 2026-10-05 | B16.6 |
+| H40 | Groq gpt-oss-120b, 3 repeats, raw vs repaired (strict scoring) | correct **50.0% ± 3.4 → 52.8% ± 3.9** (52.1% → 55.0% excluding 3 API-error fallbacks). **2026-10-07 fair re-score (§B17.3): correct 79.2% ± 4.1, intent 97.9%; 95.8% ± 4.1 after the builder fix** (2 × 24, function-style filters translated) | 72 + 48 calls | ✅ 2026-10-05 / 10-07 | B16.6, B17.3 |
 
 ---
 
@@ -363,7 +363,7 @@ $ cost per plan: **0** (local). **Local vs cloud (measured 2026-10-05, same 24 p
 | Planner | Time per plan | $ per plan | Correct (§B1 / §B16.6, strict scoring) |
 |---|---|---|---|
 | Local fine-tuned 7B (Apple M5) | ~41 s one generation (39–48 s); 42–56 s with self-check in the live batch | 0 | 96% (with repair) |
-| Groq gpt-oss-120b (free tier) | median 19.7 s (includes free-tier pauses) | ≈ $0.001 ($0.074 / 72 calls) | 52.8% ± 3.9 (with repair; lower bound) |
+| Groq gpt-oss-120b (free tier) | median 19.7 s (includes free-tier pauses) | ≈ $0.001 ($0.074 / 72 calls) | 52.8% ± 3.9 strict; 79.2% ± 4.1 fair; **95.8% ± 4.1 fair after the builder fix** (§B17.3) |
 
 The cloud model is about 2× faster per plan and costs about a tenth of a cent; the local model is
 far more often correct on this contract and keeps the data on the machine.
@@ -869,7 +869,7 @@ logged paired data; the rest need runs. Two kinds of runs:
 | A1 | Planner LLM → deterministic default plan only | correct (executable + intent) | ✅ §B1 | 0% (24 prompts) |
 | A2 | Planner raw output, no repair layer | executable / correct | ✅ §B1 | 33% / 33% (vs 100% / 96% with repair) |
 | A3 | Base Qwen2.5-7B instead of fine-tuned | intent / correct | ✅ §B1 | intent 33% vs 96%; correct 4% vs 96% (with repair) |
-| A4 | Groq cloud LLM instead of local fine-tuned | correct, executable, intent, latency, $ | ✅ §B13.1, §B16.6 | single run (second checkout): 58.3% correct, n = 24, median 22.4 s, $0.026. **3 repeats, paired (§B16.6): bare call (no repair) 50.0% ± 3.4, shipped 52.8% ± 3.9** (52.1% / 55.0% excluding API-error fallbacks), median 19.7 s, $0.074 for 72 calls — vs 96% for the local fine-tuned model. Strict scoring; a fair re-score is pending (Groq daily limit) |
+| A4 | Groq cloud LLM instead of local fine-tuned | correct, executable, intent, latency, $ | ✅ §B13.1, §B16.6 | single run (second checkout): 58.3% correct, n = 24, median 22.4 s, $0.026. **3 repeats, paired (§B16.6): bare call (no repair) 50.0% ± 3.4, shipped 52.8% ± 3.9** (52.1% / 55.0% excluding API-error fallbacks), median 19.7 s, $0.074 for 72 calls — vs 96% for the local fine-tuned model. Strict scoring. **2026-10-07 fair re-score (§B17.3): correct 79.2% ± 4.1, intent 97.9%; 95.8% ± 4.1 after the builder fix** (2 × 24, function-style filters translated) |
 | A5 | No self-check / re-plan | correct | ✅ §B1 | 11/12 vs 12/12 (sales prompts) |
 | A6 | No intent guards (Guard 1/2) | intent-check accuracy, false flags | 🧪 offline | progression 15/18 → 27/27 (§4.2) |
 | A7 | No structural assurance gate | faulty plans reaching Databricks | ✅ §B3 | 600/1,400 (43%) vs 0; 400 of them silently wrong |
@@ -932,7 +932,7 @@ results can be grouped.
 | Baseline | What to compare | Status |
 |---|---|---|
 | Manual authoring (ADF UI + notebook by hand) | time-to-pipeline, errors; 3–5 users, 3 tasks | 🧪 small user study |
-| Single general LLM (GPT-class / Groq) writing the whole config, no agents | plan validity, intent, executability | ✅ §B16.6: Groq raw reply, no repair — valid JSON 95.8%, executable 75.0%, intent 63.9%, correct **50.0% ± 3.4** (3 × 24 prompts; strict scoring, lower bound) |
+| Single general LLM (GPT-class / Groq) writing the whole config, no agents | plan validity, intent, executability | ✅ §B16.6: Groq raw reply, no repair — valid JSON 95.8%, executable 75.0%, intent 63.9%, correct **50.0% ± 3.4** (3 × 24 prompts; strict scoring). Fair scoring (§B17.3): 79.2% ± 4.1; 95.8% ± 4.1 after the builder fix |
 | Rule-based template (the deterministic default) | intent coverage | ✅ §B15.6: 0% correct on 24 prompts (always executable) |
 | Base Qwen2.5-7B (no fine-tune) | 8 checks | ✅ §3.3–3.4 |
 | Heuristic resource sizing | settings, runtime | 🧮 §5.4; settings vs ML ✅ §5.5; live: planner's own settings vs Resource Agent ✅ §B16.7; heuristic-vs-ML *live runtime* still 🧪 |
@@ -1743,7 +1743,7 @@ will ask for the measurement.
    §B16.1).
 6. **Groq planner — done** on the same 24 prompts (§B13; 3 paired repeats with and without
    repair in §B16.6: 52.8% ± 3.9 shipped vs 96% for the local fine-tuned model plus repair).
-   Fair re-score pending (daily token limit).
+   Fair re-score done 2026-10-07 (§B17.3): 79.2% ± 4.1 correct, 97.9% intent; 95.8% after the builder fix — level with the local model.
 7. **Anomaly detector P/R — done** as a constructed-signal check (§9.2, §B12.8). Eight kinds,
    5 positives + 20 normals each, precision 100%, recall 100%, normal false-positive rate 0%.
    Field check on real events: 2 of 4 labels clearly right (§B16.5).
@@ -1753,10 +1753,12 @@ will ask for the measurement.
 
 **Remaining after 2026-10-05 (everything else in this list is done, see §B15–§B16):**
 - ⏱ Timed human study (§B8.2) — needs people.
-- 🧪 Groq fair re-score (§B16.6) — blocked by the free tier's daily token limit; 1 repeat ≈ 70,000 tokens.
+- ✅ Groq fair re-score — done 2026-10-07 (§B17.3).
 - 🧪 §B1 ×3 repeats and the self-check on zoo/IoT — local model; run when the laptop can take the load.
 - 🧪 The aborted plans with the gate off — the authors' decision (or adopt a threshold, §B10.1).
-- 🧪 Fix the repair-layer bug (§B16.2) and recalibrate ADF throughput per DIU (§B16.7), then re-run.
+- 🧪 Repair-layer bug fixed + gate rule added (§B17.1); ADF throughput measured (§B17.2). Still to do: a live batch to confirm 16/20 → 20/20, and recalibrate + retrain the Resource ML labels (CPU-heavy).
+- ✅ Notebook builder now compiles function-style comparisons on any numeric cast (§B17.3); Groq 79.2% → 95.8% correct.
+- 🧪 Repair-hit rate for the local fine-tuned model (needs Ollama; Groq done in §B17.4).
 - 🧪 GPU-only items: validation loss, v1 vs v2 dataset fine-tune, in-distribution n (Part A §3).
 - 🧪 Human labels for LLM root-cause accuracy (Part A §9.3).
 
@@ -2057,7 +2059,7 @@ October 3 tables do not use this duration path and were not re-run.
 | Deterministic layers give reliability | executable 33% → 100%; faulty plans reaching the cloud 43% → 0% | B1, B3 |
 | Agents are complementary, not redundant | each removal hurts a different metric | B9 |
 | Learning loop helps on real data | cost MAPE 50.3% → 29.9% (history), 51.9% → 27.4% (new runs) | A8.2, B5.3 |
-| Resource duration fix removes the 120 s floor that blocked learning | fits the 12-run batch to 8.3% after the fix (in-sample; out-of-sample test 🧪) | B13.2, B14 |
+| Resource duration fix removes the 120 s floor that blocked learning | out of sample on the next 24-run batch: duration MAPE 53.6% → 14.4% (18.3% with the 15-min outlier) | B13.2, B14, B16.3 |
 | Learned pre-execution gates need calibrated thresholds | current rule 53.9% precision offline; live false aborts at P ≈ 0.5 | B10.1, B5.4, B7 |
 | Completed is not correct | Groq live batch: 12/12 completed, filter outputs wrong | B13.2 |
 | Cloud model on the same prompts | Groq shipped path 58.3% correct vs local fine-tuned 96% | B13.1 |
@@ -2409,7 +2411,7 @@ these pipelines, so with and without the Cost agent the runs and the cost are id
   failure ✅, `timeout` on the upload failure ⚠️ (mislabelled: the run ended; the message contained
   "timed out"), `failure` on a gate abort ⚠️ (the run never executed). 2 / 4 labels clearly correct.
 
-### B16.6 Groq planner, 3 repeats, raw vs repaired (paired) ✅ / fair re-scoring 🧪
+### B16.6 Groq planner, 3 repeats, raw vs repaired (paired) ✅ / fair re-scoring ✅ (§B17.3)
 
 `groq_bare_eval.py`, 24 prompts × 3 repeats, the raw reply captured before repair (same sample).
 $0.074 for all 72 calls; median 19.7 s per plan; 3 fallbacks — all three were API errors
@@ -2432,7 +2434,7 @@ full rule book in its prompt), so there is little to repair; its weakness is int
 tier's 200,000 tokens/day limit was reached (the 3 repeats used ~214,000), and every further call
 fell back to the default plan. 🧪 Re-run once the rolling 24 h window frees up
 (`groq_bare_eval.py out.json 1` needs ~70,000 tokens). Until then, read Groq's intent and correct
-rates as **lower bounds**.
+rates as **lower bounds**. **Update 2026-10-07: done, see §B17.3.**
 Also found: `greater(toDouble(temperature), 30)` does **not** compile — the notebook builder does
 not fully support the function style that the Groq prompt teaches (a real gap, independent of
 scoring).
@@ -2482,3 +2484,142 @@ cycles, one per 5 runs; aborted and failed runs mixed in):
 rollback safety net no longer misfires on aborted runs. The drift flags show the Resource
 Agent's own per-stage factors now sit *above* 1.0 (estimates too short) — the duration fix
 removed the old over-estimate and slightly overshot; worth watching.
+
+## B17. Offline follow-ups — 2026-10-07 (no local model, no new Azure runs) ✅
+
+Done without the local LLM (to keep the laptop cool) and without new pipeline runs.
+
+### B17.1 Repair-layer bug (§B16.2) fixed, and a gate rule that would have caught it ✅
+
+**Fix** (`planner_agent/planner_common.py::_normalize_container_names`): when the model emits the
+same container name twice, lists that line up with `containers_to_create` (the `containers` map,
+`datasets`) are remapped **by position**, duplicate dataset names get a suffix (`DS_Transform_2`),
+and stage references to the duplicated name are resolved along the data flow (a stage reads the
+container most recently written; it writes the next copy not yet written).
+**Gate rule** (`central_manager_agent/manager.py::validate_plan`, i.e. before any cloud call):
+block a plan if (a) a notebook/stream stage writes into the container it reads **and a later
+stage reads that container**, or (b) two datasets share a name. Writing into one's own input is
+allowed for the last stage, because its output lands in `output/` and nothing reads it again —
+a first version that blocked every read = write stage flagged 37 of 57 saved plans, almost all
+valid, and was narrowed before use.
+
+**How tested:**
+1. The model's duplicate-name plan rebuilt by hand (ingest, transform, transform, raw). Old code:
+   `Stage_1` reads and writes `transform-2`, both datasets named `DS_Transform` → `transform-2`
+   (the bug exactly as in §B16.2). New code: copy → `transform`, `Stage_1` `transform` →
+   `transform-2`, `Stage_2` `transform-2` → `raw`, datasets `DS_Transform` / `DS_Transform_2`.
+2. The new gate rule replayed on all 57 saved live plans (both batches):
+
+| Saved live plans | Gate rule fires | Gate rule silent |
+|---|---|---|
+| Output checked and **wrong** (2026-10-05) | **4 / 4** | 0 |
+| Output checked and **correct** (2026-10-05) | **0** | **28 / 28** |
+| Not output-checked, completed | 2 (2026-10-03 `agg3` plans with the same wiring) | 12 |
+| Failed runs | 1 (the re-check plan 02d75428, duplicate dataset name) | 10 |
+
+**Meaning:** on this sample the rule separates wrong from correct outputs perfectly and costs
+microseconds. With it, the four silent wrong outputs of §B16 would have been blocked before any
+Azure spend; with the fix, the same model reply now yields a correct plan. **Not yet shown live**
+(needs a new batch with the local planner); expected effect 16/20 → 20/20 correct.
+
+### B17.2 ADF copy metrics from Azure's own run history ✅ (read-only)
+
+`scripts/paper_eval/adf_copy_metrics.py` asks ADF (`queryActivityruns`) for the copy activity of
+every saved live run: queue time, transfer time, DIUs actually used. 47 copy activities, all
+found, all succeeded. Out: `data/paper_eval/offline_20261007/adf_copy_metrics.json`.
+
+| File | DIU used | n | Copy activity (median, range) | Queue | Transfer |
+|---|---|---|---|---|---|
+| 0.06 MB | 2 | 20 | 18.4 s (15.9–28.5) | 8 s | 3 s |
+| 3.1 MB | 2 | 16 | 18.6 s (15.4–30.2) | 8 s | 4 s |
+| **25.5 MB** | **2** | 8 | **37.2 s** (30.6–42.9) | 9 s | **21 s** |
+| **25.5 MB** | **4** | 2 | **21.5 s** (19.8–23.2) | 7.5 s | **7 s** |
+
+**Findings:**
+- Queueing is ~8 s of every copy (median 42% of the activity), whatever the size.
+- Measured transfer throughput, after a ~3 s fixed part: about **0.7 MB/s per DIU at 2 DIU and
+  ~1.6 MB/s per DIU at 4 DIU** — 3–7× below the `ADF_MB_PER_DIU_PER_S = 5.0` the Resource Agent
+  (and its ML training labels, `resource_agent/ml/calibration.py`) assume.
+- On 25 MB, DIU 4 cuts the copy activity by 42% (37.2 → 21.5 s) for ~16% more DIU-seconds
+  (74 vs 86). This explains 16 s of the 21 s gap in §B16.7's "upload + copy" phase; the rest is
+  upload and trigger overhead outside ADF.
+- Below ~25 MB the copy is dominated by fixed costs, so DIU does not matter there (consistent with
+  §B16.7).
+
+**Recommendation (not applied):** set `ADF_MB_PER_DIU_PER_S ≈ 1.0` in both places and regenerate
+the Resource ML labels + retrain (CPU-heavy, so deferred), or simply let the recommender choose
+DIU 4 from ~20 MB upward. Changing only the heuristic constant would not change today's
+estimates (at 2 DIU and 1.0 MB/s the 20 s transfer floor still dominates below ~40 MB) and would leave the ML labels
+inconsistent, so it was left alone.
+
+### B17.3 Groq planner, fair re-score ✅
+
+`groq_bare_eval.py data/paper_eval/offline_20261007/groq_fair_2rep.json 2` — 24 prompts × 2
+repeats, 48 calls, **0 fallbacks**, median 21.9 s per plan, 145,186 tokens, $0.050. Same B1 checks;
+"fair" additionally translates the function-style filters the Groq prompt teaches
+(`equals(a,b)` → `a = b`, casts stripped) and accepts `x > 9` ≡ `x >= 10` on integer columns only.
+
+| Groq gpt-oss-120b (mean ± s.d. of 2 repeats) | Executable | Intent | **Correct** |
+|---|---|---|---|
+| Raw reply, strict scoring | 79.2% ± 4.1 | 68.8% ± 2.0 | 52.0% ± 6.2 |
+| Shipped (repaired), strict scoring | 79.2% ± 4.1 | 72.9% ± 2.1 | 56.2% ± 6.2 |
+| Raw reply, **fair** scoring | 79.2% ± 4.1 | **97.9% ± 2.1** | **79.2% ± 4.1** |
+| Shipped, **fair** scoring | 79.2% ± 4.1 | **97.9% ± 2.1** | **79.2% ± 4.1** |
+| (local fine-tuned + repair, §B1, strict) | 100% | 96% | **96%** |
+
+Strict numbers are within noise of §B16.6 (50.0 → 52.8%), so the two days are comparable.
+
+**Every fair-only pass checked by hand** (8 cases, e.g. `equals(region, 'EU')`,
+`greater(toInteger(quantity), 9)` for "at least 10", `equals(toInteger(predator), 1)`): all
+genuinely correct. **The 10 non-executable plans, diagnosed with the notebook builder:**
+8 compare a `toDouble(...)` cast (`greater(toDouble(unit_price), 99)`, `less(toDouble(...), 50)`),
+which `notebook_builder` rejects as "Unsupported transform function" — a gap in our code
+generator, not a model error; 1 uses an invented `lessThan(...)`; 1 keeps the user's typo
+(`quantiy`). The fair scorer is a superset of the strict one, so the local model's 96% would not
+go down under it.
+
+**Builder fix, then re-scored (same 48 saved plans, no new calls).** `notebook_builder.
+_convert_filter_raw` now accepts any function-style comparison (`equals`, `notEquals`, `greater`,
+`greaterOrEqual`, `less`, `lessOrEqual`) on a bare column or a `toInteger/toLong/toDouble/toFloat`
+cast, with integer or decimal numbers. Old outputs for the `toInteger` forms are byte-identical;
+`lessThan(...)` (not ADF DSL) is still rejected. Executable = passes `plan_safety_issues` and the
+generated notebook compiles (same definition as §B1; not run on Spark).
+
+| Groq gpt-oss-120b, after the builder fix | Executable | Intent | **Correct** |
+|---|---|---|---|
+| Raw reply, strict | 95.8% ± 4.1 | 68.8% ± 2.0 | 66.7% ± 4.1 |
+| Shipped, strict | 95.8% ± 4.1 | 72.9% ± 2.1 | 70.8% ± 4.1 |
+| Raw / shipped, **fair** | **95.8% ± 4.1** | **97.9% ± 2.1** | **95.8% ± 4.1** |
+
+Remaining misses (2 of 48): the invented `lessThan(...)` and the kept typo `quantiy` — both
+model errors. The local model's numbers cannot change from this fix (it writes SQL-style filters,
+a different code path).
+
+**Meaning (changes the headline):** once its filter style is scored fairly and compiled, the
+120B cloud model is **as good as** the local fine-tuned 7B (95.8% vs 96% correct). The local
+model's advantage is therefore not accuracy but: no per-plan cost, data never leaves the machine,
+and it works offline; the cloud model is ~2× faster (≈20 s vs 41 s). Before the fix, 8 of
+Groq's 10 failures were our code generator's, not the model's — a concrete case of the
+evaluation harness, not the model, being the bottleneck. The paper now uses these numbers.
+
+### B17.4 Repair-layer hit rate (Groq replies) ✅
+
+`scripts/paper_eval/repair_hits.py` replays each saved raw reply through the same chain as
+`groq_planner.decide_pipeline_config`, one function at a time. **Fidelity: the replay reproduces
+the shipped plan exactly for 48/48 replies.** The `execution_groups` drop-and-rebuild that happens
+to every plan is ignored as bookkeeping.
+
+| Repair function | Changed the plan (of 48) |
+|---|---|
+| `_structural_validate` (rest: trims surplus trailing do-nothing stages) | **27 (56.2%)** |
+| `apply_prompt_stage_names` | 4 (8.3%) |
+| `reconcile_prompt_filters` | 2 (4.2%) — same size as the +4.2-point strict correct gain (raw → shipped) |
+| `enforce_container_count`, `redistribute_operations`, `strip_auto_timestamp`, `apply_custom_settings`, container / identifier renaming | 0 |
+| Any function | 27 (56.2%) |
+| Raw not executable → repaired executable | **0** |
+| Raw executable → broken by repair | **0** |
+
+**Meaning:** for a large model with the full rule book, repair is tidy-up (surplus stages) and
+two small intent fixes; it rescues nothing, matching §B16.6. For the local fine-tuned model
+repair takes executable plans from 33% to 100% (§B1); its per-function table needs the local
+model (raw replies were not saved in §B1) — 🧪.

@@ -1266,3 +1266,23 @@ Notes only, no runs. Items already measured but still marked open were updated t
 | `docs/paper/paper.pdf` | Rebuilt. |
 
 **Layout checks:** rendered all pages; fixed overlapping legends/labels (Figs. 5a, 7b, 8a, 8b), raised headroom on bar charts, rotated crowded value labels, and made every bar value print with one decimal.
+
+## Stage 22 — Repair-layer fix, wiring gate, DSL comparisons, offline follow-ups (2026-10-07)
+
+**Commit message:** `fix: resolve duplicate containers by position, gate self-feeding stages, compile cast comparisons; add follow-up results`
+
+| File | Change | Why |
+|---|---|---|
+| `planner_agent/planner_common.py` | `_normalize_container_names`: when a container name appears twice, `containers` and `datasets` are remapped by position, duplicate dataset names get a suffix, and stage references are resolved along the data flow. | Remapping by name sent every reference to the last copy, so a stage read and wrote the same container; caused all 4 wrong outputs of the 2026-10-05 batch (PAPER_RESULTS §B16.2). |
+| `central_manager_agent/manager.py` | `validate_plan` blocks a plan if a notebook/stream stage writes into its own input container **and a later stage reads it**, or if two datasets share a name. | Those runs "complete" with wrong data. Replayed on 57 saved live plans: fires on 4/4 wrong outputs, 0/28 correct. A first version (any read = write stage) flagged 37/57, mostly valid last stages, and was narrowed before use. |
+| `executor_agent/notebook_builder.py` | `_convert_filter_raw` compiles any function-style comparison on a bare column or a `toInteger/toLong/toDouble/toFloat` cast, with decimals. | 8 of Groq's 10 failing plans were `greater(toDouble(x), n)` forms the builder rejected. Existing `toInteger` outputs unchanged; `lessThan(...)` still rejected. |
+| `scripts/paper_eval/adf_copy_metrics.py` *(new)* | Read-only: ADF copy-activity metrics (queue, transfer, DIUs used) for saved runs. | Calibrate `ADF_MB_PER_DIU_PER_S`. |
+| `scripts/paper_eval/repair_hits.py` *(new)* | Replays saved raw replies through the repair chain one function at a time. | Per-function repair hit rate (§3.6). Replay matches shipped plans 48/48. |
+| `docs/PAPER_RESULTS.md` | New §B17.1–B17.4; §B16.6, H40, A4, cost table, open-items list updated; stale "out-of-sample 🧪" marker fixed. | Results below. |
+| `docs/paper/paper.tex`, `paper.pdf` | Groq numbers, abstract, contribution (i) and conclusion changed from "beats" to "matches" the 120B model; repair fix + gate replay and ADF findings added. Still 10 pages. | Headline changed with the fair re-score. |
+
+**Results:** Groq fair re-score (2 × 24, 0 fallbacks, $0.050): correct 79.2% ± 4.1, intent 97.9%; after the builder fix 95.8% ± 4.1 (same saved plans, no new calls) — level with the local model's 96%. Repair changed 27/48 Groq plans (surplus stages), rescued 0. ADF: ~8 s queue per copy; transfer 0.7–1.6 MB/s per DIU (assumed 5.0); DIU 4 cuts the 25 MB copy 37.2 → 21.5 s.
+
+**Not done (heat or Azure):** live batch to confirm 16/20 → 20/20; recalibrating + retraining Resource ML labels; intent-guard ablation and local repair-hit rate (need Ollama).
+
+**Mistakes caught during the work:** the first gate rule was too broad (see above); "every Groq failure is a cast" was wrong (8 of 10) and "a quarter of plans trimmed" was wrong (56%) — both corrected in the paper before building; the first repair-hit table counted the `execution_groups` drop-and-rebuild on every plan as a change — now excluded.

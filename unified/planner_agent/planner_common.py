@@ -843,17 +843,61 @@ def _normalize_container_names(config: dict) -> dict:
 
     remap = lambda v: mapping.get(v, _sanitize_container_name(v)) if v else v
 
+    # A name the model emitted twice (e.g. "transform" for two different
+    # containers) cannot be remapped by name: every reference would land on the
+    # last copy, so a stage could read and write the same container. Lists that
+    # line up with containers_to_create are remapped by position instead, and
+    # stage references are resolved along the data flow.
+    occurrences = {}
+    for i, orig in enumerate(originals):
+        occurrences.setdefault(orig, []).append(cleaned[i])
+    dupes = {o for o, c in occurrences.items() if len(c) > 1}
+
+    def aligned(values):
+        return len(values) == len(originals) and all(v == o for v, o in zip(values, originals))
+
     config["containers_to_create"] = cleaned
     if isinstance(config.get("containers"), dict):
-        config["containers"] = {k: remap(v) for k, v in config["containers"].items()}
-    for ds in config.get("datasets", []):
+        keys, vals = list(config["containers"]), list(config["containers"].values())
+        new_vals = cleaned if dupes and aligned(vals) else [remap(v) for v in vals]
+        config["containers"] = dict(zip(keys, new_vals))
+
+    datasets = [ds for ds in config.get("datasets", []) if isinstance(ds, dict)]
+    by_position = dupes and aligned([ds.get("container") for ds in datasets])
+    for i, ds in enumerate(datasets):
         if ds.get("container"):
-            ds["container"] = remap(ds["container"])
+            ds["container"] = cleaned[i] if by_position else remap(ds["container"])
+    ds_container = {}
+    if dupes:
+        # Duplicate dataset names follow duplicate containers; keep the first
+        # (that is the one copy stages refer to) and suffix the rest.
+        seen = {}
+        for ds in datasets:
+            name = ds.get("name")
+            if name in seen:
+                seen[name] += 1
+                ds["name"] = f"{name}_{seen[name]}"
+            else:
+                seen[name] = 1
+            ds_container.setdefault(ds.get("name"), ds.get("container"))
+
+    written = []  # containers written by earlier stages, oldest first
     for s in config.get("stages", []):
-        if s.get("source_container"):
-            s["source_container"] = remap(s["source_container"])
-        if s.get("sink_container"):
-            s["sink_container"] = remap(s["sink_container"])
+        src = s.get("source_container")
+        if src in dupes:
+            cands = occurrences[src]
+            s["source_container"] = next((c for c in reversed(written) if c in cands), cands[0])
+        elif src:
+            s["source_container"] = remap(src)
+        sink = s.get("sink_container")
+        if sink in dupes:
+            cands = [c for c in occurrences[sink] if c != s.get("source_container")]
+            s["sink_container"] = next((c for c in cands if c not in written), cands[0] if cands else remap(sink))
+        elif sink:
+            s["sink_container"] = remap(sink)
+        out = s.get("sink_container") or ds_container.get(s.get("sink_dataset"))
+        if out:
+            written.append(out)
     return config
 
 

@@ -262,6 +262,23 @@ class CentralManager:
 
         issues.extend(plan_safety_issues(plan))
 
+        # Wiring: a stage that writes into the container it reads leaves its
+        # input and output side by side; that is harmless for the last stage,
+        # but a later stage reading that container gets both and aggregates
+        # over the mix. Two datasets with one name make the copy target
+        # ambiguous. Both runs "complete" with wrong data, so stop them here.
+        for i, s in enumerate(stages):
+            box = s.get("source_container")
+            if s.get("type") in ("notebook", "stream") and box and box == s.get("sink_container") \
+                    and any(t.get("source_container") == box for t in stages[i + 1:]):
+                issues.append(
+                    f"Stage '{s.get('name')}' writes into its own input container '{box}', "
+                    f"which a later stage reads"
+                )
+        ds_names = [d.get("name") for d in plan.get("datasets") or [] if isinstance(d, dict)]
+        for name in sorted({n for n in ds_names if n and ds_names.count(n) > 1}):
+            issues.append(f"Dataset name '{name}' is used more than once")
+
         if not plan.get("containers_to_create"):
             issues.append("containers_to_create is empty")
 

@@ -324,6 +324,22 @@ def _convert_filter_raw(expr: str) -> str:
             cond = f'col("{c}") == "{pat}"'
         return f"~({cond})" if neg else cond
 
+    # function-style ADF-DSL comparison on a column or a numeric cast of it:
+    # greater(toDouble(unit_price), 99.99), lessOrEqual(quantity, 5), ...
+    m = re.match(
+        rf"^(equals|notEquals|greater|greaterOrEqual|less|lessOrEqual)\(\s*"
+        rf"(?:(toInteger|toLong|toDouble|toFloat)\(\s*(\w+)\s*\)|(\w+))\s*,\s*({_NUM})\s*\)$",
+        e, re.IGNORECASE,
+    )
+    if m:
+        fn, cast, cast_col, bare_col, num = m.groups()
+        op = {"equals": "==", "notequals": "!=", "greater": ">", "greaterorequal": ">=",
+              "less": "<", "lessorequal": "<="}[fn.lower()]
+        if cast:
+            spark_type = {"tointeger": "int", "tolong": "long", "todouble": "double", "tofloat": "float"}[cast.lower()]
+            return f'col("{_pystr(cast_col)}").cast("{spark_type}") {op} {num}'
+        return f'col("{_pystr(bare_col)}") {op} {num}'
+
     patterns = [
         # function-style string matchers
         (r"^startsWith\((\w+),\s*'([^']+)'\)$", r'col("\1").startswith("\2")'),

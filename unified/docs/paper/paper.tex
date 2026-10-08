@@ -52,7 +52,7 @@ orchestrator in which nine agents turn a CSV file and a plain-English request in
 running Azure Data Factory and Databricks pipeline, and we measured where each agent earns
 its place. A 7B model fine-tuned with QLoRA understands 96\% of unseen requests, against
 33\% before tuning, but only a deterministic repair step makes its plans runnable (33\% to
-100\%); a 120B cloud model given the same rules is correct on 53\%. A structural gate stops
+100\%), matching a 120B cloud model given the same rules (about 96\% correct each) at no cost per plan. A structural gate stops
 every one of 1{,}400 injected plan faults before the cloud, two thirds of which would
 otherwise have produced wrong data without any error. On live Azure runs, a fix to the
 learning loop cut duration-estimate error from 53.6\% to 14.4\%, and learned corrections cut
@@ -79,8 +79,8 @@ treats all three as separate problems, gives each decision to exactly one agent,
 deterministic check behind every learned component.
 
 The paper makes four contributions: (i) a planner that combines a small fine-tuned model,
-deterministic repair and a single self-verification step, and beats a 120B cloud model on the
-same contract (Sect.~\ref{sec:planner}); (ii) layered gates, evaluated with 1{,}400 injected
+deterministic repair and a single self-verification step, and matches a 120B cloud model on the
+same contract while running on a laptop (Sect.~\ref{sec:planner}); (ii) layered gates, evaluated with 1{,}400 injected
 faults, that keep wrong plans out of the cloud (Sect.~\ref{sec:gates}); (iii) a closed learning
 loop with evidence gates and automatic rollback, evaluated live and in simulation
 (Sect.~\ref{sec:learning}); and (iv) a live Azure evaluation in which every output was checked
@@ -232,15 +232,17 @@ used earlier runs. Errors are MAPE. Local inference ran on an Apple M5 with 16\,
   xticklabels={Default,{Base\\raw},{Base\\+ repair},{Tuned\\raw},{Tuned\\+ repair},{Tuned + repair\\+ self-check},{Groq\\raw},{Groq\\+ repair}},
   legend style={at={(0.5,1.03)}, anchor=south, legend columns=3},
   enlarge x limits=0.07]
-\addplot[fill=inklight, draw=ink] coordinates {(Default,100) (Base raw,0) (Base+repair,100) (Tuned raw,33) (Tuned+repair,100) (+ self-check,100) (Groq raw,75.0) (Groq+repair,80.6)};
-\addplot[fill=ink, draw=ink] coordinates {(Default,0) (Base raw,33) (Base+repair,4) (Tuned raw,96) (Tuned+repair,96) (+ self-check,100) (Groq raw,63.9) (Groq+repair,66.7)};
-\addplot[fill=warm, draw=warm!70!black] coordinates {(Default,0) (Base raw,0) (Base+repair,4) (Tuned raw,33) (Tuned+repair,96) (+ self-check,100) (Groq raw,50.0) (Groq+repair,52.8)};
+\addplot[fill=inklight, draw=ink] coordinates {(Default,100) (Base raw,0) (Base+repair,100) (Tuned raw,33) (Tuned+repair,100) (+ self-check,100) (Groq raw,95.8) (Groq+repair,95.8)};
+\addplot[fill=ink, draw=ink] coordinates {(Default,0) (Base raw,33) (Base+repair,4) (Tuned raw,96) (Tuned+repair,96) (+ self-check,100) (Groq raw,97.9) (Groq+repair,97.9)};
+\addplot[fill=warm, draw=warm!70!black] coordinates {(Default,0) (Base raw,0) (Base+repair,4) (Tuned raw,33) (Tuned+repair,96) (+ self-check,100) (Groq raw,95.8) (Groq+repair,95.8)};
 \legend{executable, meets intent, correct}
 \end{axis}
 \end{tikzpicture}
 \caption{Planner ablation on 24 unseen requests. ``Default'' is the deterministic fallback plan;
-``Base'' is untuned Qwen2.5-7B; ``Groq'' is gpt-oss-120b given the full rule book (mean of 3
-runs, s.d.\ 2--4 points). The self-check bar covers the 12 requests where it was run.}
+``Base'' is untuned Qwen2.5-7B; ``Groq'' is gpt-oss-120b given the full rule book (mean of 2
+runs, s.d.\ 2--4 points; function-style filters translated before scoring, and scored after the
+code-generator fix in the text). The self-check bar
+covers the 12 requests where it was run.}
 \label{fig:planner}
 \end{figure}
 
@@ -252,12 +254,16 @@ run. When a request names no containers, the model invents names Azure rejects, 
 read and write the same container. Repair fixes all of these without touching intent, and the
 self-check catches the one remaining miss, a missing aggregation, on its single re-plan.
 
-The 120B cloud model behaves differently. With the whole rule book in its prompt, 75\% of its raw
-plans already run, so repair adds little; it loses on intent. Some of that gap is a matter of style:
-it writes filters as \texttt{equals(region,'EU')}, which our patterns do not count, so its numbers are
-a lower bound. Even so, the small local model is right far more often, costs nothing per plan and keeps
-the data on the machine. The cloud model is about twice as fast (19.7\,s against 41\,s per plan) at
-roughly a tenth of a cent.
+The 120B cloud model behaves differently. With the whole rule book in its prompt it understands
+almost every request (98\%) once its filters, written as \texttt{equals(region,'EU')}, are translated
+for scoring; read literally, our patterns credit only 56\%. Repair changes little: over half of its
+plans have a surplus stage trimmed, but none goes from broken to runnable. At first only 79\% of its
+plans were correct, and 8 of its 10 failures turned out to be ours: comparisons on a
+\texttt{toDouble(\ldots)} cast that our code generator could not compile. With that fixed, it reaches
+96\%, level with the local model; its two remaining misses are its own (an invented function, a
+misspelled column). So the small model's edge is not accuracy. It costs nothing per plan, keeps the
+data on the machine and works offline; the cloud model is about twice as fast (about 20\,s against
+41\,s per plan) at roughly a tenth of a cent.
 
 \subsection{Gates keep wrong plans out of the cloud}
 \label{sec:gates}
@@ -440,7 +446,9 @@ processed exactly once.
 reference result. All four failures came from one plan, which we come back to in
 Sect.~\ref{sec:lessons}. Pinning the planner's own settings instead of the Resource Agent's made no
 measurable difference on the smaller files; on the 25\,MB file the Resource Agent chose half the copy
-throughput and the copy took 81\,s instead of 60\,s. Its value is in staying within limits, not in speed.
+throughput and the copy took 81\,s instead of 60\,s. Data Factory's own run history explains why: every copy
+waits about 8\,s in a queue, and real transfer speed is 0.7--1.6\,MB/s per unit, 3--7$\times$ below the 5\,MB/s
+the agent assumed. Its value is in staying within limits, not in speed.
 
 \subsection{The learning loop}
 \label{sec:learning}
@@ -544,8 +552,10 @@ aborts by 72\%.
 \paragraph{Completed is not correct.} Four runs finished, passed every post-run check, and were wrong. The
 model had written one container name twice; the repair layer renamed the duplicate but remapped references
 by name, so one stage read and wrote the same container, and the aggregation counted raw and filtered rows
-together. Nothing flagged it except our output comparison. We reproduced the bug offline; the fix is to
-de-duplicate by position and to add a gate rule that no stage may read its own output.
+together. Nothing flagged it except our output comparison. We have since fixed the repair (duplicates are
+resolved by position and along the data flow) and added a gate rule: no stage may write into its own input
+if a later stage reads it. Replayed on all 57 saved live plans, the rule blocks all four wrong runs and none of
+the 28 verified-correct ones.
 
 \paragraph{Playing it safe can mean doing nothing.} The Cost Agent only applies a cheaper configuration if
 it can show the run will stay within a learned deadline. In 20 live runs it never could, so it never made a
@@ -570,10 +580,11 @@ yet timed people doing it.
 \section{Conclusion}
 
 A small model that runs on a laptop, wrapped in deterministic repair and checked by gates, turned plain-English
-requests into correct cloud pipelines more reliably than a model seventeen times its size, and a guarded learning
+requests into correct cloud pipelines as reliably as a model seventeen times its size, and a guarded learning
 loop kept its forecasts honest on real runs. The failures taught us as much: learned gates need calibrated
 thresholds, and a pipeline that completes has not necessarily done what was asked. Next, we will time engineers
-on the same tasks, fix the two bugs described here, and build output checks into every run.
+on the same tasks, confirm the repair fix on a new live batch, recalibrate copy sizing, and build output
+checks into every run.
 
 \subsubsection*{Disclosure of Interests.}
 The authors have no competing interests to declare that are relevant to the content of this article.
